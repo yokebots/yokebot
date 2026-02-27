@@ -67,8 +67,8 @@ export function AuthCallbackPage() {
   return (
     <div className="flex h-screen items-center justify-center bg-light-bg">
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest-green text-white shadow-md">
-          <span className="text-2xl">🐂</span>
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest-green shadow-md overflow-hidden">
+          <img src="/logo-icon-white.png" alt="YokeBot" className="h-7 w-7 object-contain" />
         </div>
         <span className="font-display text-xl font-bold tracking-tight text-text-main">Signing you in...</span>
       </div>

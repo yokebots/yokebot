@@ -457,10 +457,7 @@ export function OnboardingPage() {
       {/* Header */}
       <header className="flex items-center justify-between border-b border-border-subtle bg-white px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-forest-green text-white shadow-md">
-            <span className="text-xl">🐂</span>
-          </div>
-          <span className="font-display text-lg font-bold tracking-tight text-text-main">YokeBot</span>
+          <img src="/logo-full-color.png" alt="YokeBot" className="h-8 object-contain" />
         </div>
         <div className="flex items-center gap-4">
           {/* Step indicator */}

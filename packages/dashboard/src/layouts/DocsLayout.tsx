@@ -33,10 +33,7 @@ export function DocsLayout() {
           </button>
 
           <a href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-forest-green text-white shadow-soft">
-              <span className="text-lg">🐂</span>
-            </div>
-            <span className="font-display text-lg font-bold tracking-tight text-text-main">YokeBot</span>
+            <img src="/logo-full-color.png" alt="YokeBot" className="h-7 object-contain" />
           </a>
           <span className="text-border-strong">/</span>
           <a href="/docs" className="font-display text-sm font-semibold text-forest-green">Docs</a>

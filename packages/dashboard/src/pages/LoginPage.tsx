@@ -9,10 +9,7 @@ export function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="mb-10 flex flex-col items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-forest-green text-white shadow-lg">
-            <span className="text-3xl">🐂</span>
-          </div>
-          <span className="font-display text-2xl font-bold tracking-tight text-text-main">YokeBot</span>
+          <img src="/logo-full-color.png" alt="YokeBot" className="h-12 object-contain" />
           <p className="text-sm text-text-muted">Sign in to your account or create a new one</p>
         </div>
 

@@ -33,8 +33,8 @@ import * as engine from '@/lib/engine'
 const LoadingScreen = () => (
   <div className="flex h-screen items-center justify-center bg-light-bg">
     <div className="flex flex-col items-center gap-5">
-      <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-forest-green text-white shadow-lg">
-        <span className="text-3xl">🐂</span>
+      <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-forest-green shadow-lg overflow-hidden">
+        <img src="/logo-icon-white.png" alt="YokeBot" className="h-10 w-10 object-contain" />
         <div className="absolute -inset-1 animate-ping rounded-2xl bg-forest-green/20" />
       </div>
       <div className="flex flex-col items-center gap-2">

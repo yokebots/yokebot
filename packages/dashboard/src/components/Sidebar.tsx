@@ -90,8 +90,8 @@ export function Sidebar() {
         <div className={`flex h-16 items-center border-b border-border-subtle ${!showLabels ? 'justify-center px-2' : 'gap-3 px-6'}`}>
           {showLabels && (
             <>
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-forest-green text-white shadow-soft">
-                <span className="text-lg">🐂</span>
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-forest-green shadow-soft overflow-hidden">
+                <img src="/logo-icon-white.png" alt="YokeBot" className="h-6 w-6 object-contain" />
               </div>
               <span className="flex-1 font-display text-lg font-bold tracking-tight text-text-main">YokeBot</span>
             </>

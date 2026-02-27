@@ -57,17 +57,12 @@ export function HomePage() {
       <header className="sticky top-0 z-50 w-full glass-panel">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 xl:px-12">
           <div className="flex cursor-pointer items-center gap-3 group">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest-green text-white shadow-md transition-all duration-300 group-hover:bg-forest-green-hover">
-              <span className="text-2xl">🐂</span>
-            </div>
-            <span className="font-display text-xl font-bold tracking-tight text-text-main">YokeBot</span>
+            <img src="/logo-full-color.png" alt="YokeBot" className="h-12 object-contain transition-all duration-300 group-hover:opacity-80" />
           </div>
           <nav className="hidden items-center gap-8 md:flex">
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Agents</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Tasks</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Goals</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Workspace</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Team Chat</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Features</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#pricing">Pricing</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="/docs">Docs</a>
             <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#contact">Contact</a>
           </nav>
           <div className="flex items-center gap-4">
@@ -86,8 +81,13 @@ export function HomePage() {
         {/* Mobile nav dropdown */}
         {mobileNav && (
           <div className="md:hidden border-t border-border-subtle bg-white/95 backdrop-blur-md px-6 py-4 space-y-3">
-            {['Agents', 'Tasks', 'Goals', 'Workspace', 'Team Chat', 'Contact'].map((item) => (
-              <a key={item} href={item === 'Contact' ? '#contact' : '#features'} onClick={() => setMobileNav(false)} className="block text-sm font-medium text-text-muted hover:text-forest-green transition-colors">{item}</a>
+            {[
+              { label: 'Features', href: '#features' },
+              { label: 'Pricing', href: '#pricing' },
+              { label: 'Docs', href: '/docs' },
+              { label: 'Contact', href: '#contact' },
+            ].map((item) => (
+              <a key={item.label} href={item.href} onClick={() => setMobileNav(false)} className="block text-sm font-medium text-text-muted hover:text-forest-green transition-colors">{item.label}</a>
             ))}
             <div className="pt-3 border-t border-border-subtle flex flex-col gap-2">
               <button onClick={goToLogin} className="text-sm font-bold text-text-main hover:text-forest-green transition-colors text-left">Log In</button>
@@ -460,34 +460,41 @@ export function HomePage() {
           <div className="mb-12 grid gap-12 md:grid-cols-4">
             <div>
               <div className="mb-4 flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-forest-green text-white shadow-md">
-                  <span className="text-lg">🐂</span>
-                </div>
-                <span className="font-display text-xl font-bold text-text-main">YokeBot</span>
+                <img src="/logo-full-color.png" alt="YokeBot" className="h-8 object-contain" />
               </div>
               <p className="text-sm leading-relaxed text-text-muted">The heavy-duty AI workforce platform for entrepreneurs who mean business.</p>
             </div>
             {[
-              { title: 'Product', links: ['Agents', 'Tasks', 'Goals', 'Workspace', 'Team Chat'] },
-              { title: 'Resources', links: ['Documentation', 'API Reference', 'Community', 'Blog'] },
-              { title: 'Company', links: ['About', 'Careers', 'Legal', 'Contact'] },
+              { title: 'Product', links: [
+                { label: 'Features', href: '#features' },
+                { label: 'Pricing', href: '#pricing' },
+                { label: 'Documentation', href: '/docs' },
+                { label: 'API Reference', href: '/docs/api-reference' },
+              ]},
+              { title: 'Company', links: [
+                { label: 'Contact', href: '#contact' },
+                { label: 'Discord', href: 'https://discord.gg/kqfFr87KqV', external: true },
+                { label: 'X (Twitter)', href: 'https://x.com/yokebots', external: true },
+                { label: 'GitHub', href: 'https://github.com/yokebots/yokebot', external: true },
+              ]},
+              { title: 'Get Started', links: [
+                { label: 'Log In', href: '/login' },
+                { label: 'Sign Up Free', href: '/login' },
+                { label: 'Self-Host Guide', href: '/docs/self-hosting-guide' },
+              ]},
             ].map((col) => (
               <div key={col.title}>
                 <h4 className="mb-4 font-bold text-text-main">{col.title}</h4>
                 <ul className="space-y-2 text-sm text-text-muted">
                   {col.links.map((link) => (
-                    <li key={link}><a className="transition-colors hover:text-forest-green" href="#">{link}</a></li>
+                    <li key={link.label}><a className="transition-colors hover:text-forest-green" href={link.href} {...('external' in link ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{link.label}</a></li>
                   ))}
                 </ul>
               </div>
             ))}
           </div>
-          <div className="flex flex-col items-center justify-between gap-4 border-t border-gray-200 pt-8 md:flex-row">
+          <div className="border-t border-gray-200 pt-8">
             <p className="font-mono text-xs text-text-muted opacity-80">&copy; 2026 YokeBot Inc. All rights reserved.</p>
-            <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 shadow-sm">
-              <span className="h-2 w-2 rounded-full bg-forest-green shadow-[0_0_8px_rgba(15,77,38,0.3)]" />
-              <span className="font-mono text-xs font-bold uppercase tracking-wide text-forest-green">Systems Nominal</span>
-            </div>
           </div>
         </div>
       </footer>
