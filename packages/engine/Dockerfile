@@ -20,6 +20,9 @@ RUN pnpm install --frozen-lockfile --filter @yokebot/engine...
 # Copy engine source
 COPY packages/engine/ packages/engine/
 
+# Copy enterprise module
+COPY ee/ ee/
+
 # Copy skills directory
 COPY skills/ skills/
 
@@ -38,6 +41,7 @@ COPY --from=base /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml 
 COPY --from=base /app/packages/engine/package.json packages/engine/
 RUN pnpm install --frozen-lockfile --filter @yokebot/engine... --prod
 COPY --from=base /app/packages/engine/dist packages/engine/dist/
+COPY --from=base /app/ee ee/
 COPY --from=base /app/skills skills/
 
 ENV NODE_ENV=production

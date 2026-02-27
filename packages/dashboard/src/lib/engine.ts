@@ -465,6 +465,72 @@ export const updateNotificationPreference = (teamId: string, updates: { inAppEna
     method: 'PATCH', body: JSON.stringify({ teamId, ...updates }),
   })
 
+// ===== Billing =====
+
+export interface BillingSubscription {
+  tier: string
+  status: string
+  maxAgents: number
+  minHeartbeatSeconds: number
+  activeHoursStart: number
+  activeHoursEnd: number
+  monthlyCredits: number
+  includedCredits: number
+  creditsResetAt: string | null
+  currentPeriodEnd: string | null
+}
+
+export interface BillingStatus {
+  subscription: BillingSubscription | null
+  credits: number
+}
+
+export interface CreditTransaction {
+  id: string
+  teamId: string
+  amount: number
+  balanceAfter: number
+  type: string
+  description: string
+  stripePaymentIntentId: string | null
+  createdAt: string
+}
+
+export interface ModelCreditCost {
+  modelId: string
+  creditsPerUse: number
+  modelType: string
+  starIntelligence: number
+  starPower: number
+  starSpeed: number
+  description: string
+  tagline: string
+  pros: string[]
+  cons: string[]
+  releaseDate: string | null
+  popularity: number
+}
+
+export const getModelCatalog = () => request<ModelCreditCost[]>('/api/billing/models')
+
+export const getBillingStatus = () => request<BillingStatus>('/api/billing/status')
+
+export const getCreditTransactions = (limit = 50) =>
+  request<CreditTransaction[]>(`/api/billing/transactions?limit=${limit}`)
+
+export const createSubscriptionCheckout = (priceId: string) =>
+  request<{ url: string }>('/api/billing/checkout/subscription', {
+    method: 'POST', body: JSON.stringify({ priceId }),
+  })
+
+export const createCreditPackCheckout = (priceId: string) =>
+  request<{ url: string }>('/api/billing/checkout/credits', {
+    method: 'POST', body: JSON.stringify({ priceId }),
+  })
+
+export const createBillingPortal = () =>
+  request<{ url: string }>('/api/billing/portal', { method: 'POST' })
+
 // ===== Ollama =====
 
 export const detectOllama = () => request<OllamaStatus>('/api/ollama')

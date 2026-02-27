@@ -13,6 +13,9 @@ import { resolveModelConfig } from './model.ts'
 import { getDmChannel, sendMessage } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
+import { getSubscription, isSubscriptionActive, getCreditBalance, getModelCreditCost } from './billing.ts'
+
+const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
 interface SchedulerState {
   timers: Map<string, ReturnType<typeof setInterval>>
@@ -91,6 +94,25 @@ export function unscheduleAgent(agentId: string): void {
  * Single heartbeat cycle for an agent.
  */
 async function heartbeat(db: Db, agent: Agent): Promise<void> {
+  // In hosted mode, skip heartbeat if team has no active subscription
+  if (HOSTED_MODE) {
+    const sub = await getSubscription(db, agent.teamId)
+    if (!sub || !isSubscriptionActive(sub)) {
+      console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — no active subscription`)
+      return
+    }
+  }
+
+  // Check credit balance before running heartbeat (hosted mode)
+  if (HOSTED_MODE && agent.modelId) {
+    const balance = await getCreditBalance(db, agent.teamId)
+    const cost = await getModelCreditCost(db, agent.modelId)
+    if (cost > 0 && balance < cost) {
+      console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — insufficient credits (${balance} < ${cost})`)
+      return
+    }
+  }
+
   // Check if within active hours
   const hour = new Date().getHours()
   if (hour < agent.activeHoursStart || hour >= agent.activeHoursEnd) {
@@ -116,7 +138,7 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     }
 
     try {
-      const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir)
+      const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, undefined, agent.modelId || undefined)
       if (result.response && !result.response.includes('[no-op]')) {
         // Route proactive messages to the agent's DM channel
         const dmChannel = await getDmChannel(db, agent.id, agent.teamId)

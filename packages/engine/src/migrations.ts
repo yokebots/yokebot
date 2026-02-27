@@ -138,6 +138,211 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 4,
+    name: 'add_billing_tables',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS team_subscriptions (
+            team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+            stripe_customer_id TEXT NOT NULL,
+            stripe_subscription_id TEXT,
+            tier TEXT NOT NULL DEFAULT 'none',
+            status TEXT NOT NULL DEFAULT 'inactive',
+            max_agents INTEGER NOT NULL DEFAULT 0,
+            min_heartbeat_seconds INTEGER NOT NULL DEFAULT 3600,
+            active_hours_start INTEGER NOT NULL DEFAULT 9,
+            active_hours_end INTEGER NOT NULL DEFAULT 17,
+            monthly_credits INTEGER NOT NULL DEFAULT 0,
+            current_period_end TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS team_credits (
+            team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+            balance INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS credit_transactions (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            amount INTEGER NOT NULL,
+            balance_after INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            stripe_payment_intent_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
+          CREATE INDEX IF NOT EXISTS idx_team_sub_stripe ON team_subscriptions(stripe_customer_id);
+          CREATE INDEX IF NOT EXISTS idx_team_sub_stripe_sub ON team_subscriptions(stripe_subscription_id);
+        `)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS team_subscriptions (
+            team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+            stripe_customer_id TEXT NOT NULL,
+            stripe_subscription_id TEXT,
+            tier TEXT NOT NULL DEFAULT 'none',
+            status TEXT NOT NULL DEFAULT 'inactive',
+            max_agents INTEGER NOT NULL DEFAULT 0,
+            min_heartbeat_seconds INTEGER NOT NULL DEFAULT 3600,
+            active_hours_start INTEGER NOT NULL DEFAULT 9,
+            active_hours_end INTEGER NOT NULL DEFAULT 17,
+            monthly_credits INTEGER NOT NULL DEFAULT 0,
+            current_period_end TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE TABLE IF NOT EXISTS team_credits (
+            team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+            balance INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE TABLE IF NOT EXISTS credit_transactions (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            amount INTEGER NOT NULL,
+            balance_after INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            stripe_payment_intent_id TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
+          CREATE INDEX IF NOT EXISTS idx_team_sub_stripe ON team_subscriptions(stripe_customer_id);
+          CREATE INDEX IF NOT EXISTS idx_team_sub_stripe_sub ON team_subscriptions(stripe_subscription_id);
+        `)
+      }
+    },
+  },
+  {
+    version: 5,
+    name: 'add_model_and_skill_credit_costs',
+    async up(db: Db) {
+      // --- model_credit_costs table ---
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS model_credit_costs (
+            model_id TEXT PRIMARY KEY,
+            credits_per_use INTEGER NOT NULL DEFAULT 0,
+            model_type TEXT NOT NULL DEFAULT 'chat',
+            star_intelligence INTEGER NOT NULL DEFAULT 3,
+            star_power INTEGER NOT NULL DEFAULT 3,
+            star_speed INTEGER NOT NULL DEFAULT 3,
+            description TEXT NOT NULL DEFAULT '',
+            tagline TEXT NOT NULL DEFAULT '',
+            pros TEXT NOT NULL DEFAULT '[]',
+            cons TEXT NOT NULL DEFAULT '[]',
+            release_date TEXT,
+            popularity INTEGER NOT NULL DEFAULT 50
+          );
+
+          CREATE TABLE IF NOT EXISTS skill_credit_costs (
+            skill_name TEXT PRIMARY KEY,
+            credits_per_use INTEGER NOT NULL DEFAULT 0
+          );
+        `)
+
+        // Add included_credits and credits_reset_at to team_subscriptions
+        await db.run(`ALTER TABLE team_subscriptions ADD COLUMN IF NOT EXISTS included_credits INTEGER NOT NULL DEFAULT 0`)
+        await db.run(`ALTER TABLE team_subscriptions ADD COLUMN IF NOT EXISTS credits_reset_at TEXT`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS model_credit_costs (
+            model_id TEXT PRIMARY KEY,
+            credits_per_use INTEGER NOT NULL DEFAULT 0,
+            model_type TEXT NOT NULL DEFAULT 'chat',
+            star_intelligence INTEGER NOT NULL DEFAULT 3,
+            star_power INTEGER NOT NULL DEFAULT 3,
+            star_speed INTEGER NOT NULL DEFAULT 3,
+            description TEXT NOT NULL DEFAULT '',
+            tagline TEXT NOT NULL DEFAULT '',
+            pros TEXT NOT NULL DEFAULT '[]',
+            cons TEXT NOT NULL DEFAULT '[]',
+            release_date TEXT,
+            popularity INTEGER NOT NULL DEFAULT 50
+          );
+
+          CREATE TABLE IF NOT EXISTS skill_credit_costs (
+            skill_name TEXT PRIMARY KEY,
+            credits_per_use INTEGER NOT NULL DEFAULT 0
+          );
+        `)
+
+        // Add included_credits and credits_reset_at to team_subscriptions (SQLite)
+        const cols = await db.query<{ name: string }>('PRAGMA table_info(team_subscriptions)')
+        if (!cols.some((c) => c.name === 'included_credits')) {
+          await db.run('ALTER TABLE team_subscriptions ADD COLUMN included_credits INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!cols.some((c) => c.name === 'credits_reset_at')) {
+          await db.run('ALTER TABLE team_subscriptions ADD COLUMN credits_reset_at TEXT')
+        }
+      }
+
+      // Seed LLM models
+      const chatModels = [
+        { id: 'gemma-3-27b', credits: 5, type: 'chat', si: 2, sp: 2, ss: 5, desc: 'Quick worker for simple repetitive tasks', tag: 'Fast intern', pros: '["Extremely fast","Dirt cheap"]', cons: '["Struggles with complex reasoning"]', date: '2025-03-12', pop: 40 },
+        { id: 'llama-4-scout', credits: 8, type: 'chat', si: 3, sp: 2, ss: 4, desc: 'Reliable assistant for everyday tasks', tag: 'Dependable junior', pros: '["Fast","Affordable","Solid all-rounder"]', cons: '["Not great at multi-step planning"]', date: '2025-04-05', pop: 55 },
+        { id: 'devstral-small', credits: 8, type: 'chat', si: 3, sp: 3, ss: 4, desc: 'Code specialist for technical work', tag: 'Junior developer', pros: '["Punches above weight on coding"]', cons: '["Weaker on non-technical tasks"]', date: '2025-05-20', pop: 35 },
+        { id: 'gpt-4o-mini', credits: 15, type: 'chat', si: 3, sp: 3, ss: 4, desc: 'Smooth communicator for customer-facing work', tag: 'Professional communicator', pros: '["Polished output","Reliable"]', cons: '["Closed-source","Slightly pricier"]', date: '2024-07-18', pop: 80 },
+        { id: 'llama-4-maverick', credits: 15, type: 'chat', si: 4, sp: 3, ss: 3, desc: 'Versatile workhorse for creative content', tag: 'Mid-level marketing hire', pros: '["Great creative writing","Strong reasoning"]', cons: '["Slower than budget models"]', date: '2025-04-05', pop: 65 },
+        { id: 'grok-4-fast', credits: 15, type: 'chat', si: 4, sp: 3, ss: 5, desc: 'Speed demon for real-time high-volume tasks', tag: 'Fast-talking closer', pros: '["Blazing fast","Good reasoning"]', cons: '["Newer, less battle-tested"]', date: '2025-12-01', pop: 50 },
+        { id: 'deepseek-v3.2', credits: 8, type: 'chat', si: 5, sp: 4, ss: 5, desc: 'Bargain genius — gold-medal reasoning at budget price', tag: 'Senior engineer at junior pay', pros: '["Dual chat+reasoning","Absurdly cheap"]', cons: '["Chinese company (data sensitivity)"]', date: '2025-12-01', pop: 90 },
+        { id: 'minimax-m2.5', credits: 25, type: 'chat', si: 4, sp: 4, ss: 3, desc: 'Orchestrator for complex multi-step workflows', tag: 'Project manager', pros: '["Excellent task breakdown","Strong context handling"]', cons: '["Not the cheapest"]', date: '2025-06-01', pop: 60 },
+        { id: 'devstral-2', credits: 40, type: 'chat', si: 5, sp: 4, ss: 3, desc: 'Senior developer for complex code and architecture', tag: 'Senior software engineer', pros: '["Beats Claude 3.5 on SWE-bench"]', cons: '["Expensive","Slower"]', date: '2025-09-15', pop: 45 },
+        { id: 'glm-5', credits: 40, type: 'chat', si: 5, sp: 5, ss: 3, desc: 'Frontier powerhouse for research and agentic work', tag: 'Senior strategist', pros: '["200K context","MIT license","Near-Opus benchmarks"]', cons: '["Expensive","Newer"]', date: '2026-02-11', pop: 55 },
+        { id: 'kimi-k2.5', credits: 50, type: 'chat', si: 5, sp: 4, ss: 3, desc: 'Deep thinker for research and long-document analysis', tag: 'Research analyst', pros: '["Strong reasoning","Good synthesis"]', cons: '["Expensive"]', date: '2025-07-01', pop: 50 },
+        { id: 'qwen-3.5', credits: 75, type: 'chat', si: 5, sp: 5, ss: 3, desc: 'Ultimate brain for the hardest tasks', tag: 'VP-level hire', pros: '["Top-tier intelligence across the board"]', cons: '["Most expensive option"]', date: '2025-09-01', pop: 70 },
+      ]
+
+      // Seed media models
+      const mediaModels = [
+        { id: 'flux-schnell', credits: 5, type: 'image', si: 3, sp: 3, ss: 5, desc: 'Budget image generation — fast and cheap', tag: 'Quick sketch artist', pros: '["Very fast","Dirt cheap"]', cons: '["Lower quality than premium options"]', date: '2024-08-01', pop: 60 },
+        { id: 'nano-banana-pro', credits: 200, type: 'image', si: 5, sp: 5, ss: 4, desc: 'Photorealistic image generation for brand content', tag: 'Professional photographer', pros: '["Photorealistic quality","Brand consistency"]', cons: '["Expensive"]', date: '2025-06-01', pop: 75 },
+        { id: 'kling-3.0', credits: 1500, type: 'video', si: 4, sp: 5, ss: 2, desc: 'High-fidelity 5-second video clips', tag: 'Video producer', pros: '["High quality video"]', cons: '["Very expensive","Slow"]', date: '2025-08-01', pop: 65 },
+        { id: 'seedance-2.0', credits: 1500, type: 'video', si: 4, sp: 5, ss: 2, desc: 'Dance and motion video generation', tag: 'Motion designer', pros: '["Natural motion","Good quality"]', cons: '["Very expensive","Slow"]', date: '2025-09-01', pop: 40 },
+        { id: 'hunyuan-3d-v2.1', credits: 80, type: '3d', si: 3, sp: 3, ss: 3, desc: 'Budget 3D model generation', tag: '3D modeler', pros: '["Affordable 3D"]', cons: '["Lower quality"]', date: '2025-05-01', pop: 35 },
+        { id: 'hunyuan-3d-v3.1-pro', credits: 600, type: '3d', si: 5, sp: 5, ss: 2, desc: 'High-quality 3D model generation', tag: 'Senior 3D artist', pros: '["Excellent quality"]', cons: '["Expensive","Slow"]', date: '2025-10-01', pop: 30 },
+      ]
+
+      const allModels = [...chatModels, ...mediaModels]
+      for (const m of allModels) {
+        await db.run(
+          `INSERT INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT (model_id) DO NOTHING`,
+          [m.id, m.credits, m.type, m.si, m.sp, m.ss, m.desc, m.tag, m.pros, m.cons, m.date, m.pop],
+        )
+      }
+
+      // Seed skill credit costs
+      const skills = [
+        { name: 'web_search', credits: 10 },
+        { name: 'web_scrape', credits: 10 },
+        { name: 'email_send', credits: 1 },
+        { name: 'lead_enrichment', credits: 350 },
+        { name: 'slack_send_message', credits: 0 },
+        { name: 'run_python', credits: 0 },
+        { name: 'sheets_read', credits: 0 },
+        { name: 'sheets_write', credits: 0 },
+      ]
+
+      for (const s of skills) {
+        await db.run(
+          `INSERT INTO skill_credit_costs (skill_name, credits_per_use) VALUES ($1, $2) ON CONFLICT (skill_name) DO NOTHING`,
+          [s.name, s.credits],
+        )
+      }
+    },
+  },
 ]
 
 /**

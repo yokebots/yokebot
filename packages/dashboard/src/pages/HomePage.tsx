@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ParticleConstellation } from '@/components/ParticleConstellation'
 
@@ -11,24 +12,46 @@ const agentCards = [
 ]
 
 const modelCards = [
-  { icon: 'hub', color: 'purple', tag: 'Orchestrator', name: 'Minimax 2.5', desc: 'Highly efficient context management for complex multi-agent workflows.', speed: 'Fast', speedColor: 'text-green-600', cost: '$$', costColor: 'text-green-600' },
-  { icon: 'terminal', color: 'blue', tag: 'Coding', name: 'Kimi 2.5', desc: 'Exceptional code generation capabilities at a fraction of the enterprise cost.', speed: 'Very Fast', speedColor: 'text-green-600', cost: '$', costColor: 'text-green-600' },
-  { icon: 'movie', color: 'rose', tag: 'Video Gen', name: 'Kling 3.0', desc: 'Create high-fidelity video assets for marketing and social campaigns instantly.', speed: 'Standard', speedColor: 'text-yellow-600', cost: '$$$', costColor: 'text-red-600' },
-  { icon: 'image', color: 'amber', tag: 'Image Gen', name: 'Nano Banana Pro', desc: 'Photorealistic image generation optimized for brand consistency and speed.', speed: 'Fast', speedColor: 'text-green-600', cost: '$$', costColor: 'text-green-600' },
+  { icon: 'psychology', color: 'purple', tag: 'Frontier', name: 'DeepSeek V3.2', desc: 'Gold-medal reasoning at budget price. Dual chat+reasoning in one model.', stars: { i: 5, p: 4, s: 5 }, credits: 8 },
+  { icon: 'hub', color: 'blue', tag: 'Orchestrator', name: 'MiniMax M2.5', desc: 'Excellent task breakdown and workflow orchestration with 1M context.', stars: { i: 4, p: 4, s: 3 }, credits: 25 },
+  { icon: 'terminal', color: 'indigo', tag: 'Coding', name: 'Devstral 2 123B', desc: 'Senior-level code architecture. Beats Claude 3.5 on SWE-bench.', stars: { i: 5, p: 4, s: 3 }, credits: 40 },
+  { icon: 'bolt', color: 'amber', tag: 'Budget', name: 'Gemma 3 27B', desc: 'Blazing fast for simple repetitive tasks at rock-bottom cost.', stars: { i: 2, p: 2, s: 5 }, credits: 5 },
+  { icon: 'smart_toy', color: 'teal', tag: 'Frontier', name: 'GLM-5', desc: '200K context, MIT license, near-Opus benchmarks. Research powerhouse.', stars: { i: 5, p: 5, s: 3 }, credits: 40 },
+  { icon: 'speed', color: 'rose', tag: 'Fast', name: 'Grok 4 Fast', desc: 'Speed demon for real-time high-volume tasks from xAI.', stars: { i: 4, p: 3, s: 5 }, credits: 15 },
+  { icon: 'movie', color: 'rose', tag: 'Video Gen', name: 'Kling 3.0', desc: 'Create high-fidelity 4K 60fps video assets for marketing and social.', stars: { i: 0, p: 4, s: 2 }, credits: 1500 },
+  { icon: 'image', color: 'amber', tag: 'Image Gen', name: 'Nano Banana Pro', desc: 'Premium photorealistic image generation, up to 4K resolution.', stars: { i: 0, p: 5, s: 3 }, credits: 200 },
+]
+
+function StarRow({ stars }: { stars: { i: number; p: number; s: number } }) {
+  const renderStars = (n: number) => [1, 2, 3, 4, 5].map((i) => (
+    <span key={i} className={`text-[9px] ${i <= n ? 'text-amber-400' : 'text-gray-300'}`}>&#9733;</span>
+  ))
+  return (
+    <div className="flex gap-3 text-[10px]">
+      {stars.i > 0 && <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">I</span>{renderStars(stars.i)}</span>}
+      {stars.p > 0 && <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">P</span>{renderStars(stars.p)}</span>}
+      {stars.s > 0 && <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">S</span>{renderStars(stars.s)}</span>}
+    </div>
+  )
+}
+
+const faqItems = [
+  { q: 'What is YokeBot?', a: 'YokeBot is an AI agent workforce platform. You create agents, assign them tasks and goals, and they work autonomously on a heartbeat schedule — checking in, taking actions, and reporting back. Think of it as hiring tireless AI employees.' },
+  { q: 'What are credits?', a: 'Universal credits cover all usage on the platform: LLM heartbeats, media generation (images, video, 3D), and skill execution (web search, email, etc.). Your subscription includes monthly credits, and you can buy additional credit packs that never expire.' },
+  { q: 'Can I self-host?', a: 'Yes! YokeBot is open-source (AGPLv3). You can self-host on your own hardware with your own API keys for free forever. The cloud version adds managed hosting, billing, and team features.' },
+  { q: 'What models are available?', a: 'We offer 12+ models ranging from budget (Gemma 3 at 5 credits/heartbeat) to frontier (Qwen 3.5 at 75 credits/heartbeat), plus image, video, and 3D generation models. Each model has star ratings for Intelligence, Power, and Speed to help you choose.' },
+  { q: 'How do agents work?', a: 'Each agent runs on a heartbeat cycle. Every heartbeat (configurable from 5 min to 1 hour), the agent checks its tasks, goals, and messages, then takes autonomous action using its assigned tools and skills. You set the work shift hours and the agent operates within that window.' },
+  { q: 'Is my data safe?', a: 'Absolutely. With the self-hosted option, no data ever leaves your servers. On the cloud version, all data is encrypted in transit and at rest, and we never train on your data.' },
+  { q: 'Can I bring my own API keys?', a: 'Yes! BYOK (Bring Your Own Key) skills cost 0 credits — you pay your provider directly. Self-hosted users always use their own keys for everything.' },
 ]
 
 export function HomePage() {
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
+  const [openFaq, setOpenFaq] = useState<number | null>(null)
 
   return (
     <div className="relative min-h-screen flex flex-col overflow-x-hidden bg-white text-text-main font-body selection:bg-accent-gold/30 selection:text-forest-green">
-      {/* Dot grid background */}
-      <div
-        className="fixed inset-0 z-0 pointer-events-none opacity-40"
-        style={{ backgroundImage: 'radial-gradient(#E5E7EB 1px, transparent 1px)', backgroundSize: '32px 32px' }}
-      />
-
       {/* Header */}
       <header className="sticky top-0 z-50 w-full glass-panel">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 xl:px-12">
@@ -39,9 +62,12 @@ export function HomePage() {
             <span className="font-display text-xl font-bold tracking-tight text-text-main">YokeBot</span>
           </div>
           <nav className="hidden items-center gap-8 md:flex">
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Features</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#models">Integrations</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#pricing">Pricing</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Agents</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Tasks</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Goals</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Workspace</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Team Chat</a>
+            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#contact">Contact</a>
           </nav>
           <div className="flex items-center gap-4">
             <button onClick={goToLogin} className="hidden text-sm font-bold text-text-main hover:text-forest-green transition-colors sm:block">
@@ -55,12 +81,17 @@ export function HomePage() {
       </header>
 
       <main className="relative z-10 flex-grow flex flex-col">
-        {/* Hero */}
-        <section className="relative px-6 pb-32 pt-20 xl:px-24 2xl:px-48">
+        {/* Hero — dark background */}
+        <section className="relative px-6 pb-32 pt-20 xl:px-24 2xl:px-48 bg-gray-950">
+          {/* Dark dot grid */}
+          <div
+            className="absolute inset-0 z-0 pointer-events-none opacity-20"
+            style={{ backgroundImage: 'radial-gradient(#4B5563 1px, transparent 1px)', backgroundSize: '32px 32px' }}
+          />
           <ParticleConstellation />
           <div className="relative z-10 mx-auto grid max-w-7xl items-center gap-16 lg:grid-cols-2">
             <div className="flex max-w-2xl flex-col gap-8">
-              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-border-subtle bg-light-surface-alt px-3 py-1 shadow-sm">
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-gray-700 bg-gray-900 px-3 py-1 shadow-sm">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-forest-green opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-forest-green" />
@@ -68,11 +99,11 @@ export function HomePage() {
                 <span className="font-mono text-xs font-medium uppercase tracking-wider text-forest-green">Ox-Strength AI</span>
               </div>
               <div className="space-y-4">
-                <h1 className="font-display text-6xl font-bold leading-[0.9] tracking-tight text-text-main md:text-8xl">
+                <h1 className="font-display text-6xl font-bold leading-[0.9] tracking-tight text-white md:text-8xl">
                   GET <br />
-                  <span className="bg-gradient-to-r from-forest-green via-green-600 to-accent-gold-dim bg-clip-text text-transparent">YOKED.</span>
+                  <span className="bg-gradient-to-r from-forest-green via-green-400 to-accent-gold bg-clip-text text-transparent">YOKED.</span>
                 </h1>
-                <p className="max-w-lg border-l-4 border-accent-gold py-2 pl-6 text-lg leading-relaxed text-text-muted md:text-xl">
+                <p className="max-w-lg border-l-4 border-accent-gold py-2 pl-6 text-lg leading-relaxed text-gray-400 md:text-xl">
                   Build an automated workforce that pulls its weight. <br />The AI agent platform for serious entrepreneurs.
                 </p>
               </div>
@@ -81,12 +112,12 @@ export function HomePage() {
                   Start Free
                   <span className="material-symbols-outlined text-white transition-transform group-hover:translate-x-1">arrow_forward</span>
                 </button>
-                <button className="flex h-14 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-8 font-display text-lg font-medium text-text-main shadow-sm transition-all hover:scale-105 hover:border-forest-green hover:text-forest-green hover:shadow-md">
+                <button className="flex h-14 items-center justify-center gap-2 rounded-lg border border-gray-600 bg-gray-900 px-8 font-display text-lg font-medium text-gray-300 shadow-sm transition-all hover:scale-105 hover:border-forest-green hover:text-forest-green hover:shadow-md">
                   Watch Demo
                   <span className="material-symbols-outlined">play_circle</span>
                 </button>
               </div>
-              <div className="flex items-center gap-6 pt-4 text-sm text-text-muted">
+              <div className="flex items-center gap-6 pt-4 text-sm text-gray-400">
                 <div className="flex items-center gap-2">
                   <span className="material-symbols-outlined text-lg text-accent-gold">check_circle</span>
                   <span>No Credit Card</span>
@@ -100,25 +131,25 @@ export function HomePage() {
 
             {/* Agent cards grid */}
             <div className="relative w-full">
-              <div className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-tr from-forest-green/5 to-accent-gold/10 blur-[80px]" />
+              <div className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-tr from-forest-green/10 to-accent-gold/10 blur-[80px]" />
               <div className="relative z-10 grid grid-cols-2 gap-4">
                 {agentCards.map((card) => (
-                  <div key={card.name} className={`agent-card group flex cursor-default flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 transition-all duration-300 ${card.hidden ?? ''}`}>
+                  <div key={card.name} className={`agent-card group flex cursor-default flex-col gap-3 rounded-xl border border-gray-700 bg-gray-900/80 p-4 transition-all duration-300 ${card.hidden ?? ''}`}>
                     <div className="flex items-center justify-between">
                       <div className={`flex h-10 w-10 items-center justify-center rounded-lg border ${card.bg} ${card.text} ${card.border} ${card.hoverBg} group-hover:text-white transition-colors`}>
                         <span className="material-symbols-outlined">{card.icon}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 rounded-full border border-green-100 bg-green-50 px-2 py-0.5">
+                      <div className="flex items-center gap-1.5 rounded-full border border-green-800 bg-green-900/50 px-2 py-0.5">
                         <span className="h-1.5 w-1.5 rounded-full bg-green-500 live-indicator-pulse" />
-                        <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-green-700">LIVE</span>
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-green-400">LIVE</span>
                       </div>
                     </div>
                     <div>
-                      <h3 className="font-display text-base font-bold leading-tight text-gray-900">{card.name}</h3>
-                      <p className="mt-1 text-xs text-gray-500">{card.role}</p>
+                      <h3 className="font-display text-base font-bold leading-tight text-white">{card.name}</h3>
+                      <p className="mt-1 text-xs text-gray-400">{card.role}</p>
                     </div>
-                    <div className="mt-auto border-t border-gray-100 pt-3">
-                      <div className="flex items-center gap-2 rounded bg-gray-50 px-2 py-1.5 font-mono text-xs text-gray-600">
+                    <div className="mt-auto border-t border-gray-700 pt-3">
+                      <div className="flex items-center gap-2 rounded bg-gray-800 px-2 py-1.5 font-mono text-xs text-gray-300">
                         <span className={`material-symbols-outlined text-[14px] ${card.spin ? 'animate-spin' : ''} ${card.actionColor ?? ''}`}>{card.actionIcon}</span>
                         <span className="truncate">{card.action}</span>
                       </div>
@@ -130,8 +161,14 @@ export function HomePage() {
           </div>
         </section>
 
+        {/* Dot grid for remaining sections */}
+        <div
+          className="fixed inset-0 z-0 pointer-events-none opacity-40"
+          style={{ backgroundImage: 'radial-gradient(#E5E7EB 1px, transparent 1px)', backgroundSize: '32px 32px' }}
+        />
+
         {/* Features strip */}
-        <section id="features" className="border-t border-gray-200 bg-light-bg">
+        <section id="features" className="relative z-10 border-t border-gray-200 bg-light-bg">
           <div className="mx-auto max-w-7xl px-6 py-12 xl:px-24 2xl:px-48">
             <div className="grid gap-8 md:grid-cols-3">
               {[
@@ -154,15 +191,15 @@ export function HomePage() {
         </section>
 
         {/* Model ticker */}
-        <section id="models" className="relative overflow-hidden border-y border-gray-200 bg-white py-16">
+        <section id="models" className="relative z-10 overflow-hidden border-y border-gray-200 bg-white py-16">
           <div className="organic-shader" />
           <div className="relative z-10 mx-auto mb-10 max-w-7xl px-6 text-center">
             <div className="mb-3 inline-flex items-center gap-2">
-              <span className="rounded-full border border-green-100 bg-green-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-forest-green">Multi-Model Support</span>
+              <span className="rounded-full border border-green-100 bg-green-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-forest-green">12+ Models</span>
             </div>
             <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-4xl">The Engine Behind Your Workforce</h2>
             <p className="mx-auto max-w-2xl text-lg text-text-muted">
-              Don't get locked in. Switch between the world's most powerful models to optimize for cost, speed, or specialized performance.
+              Don't get locked in. Switch between budget and frontier models to optimize for cost, speed, or intelligence.
             </p>
           </div>
           <div className="ticker-mask relative z-10 mx-auto w-full max-w-[1920px] overflow-hidden">
@@ -177,9 +214,9 @@ export function HomePage() {
                   </div>
                   <h3 className="font-display text-lg font-bold text-text-main">{card.name}</h3>
                   <p className="mt-2 text-sm text-text-muted">{card.desc}</p>
-                  <div className="mt-4 flex items-center justify-between border-t border-gray-200 pt-3 text-xs font-medium text-text-muted">
-                    <span>Speed: <span className={card.speedColor}>{card.speed}</span></span>
-                    <span>Cost: <span className={card.costColor}>{card.cost}</span></span>
+                  <div className="mt-3 border-t border-gray-200 pt-3">
+                    <StarRow stars={card.stars} />
+                    <p className="mt-1 text-[11px] text-text-muted">{card.credits} credits/use</p>
                   </div>
                 </div>
               ))}
@@ -188,7 +225,7 @@ export function HomePage() {
         </section>
 
         {/* Choose Your Path */}
-        <section className="relative bg-light-bg px-6 py-20 xl:px-24 2xl:px-48">
+        <section className="relative z-10 bg-light-bg px-6 py-20 xl:px-24 2xl:px-48">
           <div className="mx-auto max-w-7xl">
             <div className="mb-12 text-center">
               <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-5xl">Choose Your Path</h2>
@@ -205,7 +242,8 @@ export function HomePage() {
                     <span className="material-symbols-outlined text-3xl">cloud</span>
                   </div>
                   <h3 className="mb-3 font-display text-2xl font-bold text-text-main">YokeBot Cloud</h3>
-                  <p className="mb-8 flex-grow text-text-muted">The fastest way to scale. Hosted by us, managed for you. Get instant access to powerful AI agents without infrastructure headaches.</p>
+                  <p className="mb-2 text-sm font-medium text-forest-green">From $29/mo</p>
+                  <p className="mb-8 flex-grow text-text-muted">The fastest way to scale. Hosted by us, managed for you. Universal credits cover all usage — LLM, media, and skills.</p>
                   <button onClick={goToLogin} className="primary-btn flex w-full items-center justify-center gap-2 rounded-lg bg-forest-green py-3.5 font-bold text-white shadow-md transition-all hover:bg-forest-green-hover hover:shadow-lg">
                     Start Free
                     <span className="material-symbols-outlined text-sm">arrow_forward</span>
@@ -222,7 +260,8 @@ export function HomePage() {
                     <svg className="h-8 w-8 fill-current" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
                   </div>
                   <h3 className="mb-3 font-display text-2xl font-bold text-text-muted">YokeBot Open Source</h3>
-                  <p className="mb-8 flex-grow text-gray-500">Self-host on your own hardware. Full privacy, full control, forever free. Contribute to the core engine powering the future of work.</p>
+                  <p className="mb-2 text-sm font-medium text-text-muted">Free forever</p>
+                  <p className="mb-8 flex-grow text-gray-500">Self-host on your own hardware. Full privacy, full control, bring your own API keys. Contribute to the core engine powering the future of work.</p>
                   <button className="flex w-full items-center justify-center gap-2 rounded-lg border border-transparent bg-gray-200 py-3.5 font-bold text-gray-600 transition-all hover:scale-105 hover:bg-gray-300">
                     View on GitHub
                     <span className="material-symbols-outlined text-sm">open_in_new</span>
@@ -257,24 +296,24 @@ export function HomePage() {
         </section>
 
         {/* Pricing */}
-        <section id="pricing" className="relative bg-white px-6 py-24 xl:px-24 2xl:px-48">
+        <section id="pricing" className="relative z-10 bg-white px-6 py-24 xl:px-24 2xl:px-48">
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
           <div className="mx-auto max-w-7xl">
             <div className="mb-16 text-center">
               <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-5xl">Pricing that Scales</h2>
-              <p className="mx-auto max-w-xl text-text-muted">Start small and grow your workforce as your revenue grows.</p>
+              <p className="mx-auto max-w-xl text-text-muted">Start small and grow your workforce as your revenue grows. Universal credits cover all usage.</p>
             </div>
             <div className="grid items-center gap-8 md:grid-cols-3">
-              {/* Hobby */}
+              {/* Team */}
               <div className="pricing-card-hover group relative flex flex-col rounded-xl border border-border-subtle bg-white p-8 transition-all duration-300 hover:border-forest-green/30" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)' }}>
-                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Hobby</h3>
+                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Team</h3>
                 <div className="mb-6 flex items-baseline gap-1">
-                  <span className="text-4xl font-bold text-text-main">$12</span>
+                  <span className="text-4xl font-bold text-text-main">$29</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
-                <p className="mb-8 text-sm text-text-muted">Perfect for testing the waters with a single agent.</p>
+                <p className="mb-8 text-sm text-text-muted">Perfect for small teams getting started with AI agents.</p>
                 <ul className="mb-8 flex-1 space-y-4">
-                  {['1 Active Agent', '1hr Heartbeat', '8hr Active Shift', '150 Creative Credits'].map((f) => (
+                  {['2 Active Agents', '30min Heartbeat', '16hr Active (6am-10pm)', '50,000 Universal Credits/mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
@@ -283,49 +322,49 @@ export function HomePage() {
                 </ul>
                 <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Started</button>
               </div>
-              {/* Starter — popular */}
+              {/* Business — popular */}
               <div className="pricing-card-hover relative z-10 flex scale-105 flex-col rounded-xl border border-accent-gold/50 bg-white p-8 shadow-2xl shadow-accent-gold/10" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03), 0 25px 50px -12px rgba(212, 160, 23, 0.15)' }}>
                 <div className="absolute right-0 top-0 rounded-bl-lg rounded-tr-lg bg-accent-gold px-3 py-1 text-xs font-bold text-white">POPULAR</div>
-                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Starter</h3>
+                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Business</h3>
                 <div className="mb-6 flex items-baseline gap-1">
-                  <span className="text-4xl font-bold text-text-main">$39</span>
+                  <span className="text-4xl font-bold text-text-main">$59</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
-                <p className="mb-8 text-sm text-text-muted">For entrepreneurs ready to automate operations.</p>
+                <p className="mb-8 text-sm text-text-muted">For growing businesses ready to automate operations 24/7.</p>
                 <ul className="mb-8 flex-1 space-y-4">
-                  {['3 Active Agents', '30min Heartbeat', '16hr/day Active', '750 Creative Credits'].map((f) => (
+                  {['5 Active Agents', '15min Heartbeat', '24/7 Always On', '150,000 Universal Credits/mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
                     </li>
                   ))}
                 </ul>
-                <button onClick={goToLogin} className="primary-btn w-full rounded-lg bg-forest-green py-3 font-bold text-white shadow-lg shadow-forest-green/20 transition-colors hover:bg-forest-green-hover">Get Starter</button>
+                <button onClick={goToLogin} className="primary-btn w-full rounded-lg bg-forest-green py-3 font-bold text-white shadow-lg shadow-forest-green/20 transition-colors hover:bg-forest-green-hover">Get Business</button>
               </div>
-              {/* Growth */}
+              {/* Enterprise */}
               <div className="pricing-card-hover group relative flex flex-col rounded-xl border border-border-subtle bg-white p-8 transition-all duration-300 hover:border-forest-green/30" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)' }}>
-                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Growth</h3>
+                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Enterprise</h3>
                 <div className="mb-6 flex items-baseline gap-1">
-                  <span className="text-4xl font-bold text-text-main">$99</span>
+                  <span className="text-4xl font-bold text-text-main">$149</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
-                <p className="mb-8 text-sm text-text-muted">Full operational autonomy with 24/7 agent uptime.</p>
+                <p className="mb-8 text-sm text-text-muted">Full operational autonomy with maximum agent capacity.</p>
                 <ul className="mb-8 flex-1 space-y-4">
-                  {['10 Active Agents', '15min Heartbeat', '24/7 Always On', '2,000 Creative Credits'].map((f) => (
+                  {['15 Active Agents', '5min Heartbeat', '24/7 Always On', '500,000 Universal Credits/mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
                     </li>
                   ))}
                 </ul>
-                <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Growth</button>
+                <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Enterprise</button>
               </div>
             </div>
           </div>
         </section>
 
         {/* Testimonial */}
-        <section className="overflow-hidden border-t border-gray-200 bg-light-bg px-6 py-24 xl:px-24 2xl:px-48">
+        <section className="relative z-10 overflow-hidden border-t border-gray-200 bg-light-bg px-6 py-24 xl:px-24 2xl:px-48">
           <div className="relative mx-auto max-w-4xl text-center">
             <span className="pointer-events-none absolute -left-10 -top-10 -z-10 select-none font-display text-[120px] leading-none text-gray-200 opacity-60">"</span>
             <h2 className="relative z-10 mb-8 font-display text-2xl font-bold leading-tight text-text-main md:text-3xl">
@@ -342,10 +381,40 @@ export function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* FAQ */}
+        <section id="faq" className="relative z-10 bg-white px-6 py-24 xl:px-24 2xl:px-48">
+          <div className="mx-auto max-w-3xl">
+            <div className="mb-12 text-center">
+              <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-4xl">Frequently Asked Questions</h2>
+              <p className="text-text-muted">Everything you need to know about YokeBot.</p>
+            </div>
+            <div className="space-y-3">
+              {faqItems.map((item, idx) => (
+                <div key={idx} className="rounded-lg border border-border-subtle bg-white overflow-hidden">
+                  <button
+                    onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
+                    className="flex w-full items-center justify-between px-6 py-4 text-left"
+                  >
+                    <span className="text-sm font-bold text-text-main">{item.q}</span>
+                    <span className={`material-symbols-outlined text-text-muted transition-transform ${openFaq === idx ? 'rotate-180' : ''}`}>
+                      expand_more
+                    </span>
+                  </button>
+                  {openFaq === idx && (
+                    <div className="border-t border-border-subtle px-6 py-4">
+                      <p className="text-sm leading-relaxed text-text-muted">{item.a}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 bg-white px-6 pb-12 pt-16 xl:px-12">
+      <footer id="contact" className="relative z-10 border-t border-gray-200 bg-white px-6 pb-12 pt-16 xl:px-12">
         <div className="mx-auto max-w-7xl">
           <div className="mb-12 grid gap-12 md:grid-cols-4">
             <div>
@@ -358,7 +427,7 @@ export function HomePage() {
               <p className="text-sm leading-relaxed text-text-muted">The heavy-duty AI workforce platform for entrepreneurs who mean business.</p>
             </div>
             {[
-              { title: 'Product', links: ['Agents', 'Workflows', 'Integrations', 'Pricing'] },
+              { title: 'Product', links: ['Agents', 'Tasks', 'Goals', 'Workspace', 'Team Chat'] },
               { title: 'Resources', links: ['Documentation', 'API Reference', 'Community', 'Blog'] },
               { title: 'Company', links: ['About', 'Careers', 'Legal', 'Contact'] },
             ].map((col) => (
@@ -373,7 +442,7 @@ export function HomePage() {
             ))}
           </div>
           <div className="flex flex-col items-center justify-between gap-4 border-t border-gray-200 pt-8 md:flex-row">
-            <p className="font-mono text-xs text-text-muted opacity-80">© 2026 YokeBot Inc. All rights reserved.</p>
+            <p className="font-mono text-xs text-text-muted opacity-80">&copy; 2026 YokeBot Inc. All rights reserved.</p>
             <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 shadow-sm">
               <span className="h-2 w-2 rounded-full bg-forest-green shadow-[0_0_8px_rgba(15,77,38,0.3)]" />
               <span className="font-mono text-xs font-bold uppercase tracking-wide text-forest-green">Systems Nominal</span>

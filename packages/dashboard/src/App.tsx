@@ -15,6 +15,7 @@ import { KnowledgeBasePage } from '@/pages/KnowledgeBasePage'
 import { SkillsPage } from '@/pages/SkillsPage'
 import { TemplatesPage } from '@/pages/TemplatesPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { BillingPage } from '@/pages/BillingPage'
 import { TeamPage } from '@/pages/TeamPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LoginPage } from '@/pages/LoginPage'
@@ -73,6 +74,7 @@ function AppRoutes() {
         <Route path="skills" element={<SkillsPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/billing" element={<BillingPage />} />
         <Route path="team" element={<TeamPage />} />
       </Route>
 

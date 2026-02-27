@@ -5,9 +5,13 @@
  * the best available backend provider (DeepInfra, fal.ai, Ollama).
  *
  * Backend providers:
- *   - DeepInfra: all text/chat models (OpenAI-compatible)
- *   - fal.ai:    image, video, 3D generation (queue-based)
- *   - Ollama:    local models (self-hosted only, auto-discovered)
+ *   - DeepInfra:     text/chat models (OpenAI-compatible)
+ *   - OpenAI:        GPT models
+ *   - xAI:           Grok models
+ *   - Fireworks AI:  Devstral, GLM and other hosted models
+ *   - Together AI:   Devstral and other hosted models
+ *   - fal.ai:        image, video, 3D generation (queue-based)
+ *   - Ollama:        local models (self-hosted only, auto-discovered)
  */
 
 import type { Db } from './db/types.ts'
@@ -57,7 +61,7 @@ export type ModelType = 'chat' | 'image' | 'video' | '3d'
 export type ModelCategory = 'frontier' | 'efficient' | 'reasoning' | 'image' | 'video' | '3d' | 'local'
 
 export interface BackendRoute {
-  providerId: 'deepinfra' | 'fal' | 'ollama'
+  providerId: 'deepinfra' | 'fal' | 'ollama' | 'openai' | 'xai' | 'fireworks' | 'together'
   providerModelId: string
   priority: number
 }
@@ -78,75 +82,141 @@ export interface LogicalModel {
  * Users see this list. Providers are invisible.
  */
 export const MODEL_CATALOG: LogicalModel[] = [
-  // ---- Text/Chat (via DeepInfra) ----
+  // ---- Text/Chat — Budget tier ----
   {
-    id: 'minimax-m2.5',
-    name: 'MiniMax M2.5',
-    description: 'Top-tier coding and reasoning, 1M context',
+    id: 'gemma-3-27b',
+    name: 'Gemma 3 27B',
+    description: 'Quick worker for simple repetitive tasks',
     type: 'chat',
-    category: 'frontier',
-    contextWindow: 1000000,
-    backends: [{ providerId: 'deepinfra', providerModelId: 'MiniMaxAI/MiniMax-M2.5', priority: 1 }],
-  },
-  {
-    id: 'qwen-3.5',
-    name: 'Qwen 3.5',
-    description: 'Alibaba\'s flagship MoE model, 1M context',
-    type: 'chat',
-    category: 'frontier',
-    contextWindow: 1000000,
-    backends: [{ providerId: 'deepinfra', providerModelId: 'Qwen/Qwen3.5-397B-A17B', priority: 1 }],
-  },
-  {
-    id: 'kimi-k2.5',
-    name: 'Kimi K2.5',
-    description: 'Moonshot AI\'s agentic model with vision',
-    type: 'chat',
-    category: 'frontier',
-    backends: [{ providerId: 'deepinfra', providerModelId: 'moonshotai/Kimi-K2.5', priority: 1 }],
-  },
-  {
-    id: 'llama-4-maverick',
-    name: 'Llama 4 Maverick',
-    description: 'Meta\'s frontier MoE model, 1M context',
-    type: 'chat',
-    category: 'frontier',
-    contextWindow: 1000000,
-    backends: [{ providerId: 'deepinfra', providerModelId: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', priority: 1 }],
+    category: 'efficient',
+    contextWindow: 128000,
+    backends: [{ providerId: 'deepinfra', providerModelId: 'google/gemma-3-27b-it', priority: 1 }],
   },
   {
     id: 'llama-4-scout',
     name: 'Llama 4 Scout',
-    description: 'Lightweight Llama 4 for speed-sensitive tasks',
+    description: 'Reliable assistant for everyday tasks',
     type: 'chat',
     category: 'efficient',
     contextWindow: 524288,
     backends: [{ providerId: 'deepinfra', providerModelId: 'meta-llama/Llama-4-Scout-17B-16E-Instruct', priority: 1 }],
   },
   {
-    id: 'deepseek-r1',
-    name: 'DeepSeek R1',
-    description: 'Strong reasoning with chain-of-thought',
-    type: 'chat',
-    category: 'reasoning',
-    contextWindow: 64000,
-    backends: [{ providerId: 'deepinfra', providerModelId: 'deepseek-ai/DeepSeek-R1', priority: 1 }],
-  },
-  {
-    id: 'deepseek-v3',
-    name: 'DeepSeek V3',
-    description: 'Efficient general-purpose model',
+    id: 'devstral-small',
+    name: 'Devstral Small',
+    description: 'Code specialist for technical work',
     type: 'chat',
     category: 'efficient',
-    contextWindow: 64000,
-    backends: [{ providerId: 'deepinfra', providerModelId: 'deepseek-ai/DeepSeek-V3', priority: 1 }],
+    contextWindow: 128000,
+    backends: [
+      { providerId: 'deepinfra', providerModelId: 'mistralai/Devstral-Small-2505', priority: 1 },
+      { providerId: 'fireworks', providerModelId: 'accounts/fireworks/models/devstral-small', priority: 2 },
+    ],
+  },
+  {
+    id: 'gpt-4o-mini',
+    name: 'GPT-4o mini',
+    description: 'Smooth communicator for customer-facing work',
+    type: 'chat',
+    category: 'efficient',
+    contextWindow: 128000,
+    backends: [{ providerId: 'openai', providerModelId: 'gpt-4o-mini', priority: 1 }],
+  },
+
+  // ---- Text/Chat — Mid tier ----
+  {
+    id: 'llama-4-maverick',
+    name: 'Llama 4 Maverick',
+    description: 'Versatile workhorse for creative content',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 1000000,
+    backends: [{ providerId: 'deepinfra', providerModelId: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', priority: 1 }],
+  },
+  {
+    id: 'deepseek-v3.2',
+    name: 'DeepSeek V3.2',
+    description: 'Bargain genius — gold-medal reasoning at budget price',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 128000,
+    backends: [{ providerId: 'deepinfra', providerModelId: 'deepseek-ai/DeepSeek-V3.2', priority: 1 }],
+  },
+  {
+    id: 'grok-4-fast',
+    name: 'Grok 4 Fast',
+    description: 'Speed demon for real-time high-volume tasks',
+    type: 'chat',
+    category: 'efficient',
+    contextWindow: 131072,
+    backends: [{ providerId: 'xai', providerModelId: 'grok-4-fast', priority: 1 }],
+  },
+  {
+    id: 'minimax-m2.5',
+    name: 'MiniMax M2.5',
+    description: 'Orchestrator for complex multi-step workflows',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 1000000,
+    backends: [{ providerId: 'deepinfra', providerModelId: 'MiniMaxAI/MiniMax-M2.5', priority: 1 }],
+  },
+
+  // ---- Text/Chat — Frontier tier ----
+  {
+    id: 'devstral-2',
+    name: 'Devstral 2 123B',
+    description: 'Senior developer for complex code and architecture',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 128000,
+    backends: [
+      { providerId: 'fireworks', providerModelId: 'accounts/fireworks/models/devstral-2-123b', priority: 1 },
+      { providerId: 'together', providerModelId: 'mistralai/Devstral-2-123B', priority: 2 },
+    ],
+  },
+  {
+    id: 'glm-5',
+    name: 'GLM-5',
+    description: 'Frontier powerhouse for research and agentic work',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 200000,
+    backends: [
+      { providerId: 'deepinfra', providerModelId: 'THUDM/GLM-5-0414-9B-Chat', priority: 1 },
+      { providerId: 'fireworks', providerModelId: 'accounts/fireworks/models/glm-5', priority: 2 },
+    ],
+  },
+  {
+    id: 'kimi-k2.5',
+    name: 'Kimi K2.5',
+    description: 'Deep thinker for research and long-document analysis',
+    type: 'chat',
+    category: 'frontier',
+    backends: [{ providerId: 'deepinfra', providerModelId: 'moonshotai/Kimi-K2.5', priority: 1 }],
+  },
+  {
+    id: 'qwen-3.5',
+    name: 'Qwen 3.5',
+    description: 'Ultimate brain for the hardest tasks',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 1000000,
+    backends: [{ providerId: 'deepinfra', providerModelId: 'Qwen/Qwen3.5-397B-A17B', priority: 1 }],
   },
 
   // ---- Image Generation (via fal.ai) ----
   {
+    id: 'flux-schnell',
+    name: 'Flux Schnell',
+    description: 'Fast budget image generation',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/flux/schnell', priority: 1 }],
+  },
+  {
     id: 'nano-banana-pro',
     name: 'Nano Banana Pro',
-    description: 'Google\'s image generation model, up to 4K',
+    description: 'Premium image generation, up to 4K',
     type: 'image',
     category: 'image',
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/nano-banana-pro', priority: 1 }],
@@ -211,6 +281,30 @@ export const PROVIDERS: ProviderDef[] = [
     id: 'fal',
     name: 'fal.ai',
     endpoint: 'https://queue.fal.run',
+    requiresKey: true,
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    endpoint: 'https://api.openai.com/v1',
+    requiresKey: true,
+  },
+  {
+    id: 'xai',
+    name: 'xAI',
+    endpoint: 'https://api.x.ai/v1',
+    requiresKey: true,
+  },
+  {
+    id: 'fireworks',
+    name: 'Fireworks AI',
+    endpoint: 'https://api.fireworks.ai/inference/v1',
+    requiresKey: true,
+  },
+  {
+    id: 'together',
+    name: 'Together AI',
+    endpoint: 'https://api.together.xyz/v1',
     requiresKey: true,
   },
 ]

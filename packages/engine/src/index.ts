@@ -42,8 +42,8 @@ async function main() {
   // Register hosted mode routing if enabled (reads API keys from env vars instead of DB)
   if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
     try {
-      // Dynamic import from /ee — outside engine rootDir, so use string variable to avoid tsc rootDir check
-      const eePath = '../../../ee/hosted-routing.ts'
+      // Dynamic import from /ee — plain JS, outside engine rootDir
+      const eePath = '../../../ee/hosted-routing.js'
       const ee = await import(/* @vite-ignore */ eePath) as { hostedResolveModelConfig: typeof resolveModelConfig }
       setHostedResolver(ee.hostedResolveModelConfig)
       console.log('[engine] Hosted mode enabled — using env var routing')
@@ -67,6 +67,9 @@ async function main() {
     ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((s) => s.trim())
     : ['http://localhost:5173', 'http://localhost:3000']
   app.use(cors({ origin: CORS_ORIGINS, credentials: true }))
+
+  // Stripe webhook needs raw body for signature verification — must come BEFORE express.json()
+  app.use('/api/billing/webhook', express.raw({ type: 'application/json' }))
 
   // Body size limit
   app.use(express.json({ limit: '1mb' }))
@@ -94,6 +97,14 @@ async function main() {
 
   // Team context — resolves X-Team-Id header, verifies membership
   app.use(createTeamMiddleware(db))
+
+  // Billing gate — only active in hosted mode (requires active subscription)
+  const { createBillingMiddleware } = await import('./billing-middleware.ts')
+  app.use(createBillingMiddleware(db))
+
+  // Billing API routes (checkout, webhook, status)
+  const { registerBillingRoutes } = await import('./billing-routes.ts')
+  registerBillingRoutes(app, db)
 
   // ===== Health =====
 
@@ -124,6 +135,17 @@ async function main() {
   app.post('/api/agents', async (req, res) => {
     const teamId = req.user!.activeTeamId!
     const body = validate(CreateAgentSchema, req.body)
+
+    // Enforce agent count limit in hosted mode
+    if (req.subscription) {
+      const existing = await listAgents(db, teamId)
+      if (existing.length >= req.subscription.maxAgents) {
+        return res.status(403).json({
+          error: `Your ${req.subscription.tier} plan allows ${req.subscription.maxAgents} agent(s). Upgrade to add more.`,
+          code: 'AGENT_LIMIT_REACHED',
+        })
+      }
+    }
 
     const agent = await createAgent(db, teamId, {
       name: body.name,
@@ -164,6 +186,23 @@ async function main() {
     const teamId = req.user!.activeTeamId!
     const agent = await getAgent(db, req.params.id)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
+
+    // Enforce heartbeat and active hours in hosted mode
+    if (req.subscription) {
+      if (agent.heartbeatSeconds < req.subscription.minHeartbeatSeconds) {
+        return res.status(403).json({
+          error: `Your ${req.subscription.tier} plan minimum heartbeat is ${req.subscription.minHeartbeatSeconds / 60} minutes.`,
+          code: 'HEARTBEAT_LIMIT',
+        })
+      }
+      if (agent.activeHoursStart < req.subscription.activeHoursStart || agent.activeHoursEnd > req.subscription.activeHoursEnd) {
+        return res.status(403).json({
+          error: `Your ${req.subscription.tier} plan allows active hours ${req.subscription.activeHoursStart}:00-${req.subscription.activeHoursEnd}:00.`,
+          code: 'ACTIVE_HOURS_LIMIT',
+        })
+      }
+    }
+
     await setAgentStatus(db, agent.id, 'running')
     scheduleAgent(db, { ...agent, status: 'running' })
     await logActivity(db, 'agent_started', agent.id, `Agent "${agent.name}" started`, undefined, teamId)
@@ -206,6 +245,8 @@ async function main() {
         systemPrompt,
         workspaceConfig,
         SKILLS_DIR,
+        undefined,
+        agent.modelId || undefined,
       )
 
       // Store agent response in DM channel

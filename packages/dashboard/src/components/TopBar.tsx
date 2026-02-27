@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router'
 import { UniversalSearch } from '@/components/UniversalSearch'
 import { NotificationCenter } from '@/components/NotificationCenter'
+import { getBillingStatus } from '@/lib/engine'
 
 export function TopBar() {
   const [showSearch, setShowSearch] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [credits, setCredits] = useState<number | null>(null)
+  const navigate = useNavigate()
 
   // Cmd+K shortcut
   useEffect(() => {
@@ -16,6 +20,13 @@ export function TopBar() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  // Load credit balance
+  useEffect(() => {
+    getBillingStatus()
+      .then((s) => setCredits(s.credits))
+      .catch(() => setCredits(null))
   }, [])
 
   return (
@@ -36,11 +47,14 @@ export function TopBar() {
         {/* Right side */}
         <div className="flex items-center gap-6 pl-6">
           {/* Credits */}
-          <div className="flex items-center gap-2 rounded-full border border-border-subtle bg-white px-3 py-1.5 shadow-sm">
+          <button
+            onClick={() => navigate('/settings/billing')}
+            className="flex items-center gap-2 rounded-full border border-border-subtle bg-white px-3 py-1.5 shadow-sm hover:border-forest-green transition-colors"
+          >
             <span className="material-symbols-outlined text-accent-gold text-[18px]">bolt</span>
-            <span className="font-mono text-sm font-bold text-text-main">2,450</span>
+            <span className="font-mono text-sm font-bold text-text-main">{credits !== null ? credits.toLocaleString() : '--'}</span>
             <span className="text-xs text-text-muted">credits</span>
-          </div>
+          </button>
 
           <div className="h-6 w-px bg-border-subtle" />
 

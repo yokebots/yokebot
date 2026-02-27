@@ -204,6 +204,66 @@ const SQLITE_DDL = `
     PRIMARY KEY (user_id, team_id)
   );
 
+  -- Team subscriptions (billing)
+  CREATE TABLE IF NOT EXISTS team_subscriptions (
+    team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    stripe_customer_id TEXT NOT NULL,
+    stripe_subscription_id TEXT,
+    tier TEXT NOT NULL DEFAULT 'none',
+    status TEXT NOT NULL DEFAULT 'inactive',
+    max_agents INTEGER NOT NULL DEFAULT 0,
+    min_heartbeat_seconds INTEGER NOT NULL DEFAULT 3600,
+    active_hours_start INTEGER NOT NULL DEFAULT 9,
+    active_hours_end INTEGER NOT NULL DEFAULT 17,
+    monthly_credits INTEGER NOT NULL DEFAULT 0,
+    included_credits INTEGER NOT NULL DEFAULT 0,
+    credits_reset_at TEXT,
+    current_period_end TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Team credit balance
+  CREATE TABLE IF NOT EXISTS team_credits (
+    team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    balance INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Credit transaction log
+  CREATE TABLE IF NOT EXISTS credit_transactions (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    amount INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    stripe_payment_intent_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Model credit costs (star ratings, descriptions, per-use cost)
+  CREATE TABLE IF NOT EXISTS model_credit_costs (
+    model_id TEXT PRIMARY KEY,
+    credits_per_use INTEGER NOT NULL DEFAULT 0,
+    model_type TEXT NOT NULL DEFAULT 'chat',
+    star_intelligence INTEGER NOT NULL DEFAULT 3,
+    star_power INTEGER NOT NULL DEFAULT 3,
+    star_speed INTEGER NOT NULL DEFAULT 3,
+    description TEXT NOT NULL DEFAULT '',
+    tagline TEXT NOT NULL DEFAULT '',
+    pros TEXT NOT NULL DEFAULT '[]',
+    cons TEXT NOT NULL DEFAULT '[]',
+    release_date TEXT,
+    popularity INTEGER NOT NULL DEFAULT 50
+  );
+
+  -- Skill credit costs (per-use cost for external skill tools)
+  CREATE TABLE IF NOT EXISTS skill_credit_costs (
+    skill_name TEXT PRIMARY KEY,
+    credits_per_use INTEGER NOT NULL DEFAULT 0
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -223,6 +283,8 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_sor_rows_table ON sor_rows(table_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_notifications_team ON notifications(team_id, user_id);
+  CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_team_sub_stripe ON team_subscriptions(stripe_customer_id);
 `
 
 const POSTGRES_DDL = `
@@ -419,6 +481,66 @@ const POSTGRES_DDL = `
     PRIMARY KEY (user_id, team_id)
   );
 
+  -- Team subscriptions (billing)
+  CREATE TABLE IF NOT EXISTS team_subscriptions (
+    team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    stripe_customer_id TEXT NOT NULL,
+    stripe_subscription_id TEXT,
+    tier TEXT NOT NULL DEFAULT 'none',
+    status TEXT NOT NULL DEFAULT 'inactive',
+    max_agents INTEGER NOT NULL DEFAULT 0,
+    min_heartbeat_seconds INTEGER NOT NULL DEFAULT 3600,
+    active_hours_start INTEGER NOT NULL DEFAULT 9,
+    active_hours_end INTEGER NOT NULL DEFAULT 17,
+    monthly_credits INTEGER NOT NULL DEFAULT 0,
+    included_credits INTEGER NOT NULL DEFAULT 0,
+    credits_reset_at TEXT,
+    current_period_end TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Team credit balance
+  CREATE TABLE IF NOT EXISTS team_credits (
+    team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    balance INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Credit transaction log
+  CREATE TABLE IF NOT EXISTS credit_transactions (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    amount INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    stripe_payment_intent_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Model credit costs (star ratings, descriptions, per-use cost)
+  CREATE TABLE IF NOT EXISTS model_credit_costs (
+    model_id TEXT PRIMARY KEY,
+    credits_per_use INTEGER NOT NULL DEFAULT 0,
+    model_type TEXT NOT NULL DEFAULT 'chat',
+    star_intelligence INTEGER NOT NULL DEFAULT 3,
+    star_power INTEGER NOT NULL DEFAULT 3,
+    star_speed INTEGER NOT NULL DEFAULT 3,
+    description TEXT NOT NULL DEFAULT '',
+    tagline TEXT NOT NULL DEFAULT '',
+    pros TEXT NOT NULL DEFAULT '[]',
+    cons TEXT NOT NULL DEFAULT '[]',
+    release_date TEXT,
+    popularity INTEGER NOT NULL DEFAULT 50
+  );
+
+  -- Skill credit costs (per-use cost for external skill tools)
+  CREATE TABLE IF NOT EXISTS skill_credit_costs (
+    skill_name TEXT PRIMARY KEY,
+    credits_per_use INTEGER NOT NULL DEFAULT 0
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -438,6 +560,8 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_sor_rows_table ON sor_rows(table_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_notifications_team ON notifications(team_id, user_id);
+  CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_team_sub_stripe ON team_subscriptions(stripe_customer_id);
 `
 
 export async function migrate(db: Db): Promise<void> {

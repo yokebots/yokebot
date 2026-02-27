@@ -9,12 +9,14 @@ YokeBot is an open-source AI agent workforce platform. Deploy a team of AI agent
 **Key features:**
 - Visual dashboard for non-developers
 - Built-in team chat + task management (Mission Control)
-- WebMCP-native hybrid browser engine
+- Universal credit system for all usage (LLM, media, skills)
+- Star-rated model catalog (12+ models across 7 providers)
+- Skills marketplace with SKILL.md format
 - Container isolation (Docker per agent)
-- Skills-as-configuration (SKILL.md format)
-- Model-agnostic (Ollama, DeepInfra, Together, any OpenAI-compatible endpoint)
+- Model-agnostic (Ollama, DeepInfra, OpenAI, xAI, Fireworks, Together, fal.ai)
 - Proactive agents that think, suggest, and initiate
 - Approval queue for high-risk agent actions
+- Billing & subscription system with Stripe integration
 
 ## Quick Start
 
@@ -29,14 +31,18 @@ pnpm dev
 
 | | Self-Host (Free) | YokeBot Cloud |
 |---|---|---|
-| **Cost** | Free forever | From $12/mo |
-| **Models** | Bring your own (Ollama, etc.) | Included (flat rate) |
+| **Cost** | Free forever | From $29/mo |
+| **Models** | Bring your own keys | Universal credits (pay per use) |
 | **Docker** | You manage | We manage |
 | **Setup** | Developer-friendly | One-click |
 
-**Self-host:** Run YokeBot on your own hardware with your own models. MIT-level freedom for personal and business use.
+**Self-host:** Run YokeBot on your own hardware with your own API keys. Full privacy, full control.
 
 **Cloud:** [yokebot.com](https://yokebot.com) — we handle everything. Pick a plan, deploy agents, done.
+
+## Skills
+
+YokeBot uses a `SKILL.md` format for defining agent capabilities. Skills are plain Markdown files that describe tools, parameters, and handlers. Bundled skills include web search, Slack notifications, code interpreter, and Google Sheets integration.
 
 ## License
 

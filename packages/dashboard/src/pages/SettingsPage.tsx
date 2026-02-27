@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { ProviderConfig } from '@/lib/engine'
 
@@ -19,6 +20,7 @@ interface ConnectedChannel {
 }
 
 export function SettingsPage() {
+  const navigate = useNavigate()
   const [tab, setTab] = useState<'notifications' | 'providers'>('providers')
   const [globalEnabled, setGlobalEnabled] = useState(true)
   const [providers, setProviders] = useState<ProviderConfig[]>([])
@@ -85,10 +87,10 @@ export function SettingsPage() {
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 border-b border-border-subtle">
-        {([{ id: 'providers', label: 'Model Providers' }, { id: 'notifications', label: 'Notifications' }] as const).map((t) => (
+        {([{ id: 'providers', label: 'Model Providers' }, { id: 'notifications', label: 'Notifications' }, { id: 'billing', label: 'Billing' }] as const).map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id as 'providers' | 'notifications')}
+            onClick={() => t.id === 'billing' ? navigate('/settings/billing') : setTab(t.id as 'providers' | 'notifications')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors ${
               tab === t.id
                 ? 'border-b-2 border-forest-green text-forest-green'

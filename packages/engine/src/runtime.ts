@@ -22,6 +22,9 @@ import { falGenerate } from './fal.ts'
 import { getLogicalModel } from './model.ts'
 import { downloadAndSave, guessMimeType, type MediaAttachment } from './media.ts'
 import type { ChatAttachment } from './chat.ts'
+import { deductCredits, getModelCreditCost, getSkillCreditCost } from './billing.ts'
+
+const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
 export interface RuntimeConfig {
   maxIterations: number  // safety limit to prevent infinite loops
@@ -255,6 +258,11 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (!logical || logical.type !== 'image') return `Unknown image model: ${modelId}`
       const falModelId = logical.backends[0]?.providerModelId
       if (!falModelId) return `No backend configured for model: ${modelId}`
+      if (HOSTED_MODE) {
+        const cost = await getModelCreditCost(ctx.db, modelId)
+        const { success, balance } = await deductCredits(ctx.db, ctx.teamId, cost || 10, 'media_debit', `Image generation: ${(args.prompt as string).slice(0, 80)}`)
+        if (!success) return `Insufficient credits. Image generation costs ${cost} credits but your team has ${balance}. Purchase more credits in Settings → Billing.`
+      }
       try {
         const result = await falGenerate(ctx.db, falModelId, { prompt: args.prompt as string })
         const image = result.images?.[0]
@@ -284,6 +292,11 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (!logical || logical.type !== 'video') return `Unknown video model: ${modelId}`
       const falModelId = logical.backends[0]?.providerModelId
       if (!falModelId) return `No backend configured for model: ${modelId}`
+      if (HOSTED_MODE) {
+        const cost = await getModelCreditCost(ctx.db, modelId)
+        const { success, balance } = await deductCredits(ctx.db, ctx.teamId, cost || 100, 'media_debit', `Video generation: ${(args.prompt as string).slice(0, 80)}`)
+        if (!success) return `Insufficient credits. Video generation costs ${cost} credits but your team has ${balance}. Purchase more credits in Settings → Billing.`
+      }
       try {
         const result = await falGenerate(ctx.db, falModelId, { prompt: args.prompt as string })
         const video = result.video
@@ -312,6 +325,11 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (!logical || logical.type !== '3d') return `Unknown 3D model: ${modelId}`
       const falModelId = logical.backends[0]?.providerModelId
       if (!falModelId) return `No backend configured for model: ${modelId}`
+      if (HOSTED_MODE) {
+        const cost = await getModelCreditCost(ctx.db, modelId)
+        const { success, balance } = await deductCredits(ctx.db, ctx.teamId, cost || 10, 'media_debit', `3D model generation`)
+        if (!success) return `Insufficient credits. 3D generation costs ${cost} credits but your team has ${balance}. Purchase more credits in Settings → Billing.`
+      }
       try {
         const result = await falGenerate(ctx.db, falModelId, { image_url: args.imageUrl as string })
         const mesh = result.model_mesh
@@ -333,6 +351,18 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     default: {
+      // Deduct skill credits before executing (hosted mode only)
+      if (HOSTED_MODE) {
+        const skillCost = await getSkillCreditCost(ctx.db, toolCall.function.name)
+        if (skillCost > 0) {
+          const { success, balance } = await deductCredits(ctx.db, ctx.teamId, skillCost, 'skill_debit',
+            `Skill: ${toolCall.function.name}`)
+          if (!success) {
+            return `Insufficient credits. ${toolCall.function.name} costs ${skillCost} credits but your team has ${balance}. Purchase more credits in Settings → Billing.`
+          }
+        }
+      }
+
       // Try skill tool handlers (web_search, slack_send_message, etc.)
       const skillResult = await executeSkillToolCall(toolCall, args)
       if (skillResult !== null) return skillResult
@@ -410,6 +440,7 @@ export async function runReactLoop(
   workspaceConfig: WorkspaceConfig,
   skillsDir: string,
   config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
+  logicalModelId?: string,
 ): Promise<RunResult> {
   // Save the user message
   await addMessage(db, agentId, 'user', userMessage, teamId)
@@ -433,6 +464,19 @@ export async function runReactLoop(
   let response: string | null = null
 
   for (let i = 0; i < config.maxIterations; i++) {
+    // Deduct LLM credits before each ReAct iteration (hosted mode only)
+    if (HOSTED_MODE && logicalModelId) {
+      const llmCost = await getModelCreditCost(db, logicalModelId)
+      if (llmCost > 0) {
+        const { success, balance } = await deductCredits(db, teamId, llmCost, 'heartbeat_debit',
+          `LLM: ${logicalModelId} (iteration ${i + 1})`)
+        if (!success) {
+          response = `Insufficient credits. ${logicalModelId} costs ${llmCost} credits per iteration but your team has ${balance}. Purchase more credits in Settings → Billing.`
+          break
+        }
+      }
+    }
+
     const completion = await chatCompletionWithFallback(modelConfig, messages, tools)
 
     // If the model returned tool calls, execute them

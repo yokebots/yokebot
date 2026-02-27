@@ -1,7 +1,20 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { EngineAgent, ChatMessage, LogicalModel, AgentSkill } from '@/lib/engine'
+import type { EngineAgent, ChatMessage, LogicalModel, AgentSkill, ModelCreditCost, BillingStatus } from '@/lib/engine'
+
+function StarRating({ stars, label }: { stars: number; label: string }) {
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-[10px] font-medium text-text-muted w-5">{label}</span>
+      <div className="flex gap-px">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <span key={i} className={`text-[10px] ${i <= stars ? 'text-amber-400' : 'text-gray-200'}`}>&#9733;</span>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export function AgentDetailPage() {
   const { agentId } = useParams()
@@ -12,7 +25,12 @@ export function AgentDetailPage() {
   const [newMessage, setNewMessage] = useState('')
   const [editPrompt, setEditPrompt] = useState('')
   const [editModelId, setEditModelId] = useState('')
+  const [editHeartbeat, setEditHeartbeat] = useState(1800)
+  const [editHoursStart, setEditHoursStart] = useState(6)
+  const [editHoursEnd, setEditHoursEnd] = useState(22)
   const [models, setModels] = useState<LogicalModel[]>([])
+  const [modelCatalog, setModelCatalog] = useState<ModelCreditCost[]>([])
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null)
   const [agentSkills, setAgentSkills] = useState<AgentSkill[]>([])
   const [availableSkills, setAvailableSkills] = useState<Array<{ metadata: { name: string; description: string; tags: string[]; source: string }; filePath: string }>>([])
   const [installingSkill, setInstallingSkill] = useState(false)
@@ -20,16 +38,23 @@ export function AgentDetailPage() {
   const loadData = async () => {
     if (!agentId) return
     try {
-      const [a, m, skills, allSkills] = await Promise.all([
+      const [a, m, catalog, billing, skills, allSkills] = await Promise.all([
         engine.getAgent(agentId),
         engine.getAvailableModels(),
+        engine.getModelCatalog().catch(() => [] as ModelCreditCost[]),
+        engine.getBillingStatus().catch(() => null),
         engine.getAgentSkills(agentId),
         engine.listSkills(),
       ])
       setAgent(a)
       setEditPrompt(a.systemPrompt ?? '')
       setEditModelId(a.modelId || '')
+      setEditHeartbeat(a.heartbeatSeconds)
+      setEditHoursStart(a.activeHoursStart)
+      setEditHoursEnd(a.activeHoursEnd)
       setModels(m)
+      setModelCatalog(catalog)
+      setBillingStatus(billing)
       setAgentSkills(skills)
       setAvailableSkills(allSkills)
       const ch = await engine.getDmChannel(agentId)
@@ -65,20 +90,35 @@ export function AgentDetailPage() {
     await engine.updateAgent(agentId, {
       systemPrompt: editPrompt,
       modelId: editModelId,
+      heartbeatSeconds: editHeartbeat,
+      activeHoursStart: editHoursStart,
+      activeHoursEnd: editHoursEnd,
     })
     loadData()
   }
 
+  const selectedCost = modelCatalog.find((c) => c.modelId === editModelId)
   const currentModelLabel = models.find((m) => m.id === editModelId)?.name ?? agent?.modelId ?? agent?.modelName ?? 'Unknown'
 
-  const categoryLabels: Record<string, string> = {
-    frontier: 'Frontier', reasoning: 'Reasoning', efficient: 'Efficient',
-    image: 'Image Generation', video: 'Video Generation', '3d': '3D Generation', local: 'Local (Ollama)',
-  }
-  const categoryOrder = ['frontier', 'reasoning', 'efficient', 'image', 'video', '3d', 'local']
-  const groupedCategories = categoryOrder
-    .map((cat) => ({ category: cat, label: categoryLabels[cat] ?? cat, models: models.filter((m) => m.category === cat) }))
-    .filter((g) => g.models.length > 0)
+  // Credit estimator calculation
+  const activeHours = editHoursEnd - editHoursStart
+  const heartbeatMinutes = editHeartbeat / 60
+  const heartbeatsPerDay = activeHours > 0 ? activeHours / (heartbeatMinutes / 60) : 0
+  const creditsPerDay = selectedCost ? heartbeatsPerDay * selectedCost.creditsPerUse : 0
+  const creditsPerWeek = creditsPerDay * 7
+  const creditsPerMonth = creditsPerDay * 30
+
+  // Heartbeat options
+  const heartbeatOptions = [
+    { value: 300, label: '5 min' },
+    { value: 600, label: '10 min' },
+    { value: 900, label: '15 min' },
+    { value: 1800, label: '30 min' },
+    { value: 3600, label: '1 hour' },
+  ]
+
+  // Min heartbeat from subscription
+  const minHeartbeat = billingStatus?.subscription?.minHeartbeatSeconds ?? 300
 
   if (!agent) {
     return <div className="flex items-center justify-center py-24"><p className="text-text-muted">Loading agent...</p></div>
@@ -150,33 +190,168 @@ export function AgentDetailPage() {
 
           {tab === 'config' && (
             <div className="space-y-4">
+              {/* Model Picker */}
               <div className="rounded-lg border border-border-subtle bg-white p-4">
                 <h3 className="mb-3 text-sm font-bold text-text-main">Model</h3>
-                <select
-                  value={editModelId}
-                  onChange={(e) => setEditModelId(e.target.value)}
-                  className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
-                >
-                  {groupedCategories.map((group) => (
-                    <optgroup key={group.category} label={group.label}>
-                      {group.models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ''}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                  {/* If current model isn't in the list, show it anyway */}
-                  {editModelId && !models.find((m) => m.id === editModelId) && (
-                    <option value={editModelId}>{editModelId}</option>
-                  )}
-                </select>
-                {(() => {
-                  const selected = models.find((m) => m.id === editModelId)
-                  return selected ? <p className="mt-1 text-xs text-text-muted">{selected.description}</p> : null
-                })()}
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {models.filter((m) => m.type === 'chat').map((m) => {
+                    const cost = modelCatalog.find((c) => c.modelId === m.id)
+                    const isSelected = editModelId === m.id
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setEditModelId(m.id)}
+                        className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                          isSelected
+                            ? 'border-forest-green bg-forest-green/5 ring-1 ring-forest-green'
+                            : 'border-border-subtle hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-text-main">{m.name}</span>
+                              {cost && (
+                                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-text-muted">
+                                  {cost.creditsPerUse} cr/hb
+                                </span>
+                              )}
+                            </div>
+                            {cost?.tagline && (
+                              <p className="mt-0.5 text-xs italic text-text-muted">Think of it as: {cost.tagline}</p>
+                            )}
+                            <p className="mt-1 text-xs text-text-secondary">{m.description}</p>
+                            {cost && (
+                              <div className="mt-1.5 flex gap-3">
+                                <StarRating stars={cost.starIntelligence} label="Int" />
+                                <StarRating stars={cost.starPower} label="Pwr" />
+                                <StarRating stars={cost.starSpeed} label="Spd" />
+                              </div>
+                            )}
+                          </div>
+                          {isSelected && (
+                            <span className="material-symbols-outlined text-forest-green text-lg mt-0.5">check_circle</span>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                  {/* Ollama models */}
+                  {models.filter((m) => m.category === 'local').map((m) => {
+                    const isSelected = editModelId === m.id
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setEditModelId(m.id)}
+                        className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                          isSelected
+                            ? 'border-forest-green bg-forest-green/5 ring-1 ring-forest-green'
+                            : 'border-border-subtle hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-sm font-bold text-text-main">{m.name}</span>
+                            <p className="text-xs text-text-muted">{m.description}</p>
+                          </div>
+                          {isSelected && (
+                            <span className="material-symbols-outlined text-forest-green text-lg">check_circle</span>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                {/* Show if current model isn't in the list */}
+                {editModelId && !models.find((m) => m.id === editModelId) && (
+                  <p className="mt-2 text-xs text-amber-600">Current model "{editModelId}" is not available. Select a new model.</p>
+                )}
               </div>
 
+              {/* Heartbeat & Work Shift */}
+              <div className="rounded-lg border border-border-subtle bg-white p-4">
+                <h3 className="mb-3 text-sm font-bold text-text-main">Work Schedule</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-secondary">Heartbeat Frequency</label>
+                    <select
+                      value={editHeartbeat}
+                      onChange={(e) => setEditHeartbeat(Number(e.target.value))}
+                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+                    >
+                      {heartbeatOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value} disabled={opt.value < minHeartbeat}>
+                          Every {opt.label}{opt.value < minHeartbeat ? ' (upgrade plan)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-text-muted">How often the agent checks in and does work</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-text-secondary">Shift Start</label>
+                      <select
+                        value={editHoursStart}
+                        onChange={(e) => setEditHoursStart(Number(e.target.value))}
+                        className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+                      >
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i}>{i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-text-secondary">Shift End</label>
+                      <select
+                        value={editHoursEnd}
+                        onChange={(e) => setEditHoursEnd(Number(e.target.value))}
+                        className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+                      >
+                        {Array.from({ length: 24 }, (_, i) => i + 1).map((i) => (
+                          <option key={i} value={i}>{i === 24 ? '12:00 AM (next day)' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-text-muted">
+                    {activeHours > 0 ? `${activeHours} active hours/day` : 'No active hours'} &middot; {Math.round(activeHours * 7)} hrs/week equivalent
+                  </p>
+                </div>
+              </div>
+
+              {/* Credit Estimator */}
+              {selectedCost && creditsPerDay > 0 && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                  <h3 className="mb-2 text-sm font-bold text-blue-900">Estimated Credit Usage</h3>
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <p className="text-lg font-bold text-blue-900">{Math.round(creditsPerDay).toLocaleString()}</p>
+                      <p className="text-[11px] text-blue-700">Daily</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-blue-900">{Math.round(creditsPerWeek).toLocaleString()}</p>
+                      <p className="text-[11px] text-blue-700">Weekly</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-blue-900">{Math.round(creditsPerMonth).toLocaleString()}</p>
+                      <p className="text-[11px] text-blue-700">Monthly</p>
+                    </div>
+                  </div>
+                  {billingStatus?.subscription && (
+                    <p className="mt-2 text-xs text-blue-700">
+                      Plan includes {billingStatus.subscription.includedCredits.toLocaleString()} credits/mo &middot;{' '}
+                      {billingStatus.subscription.includedCredits - creditsPerMonth > 0
+                        ? `${Math.round(billingStatus.subscription.includedCredits - creditsPerMonth).toLocaleString()} remaining after this agent`
+                        : 'May need additional credit packs'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* System Prompt */}
               <div className="rounded-lg border border-border-subtle bg-white p-4">
                 <h3 className="mb-3 text-sm font-bold text-text-main">System Instructions</h3>
                 <textarea
@@ -187,32 +362,17 @@ export function AgentDetailPage() {
                 />
               </div>
 
+              {/* Behavior (read-only) */}
               <div className="rounded-lg border border-border-subtle bg-white p-4">
                 <h3 className="mb-3 text-sm font-bold text-text-main">Behavior</h3>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-text-main">Proactive Mode</p>
-                      <p className="text-xs text-text-muted">Agent initiates actions during heartbeat cycles</p>
-                    </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${agent.proactive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                      {agent.proactive ? 'On' : 'Off'}
-                    </span>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-text-main">Proactive Mode</p>
+                    <p className="text-xs text-text-muted">Agent initiates actions during heartbeat cycles</p>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-text-main">Heartbeat</p>
-                      <p className="text-xs text-text-muted">Check-in interval</p>
-                    </div>
-                    <span className="font-mono text-sm text-text-main">{agent.heartbeatSeconds}s</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-text-main">Active Hours</p>
-                      <p className="text-xs text-text-muted">When the agent operates</p>
-                    </div>
-                    <span className="font-mono text-sm text-text-main">{agent.activeHoursStart}:00 – {agent.activeHoursEnd}:00</span>
-                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${agent.proactive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {agent.proactive ? 'On' : 'Off'}
+                  </span>
                 </div>
               </div>
 
