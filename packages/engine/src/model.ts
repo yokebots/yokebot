@@ -61,7 +61,7 @@ export type ModelType = 'chat' | 'image' | 'video' | '3d'
 export type ModelCategory = 'frontier' | 'efficient' | 'reasoning' | 'image' | 'video' | '3d' | 'local'
 
 export interface BackendRoute {
-  providerId: 'deepinfra' | 'fal' | 'ollama' | 'openai' | 'xai' | 'fireworks' | 'together'
+  providerId: 'deepinfra' | 'fal' | 'ollama' | 'openai' | 'xai' | 'fireworks' | 'together' | 'openrouter'
   providerModelId: string
   priority: number
 }
@@ -120,7 +120,10 @@ export const MODEL_CATALOG: LogicalModel[] = [
     type: 'chat',
     category: 'efficient',
     contextWindow: 128000,
-    backends: [{ providerId: 'openai', providerModelId: 'gpt-4o-mini', priority: 1 }],
+    backends: [
+      { providerId: 'openai', providerModelId: 'gpt-4o-mini', priority: 1 },
+      { providerId: 'openrouter', providerModelId: 'openai/gpt-4o-mini', priority: 2 },
+    ],
   },
 
   // ---- Text/Chat — Mid tier ----
@@ -149,7 +152,10 @@ export const MODEL_CATALOG: LogicalModel[] = [
     type: 'chat',
     category: 'efficient',
     contextWindow: 131072,
-    backends: [{ providerId: 'xai', providerModelId: 'grok-4-fast', priority: 1 }],
+    backends: [
+      { providerId: 'xai', providerModelId: 'grok-4-fast', priority: 1 },
+      { providerId: 'openrouter', providerModelId: 'x-ai/grok-4-fast', priority: 2 },
+    ],
   },
   {
     id: 'minimax-m2.5',
@@ -172,6 +178,7 @@ export const MODEL_CATALOG: LogicalModel[] = [
     backends: [
       { providerId: 'fireworks', providerModelId: 'accounts/fireworks/models/devstral-2-123b', priority: 1 },
       { providerId: 'together', providerModelId: 'mistralai/Devstral-2-123B', priority: 2 },
+      { providerId: 'openrouter', providerModelId: 'mistralai/devstral-2512', priority: 3 },
     ],
   },
   {
@@ -182,8 +189,9 @@ export const MODEL_CATALOG: LogicalModel[] = [
     category: 'frontier',
     contextWindow: 200000,
     backends: [
-      { providerId: 'deepinfra', providerModelId: 'THUDM/GLM-5-0414-9B-Chat', priority: 1 },
+      { providerId: 'deepinfra', providerModelId: 'zai-org/GLM-5', priority: 1 },
       { providerId: 'fireworks', providerModelId: 'accounts/fireworks/models/glm-5', priority: 2 },
+      { providerId: 'openrouter', providerModelId: 'z-ai/glm-5', priority: 3 },
     ],
   },
   {
@@ -201,7 +209,10 @@ export const MODEL_CATALOG: LogicalModel[] = [
     type: 'chat',
     category: 'frontier',
     contextWindow: 1000000,
-    backends: [{ providerId: 'deepinfra', providerModelId: 'Qwen/Qwen3.5-397B-A17B', priority: 1 }],
+    backends: [
+      { providerId: 'deepinfra', providerModelId: 'Qwen/Qwen3.5-397B-A17B', priority: 1 },
+      { providerId: 'openrouter', providerModelId: 'qwen/qwen3.5-397b-a17b', priority: 2 },
+    ],
   },
 
   // ---- Image Generation (via fal.ai) ----
@@ -331,6 +342,12 @@ export const PROVIDERS: ProviderDef[] = [
     id: 'together',
     name: 'Together AI',
     endpoint: 'https://api.together.xyz/v1',
+    requiresKey: true,
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    endpoint: 'https://openrouter.ai/api/v1',
     requiresKey: true,
   },
 ]
