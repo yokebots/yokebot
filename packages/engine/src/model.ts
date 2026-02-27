@@ -57,8 +57,8 @@ export interface CompletionResponse {
 
 // ---- Logical Model Catalog ----
 
-export type ModelType = 'chat' | 'image' | 'video' | '3d'
-export type ModelCategory = 'frontier' | 'efficient' | 'reasoning' | 'image' | 'video' | '3d' | 'local'
+export type ModelType = 'chat' | 'image' | 'video' | '3d' | 'stt' | 'audio' | 'embedding'
+export type ModelCategory = 'frontier' | 'efficient' | 'reasoning' | 'image' | 'video' | '3d' | 'local' | 'stt' | 'audio' | 'embedding'
 
 export interface BackendRoute {
   providerId: 'deepinfra' | 'fal' | 'ollama' | 'openai' | 'xai' | 'fireworks' | 'together' | 'openrouter'
@@ -258,15 +258,47 @@ export const MODEL_CATALOG: LogicalModel[] = [
     category: 'image',
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/firered-image-edit', priority: 1 }],
   },
+  {
+    id: 'qwen-multi-angles',
+    name: 'Qwen Multi-Angles',
+    description: 'Render any image from 96 camera angles — product photography, e-commerce multi-view',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/qwen-image-edit-2511-multiple-angles', priority: 1 }],
+  },
 
   // ---- Video Generation (via fal.ai) ----
   {
-    id: 'kling-3.0',
-    name: 'Kling 3.0',
-    description: 'Kuaishou video generation, 4K 60fps, native audio',
+    id: 'kling-o3',
+    name: 'Kling O3',
+    description: 'Omni video — editing, references, multi-shot + native audio & voice control',
     type: 'video',
     category: 'video',
-    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/kling-video/v3.0/standard/text-to-video', priority: 1 }],
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/kling-video/o3/standard/image-to-video', priority: 1 }],
+  },
+  {
+    id: 'kling-2.6-pro',
+    name: 'Kling 2.6 Pro',
+    description: 'Long-form video up to 2 minutes, 1080p/30fps, audio-synced',
+    type: 'video',
+    category: 'video',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/kling-video/v2.6/pro/image-to-video', priority: 1 }],
+  },
+  {
+    id: 'kling-3.0',
+    name: 'Kling 3.0 Pro',
+    description: 'Multi-shot cinematic sequences (up to 6 shots), character consistency',
+    type: 'video',
+    category: 'video',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/kling-video/v3.0/pro/text-to-video', priority: 1 }],
+  },
+  {
+    id: 'wan-2.6',
+    name: 'Wan 2.6',
+    description: 'Alibaba open-source video gen — cheapest quality option, 15s clips, native audio',
+    type: 'video',
+    category: 'video',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/wan/v2.6/image-to-video', priority: 1 }],
   },
   {
     id: 'seedance-2.0',
@@ -285,6 +317,44 @@ export const MODEL_CATALOG: LogicalModel[] = [
     type: '3d',
     category: '3d',
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/hunyuan-3d/v3.1/pro/image-to-3d', priority: 1 }],
+  },
+
+  // ---- Speech-to-Text ----
+  {
+    id: 'voxtral-mini-realtime',
+    name: 'Voxtral Mini 4B Realtime',
+    description: 'Real-time streaming speech-to-text, <500ms latency, 13 languages',
+    type: 'stt',
+    category: 'stt',
+    backends: [{ providerId: 'deepinfra', providerModelId: 'mistralai/Voxtral-Mini-4B-Realtime-2602', priority: 1 }],
+  },
+
+  // ---- Audio Generation (via fal.ai) ----
+  {
+    id: 'ace-step',
+    name: 'ACE-Step 1.5',
+    description: 'AI music generation — full songs with lyrics, any genre',
+    type: 'audio',
+    category: 'audio',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/ace-step', priority: 1 }],
+  },
+  {
+    id: 'mirelo-sfx',
+    name: 'Mirelo SFX',
+    description: 'Premium sound effects and foley — 70% win rate over competitors in blind tests',
+    type: 'audio',
+    category: 'audio',
+    backends: [{ providerId: 'fal', providerModelId: 'mirelo-ai/sfx-v1/video-to-audio', priority: 1 }],
+  },
+
+  // ---- Embeddings ----
+  {
+    id: 'qwen3-embedding-8b',
+    name: 'Qwen3 Embedding 8B',
+    description: 'MTEB #1 multilingual embeddings for semantic search and knowledge base',
+    type: 'embedding',
+    category: 'embedding',
+    backends: [{ providerId: 'deepinfra', providerModelId: 'Qwen/Qwen3-Embedding-8B', priority: 1 }],
   },
 ]
 

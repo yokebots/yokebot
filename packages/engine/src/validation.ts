@@ -153,6 +153,21 @@ export const UpdateRoleSchema = z.object({
   role: z.enum(['admin', 'member', 'viewer']),
 })
 
+// ---- Knowledge Base ----
+
+export const UploadKbDocumentSchema = z.object({
+  title: z.string().min(1).max(500).optional(),
+  fileName: z.string().min(1).max(255),
+  fileType: z.string().min(1).max(10),
+  content: z.string().min(1),  // base64-encoded file content
+})
+
+export const SearchKbSchema = z.object({
+  query: z.string().min(1).max(1000),
+  topK: z.number().int().min(1).max(20).optional(),
+  documentIds: z.array(z.string()).optional(),
+})
+
 // ---- Validation helper ----
 
 export function validate<T>(schema: z.ZodType<T>, data: unknown): T {

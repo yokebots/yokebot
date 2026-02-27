@@ -346,6 +346,153 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 6,
+    name: 'add_stt_audio_embedding_models',
+    async up(db: Db) {
+      const newModels = [
+        { id: 'voxtral-mini-realtime', credits: 5, type: 'stt', si: 5, sp: 4, ss: 5, desc: 'Real-time streaming speech-to-text, <500ms latency, 13 languages', tag: 'Live transcriptionist', pros: '["Real-time <500ms latency","Beats Whisper, GPT-4o, Gemini","Apache 2.0 license"]', cons: '["13 languages (not 100+)","Newer model"]', date: '2026-02-01', pop: 85 },
+        { id: 'ace-step', credits: 100, type: 'audio', si: 4, sp: 4, ss: 3, desc: 'AI music generation — full songs with lyrics, any genre', tag: 'In-house composer', pros: '["Full songs with lyrics","50+ languages","LoRA support"]', cons: '["Quality varies by seed","Vocal synthesis lacks nuance"]', date: '2026-01-28', pop: 55 },
+        { id: 'mirelo-sfx', credits: 75, type: 'audio', si: 4, sp: 5, ss: 3, desc: 'Premium sound effects and foley — 70% win rate in blind tests', tag: 'Sound designer', pros: '["70%+ blind test win rate","Video-synced foley","a16z backed"]', cons: '["More expensive than alternatives","Newer service"]', date: '2025-12-01', pop: 60 },
+        { id: 'qwen3-embedding-8b', credits: 1, type: 'embedding', si: 5, sp: 4, ss: 5, desc: 'MTEB #1 multilingual embeddings for semantic search and knowledge base', tag: 'Search indexer', pros: '["#1 on MTEB leaderboard","100+ languages","Dirt cheap"]', cons: '["Embedding only, not generative"]', date: '2025-06-01', pop: 75 },
+        { id: 'qwen-multi-angles', credits: 150, type: 'image', si: 4, sp: 4, ss: 3, desc: 'Render any image from 96 camera angles — product photography, e-commerce', tag: 'Product photographer', pros: '["96 precise camera poses","3D-consistent renders","Great for e-commerce"]', cons: '["Angle control only, not general editing"]', date: '2025-11-01', pop: 45 },
+        { id: 'kling-o3', credits: 2000, type: 'video', si: 5, sp: 5, ss: 2, desc: 'Omni video — editing, references, multi-shot + native audio & voice control', tag: 'Video director', pros: '["Edit existing videos with text","Character consistency","Native audio + voice"]', cons: '["Expensive","Slow (1-2 min/clip)"]', date: '2026-02-01', pop: 80 },
+        { id: 'kling-2.6-pro', credits: 1200, type: 'video', si: 4, sp: 5, ss: 2, desc: 'Long-form video up to 2 minutes, 1080p/30fps, audio-synced', tag: 'Video producer', pros: '["Up to 2 minutes","Audio synced","1080p/30fps"]', cons: '["Expensive"]', date: '2025-12-01', pop: 65 },
+        { id: 'wan-2.6', credits: 500, type: 'video', si: 4, sp: 4, ss: 3, desc: 'Alibaba open-source video gen — cheapest quality option, native audio', tag: 'Budget filmmaker', pros: '["Very affordable","Open source","Native audio","15s clips"]', cons: '["Lower quality than Kling"]', date: '2025-12-16', pop: 60 },
+      ]
+
+      for (const m of newModels) {
+        await db.run(
+          `INSERT INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT (model_id) DO NOTHING`,
+          [m.id, m.credits, m.type, m.si, m.sp, m.ss, m.desc, m.tag, m.pros, m.cons, m.date, m.pop],
+        )
+      }
+
+      // Seed skill credit costs for new skills
+      const newSkills = [
+        { name: 'generate_music', credits: 100 },
+        { name: 'generate_sound_fx', credits: 75 },
+        { name: 'embed_text', credits: 1 },
+        { name: 'render_video', credits: 50 },
+      ]
+
+      for (const s of newSkills) {
+        await db.run(
+          `INSERT INTO skill_credit_costs (skill_name, credits_per_use) VALUES ($1, $2) ON CONFLICT (skill_name) DO NOTHING`,
+          [s.name, s.credits],
+        )
+      }
+    },
+  },
+  {
+    version: 7,
+    name: 'add_knowledge_base_tables',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        // Enable pgvector extension
+        await db.run('CREATE EXTENSION IF NOT EXISTS vector')
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS kb_documents (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            l0_summary TEXT,
+            l1_overview TEXT,
+            chunk_count INTEGER DEFAULT 0,
+            error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS kb_chunks (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
+            team_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            token_count INTEGER DEFAULT 0,
+            embedding vector(4096),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS kb_memories (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            agent_id TEXT,
+            content TEXT NOT NULL,
+            source_channel_id TEXT,
+            embedding vector(4096),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_kb_documents_team ON kb_documents(team_id);
+          CREATE INDEX IF NOT EXISTS idx_kb_documents_status ON kb_documents(status);
+          CREATE INDEX IF NOT EXISTS idx_kb_chunks_team ON kb_chunks(team_id);
+          CREATE INDEX IF NOT EXISTS idx_kb_chunks_document ON kb_chunks(document_id);
+          CREATE INDEX IF NOT EXISTS idx_kb_memories_team ON kb_memories(team_id);
+          CREATE INDEX IF NOT EXISTS idx_kb_memories_agent ON kb_memories(agent_id);
+
+          CREATE INDEX IF NOT EXISTS idx_kb_chunks_embedding ON kb_chunks USING hnsw (embedding vector_cosine_ops);
+          CREATE INDEX IF NOT EXISTS idx_kb_memories_embedding ON kb_memories USING hnsw (embedding vector_cosine_ops);
+
+          ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE kb_chunks ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE kb_memories ENABLE ROW LEVEL SECURITY;
+        `)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS kb_documents (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            l0_summary TEXT,
+            l1_overview TEXT,
+            chunk_count INTEGER DEFAULT 0,
+            error TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE TABLE IF NOT EXISTS kb_chunks (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
+            team_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            token_count INTEGER DEFAULT 0,
+            embedding TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE TABLE IF NOT EXISTS kb_memories (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            agent_id TEXT,
+            content TEXT NOT NULL,
+            source_channel_id TEXT,
+            embedding TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_kb_documents_team ON kb_documents(team_id);
+          CREATE INDEX IF NOT EXISTS idx_kb_documents_status ON kb_documents(status);
+          CREATE INDEX IF NOT EXISTS idx_kb_chunks_team ON kb_chunks(team_id);
+          CREATE INDEX IF NOT EXISTS idx_kb_chunks_document ON kb_chunks(document_id);
+          CREATE INDEX IF NOT EXISTS idx_kb_memories_team ON kb_memories(team_id);
+          CREATE INDEX IF NOT EXISTS idx_kb_memories_agent ON kb_memories(agent_id);
+        `)
+      }
+    },
+  },
 ]
 
 /**

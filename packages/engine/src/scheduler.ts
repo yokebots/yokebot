@@ -128,6 +128,22 @@ function scheduleAgentWithOffset(db: Db, agent: Agent, offsetMs: number): void {
 }
 
 /**
+ * Immediately trigger an agent's heartbeat (bypasses normal interval).
+ * Used when an agent is @mentioned in chat to wake it up instantly.
+ */
+export async function triggerAgentNow(db: Db, agentId: string, teamId: string): Promise<void> {
+  const { getAgent } = await import('./agent.ts')
+  const agent = await getAgent(db, agentId)
+  if (!agent || agent.status !== 'running') return
+  if (agent.teamId !== teamId) return
+
+  // Cancel existing timer and re-schedule with zero offset (fires immediately)
+  unscheduleAgent(agentId)
+  scheduleAgentWithOffset(db, agent, 0)
+  console.log(`[scheduler] Immediately triggered agent "${agent.name}" via @mention`)
+}
+
+/**
  * Remove the heartbeat timer for an agent.
  */
 export function unscheduleAgent(agentId: string): void {

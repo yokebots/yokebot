@@ -18,7 +18,7 @@ import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
-import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages } from './chat.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions } from './chat.ts'
 import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
@@ -30,7 +30,8 @@ import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
 import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
 import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
-import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema } from './validation.ts'
+import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema } from './validation.ts'
+import { uploadDocument, listDocuments, getDocument, deleteDocument, getDocumentChunks, searchKb } from './knowledge-base.ts'
 import { listCredentials, setCredential, deleteCredential } from './credentials.ts'
 import { listServices } from './services.ts'
 import { listTemplates, getTemplate } from './templates.ts'
@@ -119,7 +120,7 @@ async function main() {
 
   // ===== Ownership verification helper =====
   // Prevents IDOR: verifies an object belongs to the requesting user's team
-  const OWNERSHIP_TABLES = new Set(['agents', 'tasks', 'goals', 'kpi_goals', 'approvals', 'chat_channels', 'sor_tables'])
+  const OWNERSHIP_TABLES = new Set(['agents', 'tasks', 'goals', 'kpi_goals', 'approvals', 'chat_channels', 'sor_tables', 'kb_documents'])
   async function verifyOwnership(table: string, id: string, teamId: string): Promise<boolean> {
     if (!OWNERSHIP_TABLES.has(table)) throw new Error(`verifyOwnership: unknown table "${table}"`)
     const row = await db.queryOne<{ team_id: string }>(`SELECT team_id FROM ${table} WHERE id = $1`, [id])
@@ -452,7 +453,26 @@ async function main() {
     if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
     const { senderType, senderId, content, taskId } = validate(SendChatMessageSchema, req.body)
     const msg = await sendMessage(db, req.params.channelId, senderType, senderId, content, taskId, teamId)
+    // Fire-and-forget mention processing (notifications + agent wake)
+    processMentions(db, teamId, req.params.channelId, msg).catch((err) =>
+      console.error('[chat] Mention processing error:', err),
+    )
     res.status(201).json(msg)
+  })
+
+  // Mention autocomplete data — returns agents, users, and KB documents for the @ dropdown
+  app.get('/api/chat/mentions', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const [agents, members, documents] = await Promise.all([
+      listAgents(db, teamId),
+      getTeamMembers(db, teamId),
+      listDocuments(db, teamId),
+    ])
+    res.json({
+      agents: agents.map((a) => ({ id: a.id, name: a.name, iconName: a.iconName, iconColor: a.iconColor, status: a.status })),
+      users: members.map((m) => ({ userId: m.userId, email: m.email })),
+      documents: documents.map((d) => ({ id: d.id, title: d.title, fileType: d.fileType })),
+    })
   })
 
   // ===== Workspace =====
@@ -475,6 +495,75 @@ async function main() {
     const result = writeFile(workspaceConfig, path, content, agentId)
     if (!result.success) return res.status(423).json({ error: result.error })
     res.json({ success: true })
+  })
+
+  // ===== Knowledge Base =====
+
+  app.post('/api/kb/documents', express.json({ limit: '15mb' }), async (req, res) => {
+    try {
+      const teamId = req.user!.activeTeamId!
+      const { fileName, fileType, content, title } = validate(UploadKbDocumentSchema, req.body)
+
+      // Decode base64 to check actual file size
+      const buffer = Buffer.from(content, 'base64')
+      if (buffer.length > 10 * 1024 * 1024) {
+        return res.status(400).json({ error: 'File too large. Maximum size is 10MB.' })
+      }
+
+      const doc = await uploadDocument(db, teamId, {
+        title,
+        fileName,
+        fileType,
+        fileSize: buffer.length,
+        contentBase64: content,
+      })
+      res.status(201).json(doc)
+    } catch (err) {
+      const status = (err as Error & { status?: number }).status ?? 500
+      res.status(status).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/kb/documents', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const docs = await listDocuments(db, teamId)
+    res.json(docs)
+  })
+
+  app.get('/api/kb/documents/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const doc = await getDocument(db, req.params.id, teamId)
+    if (!doc) return res.status(404).json({ error: 'Document not found' })
+    res.json(doc)
+  })
+
+  app.delete('/api/kb/documents/:id', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    const owns = await verifyOwnership('kb_documents', req.params.id, teamId)
+    if (!owns) return res.status(404).json({ error: 'Document not found' })
+    await deleteDocument(db, req.params.id, teamId)
+    res.json({ success: true })
+  })
+
+  app.post('/api/kb/search', async (req, res) => {
+    try {
+      const teamId = req.user!.activeTeamId!
+      const { query, topK, documentIds } = validate(SearchKbSchema, req.body)
+      const results = await searchKb(db, teamId, query, topK ?? 5, documentIds)
+      res.json(results)
+    } catch (err) {
+      const status = (err as Error & { status?: number }).status ?? 500
+      res.status(status).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/kb/documents/:id/chunks', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const doc = await getDocument(db, req.params.id, teamId)
+    if (!doc) return res.status(404).json({ error: 'Document not found' })
+    const chunks = await getDocumentChunks(db, req.params.id, teamId)
+    res.json({ chunks })
   })
 
   // ===== Source of Record =====

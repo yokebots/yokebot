@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent } from '@/lib/engine'
+import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, MentionCompletionData } from '@/lib/engine'
+import { MentionInput, renderMentionContent } from '@/components/MentionInput'
 
 const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 
 export function ChatPage() {
   const { channelId: paramChannelId } = useParams()
+  const navigate = useNavigate()
   const [channels, setChannels] = useState<ChatChannel[]>([])
   const [agents, setAgents] = useState<EngineAgent[]>([])
   const [activeChannelId, setActiveChannelId] = useState(paramChannelId ?? '')
@@ -15,6 +17,7 @@ export function ChatPage() {
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [newChannelName, setNewChannelName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [mentionCompletions, setMentionCompletions] = useState<MentionCompletionData | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelInputRef = useRef<HTMLInputElement>(null)
 
@@ -27,6 +30,13 @@ export function ChatPage() {
     } catch { /* offline */ }
   }
 
+  const loadMentionCompletions = async () => {
+    try {
+      const data = await engine.getMentionCompletions()
+      setMentionCompletions(data)
+    } catch { /* offline */ }
+  }
+
   const loadMessages = async () => {
     if (!activeChannelId) return
     try {
@@ -35,7 +45,7 @@ export function ChatPage() {
     } catch { /* offline */ }
   }
 
-  useEffect(() => { loadChannels() }, [])
+  useEffect(() => { loadChannels(); loadMentionCompletions() }, [])
   useEffect(() => { loadMessages() }, [activeChannelId])
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   useEffect(() => {
@@ -360,7 +370,13 @@ export function ChatPage() {
                     {agents.find((a) => a.id === msg.senderId)?.name ?? 'Agent'}
                   </p>
                 )}
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                <p className="text-sm whitespace-pre-wrap">
+                  {renderMentionContent(
+                    msg.content,
+                    (agentId) => openDm(agentId),
+                    (docId) => navigate(`/knowledge-base?doc=${docId}`),
+                  )}
+                </p>
 
                 {/* Inline media attachments */}
                 {msg.attachments && msg.attachments.length > 0 && (
@@ -382,17 +398,16 @@ export function ChatPage() {
         {activeChannelId && (
           <div className="border-t border-border-subtle bg-white p-4">
             <div className="flex gap-3">
-              <input
-                type="text"
+              <MentionInput
                 value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
+                onChange={setNewMessage}
+                onSubmit={sendMsg}
                 placeholder={`Message ${activeChannel ? (activeChannel.type === 'dm' ? getAgentName(activeChannel) : '#' + activeChannel.name) : ''}...`}
-                className="flex-1 rounded-lg border border-border-subtle px-4 py-2.5 text-sm focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
-                onKeyDown={(e) => e.key === 'Enter' && sendMsg()}
+                completions={mentionCompletions}
               />
               <button
                 onClick={sendMsg}
-                className="rounded-lg bg-forest-green px-4 py-2.5 text-white hover:bg-forest-green/90"
+                className="shrink-0 self-end rounded-lg bg-forest-green px-4 py-2.5 text-white hover:bg-forest-green/90"
               >
                 <span className="material-symbols-outlined text-[20px]">send</span>
               </button>

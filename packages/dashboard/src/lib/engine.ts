@@ -892,3 +892,91 @@ export function connectMeetingStream(
 
   return () => controller.abort()
 }
+
+// ===== Knowledge Base =====
+
+export interface KbDocument {
+  id: string
+  teamId: string
+  title: string
+  fileName: string
+  fileType: string
+  fileSize: number
+  status: 'pending' | 'processing' | 'ready' | 'failed'
+  l0Summary: string | null
+  l1Overview: string | null
+  chunkCount: number
+  error: string | null
+  createdAt: string
+}
+
+export interface KbSearchResult {
+  chunkId: string
+  documentId: string
+  documentTitle: string
+  content: string
+  score: number
+  l0Summary: string | null
+}
+
+export interface KbChunk {
+  id: string
+  content: string
+  chunkIndex: number
+  tokenCount: number
+}
+
+export const listKbDocuments = () =>
+  request<KbDocument[]>('/api/kb/documents')
+
+export const getKbDocument = (id: string) =>
+  request<KbDocument>(`/api/kb/documents/${id}`)
+
+export const deleteKbDocument = (id: string) =>
+  request<{ success: boolean }>(`/api/kb/documents/${id}`, { method: 'DELETE' })
+
+export const searchKb = (query: string, topK?: number) =>
+  request<KbSearchResult[]>('/api/kb/search', {
+    method: 'POST',
+    body: JSON.stringify({ query, topK }),
+  })
+
+export const getKbDocumentChunks = (id: string) =>
+  request<{ chunks: KbChunk[] }>(`/api/kb/documents/${id}/chunks`)
+
+export async function uploadKbDocument(file: File, title?: string): Promise<KbDocument> {
+  const base64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      // Strip data URL prefix: "data:application/pdf;base64,..."
+      const base64Data = result.includes(',') ? result.split(',')[1] : result
+      resolve(base64Data)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'txt'
+
+  return request<KbDocument>('/api/kb/documents', {
+    method: 'POST',
+    body: JSON.stringify({
+      fileName: file.name,
+      fileType: ext,
+      content: base64,
+      title,
+    }),
+  })
+}
+
+// ===== Mentions =====
+
+export interface MentionCompletionData {
+  agents: Array<{ id: string; name: string; iconName: string | null; iconColor: string | null; status: string }>
+  users: Array<{ userId: string; email: string }>
+  documents: Array<{ id: string; title: string; fileType: string }>
+}
+
+export const getMentionCompletions = () =>
+  request<MentionCompletionData>('/api/chat/mentions')

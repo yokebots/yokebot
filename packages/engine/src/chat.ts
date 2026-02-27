@@ -98,6 +98,74 @@ export async function getChannelMessages(db: Db, channelId: string, limit = 50, 
   return rows.map(rowToMessage).reverse()
 }
 
+// ---- Mention Processing ----
+
+const MENTION_REGEX = /@\[([^\]]+)\]\((agent|user|file):([^)]+)\)/g
+
+interface ParsedMention {
+  displayName: string
+  type: 'agent' | 'user' | 'file'
+  id: string
+}
+
+function parseMentions(content: string): ParsedMention[] {
+  const mentions: ParsedMention[] = []
+  let match
+  while ((match = MENTION_REGEX.exec(content)) !== null) {
+    mentions.push({
+      displayName: match[1],
+      type: match[2] as ParsedMention['type'],
+      id: match[3],
+    })
+  }
+  return mentions
+}
+
+/**
+ * Process @mentions in a message: send notifications and trigger agents.
+ * Call fire-and-forget after sendMessage().
+ */
+export async function processMentions(
+  db: Db,
+  teamId: string,
+  channelId: string,
+  message: ChatMessage,
+): Promise<void> {
+  const mentions = parseMentions(message.content)
+  if (mentions.length === 0) return
+
+  // Lazy imports to avoid circular deps
+  const { createNotification } = await import('./notifications.ts')
+  const { triggerAgentNow } = await import('./scheduler.ts')
+
+  for (const mention of mentions) {
+    try {
+      switch (mention.type) {
+        case 'agent':
+          // Notify the agent by triggering its heartbeat immediately
+          await triggerAgentNow(db, mention.id, teamId)
+          break
+
+        case 'user':
+          // Create a notification for the human user
+          await createNotification(
+            db, teamId, mention.id, 'mention',
+            `You were mentioned by ${message.senderType === 'agent' ? 'an agent' : 'a team member'}`,
+            message.content.slice(0, 200),
+            `/chat/channels/${channelId}`,
+          )
+          break
+
+        case 'file':
+          // File mentions are display-only — no notification needed
+          break
+      }
+    } catch (err) {
+      console.error(`[chat] Failed to process mention ${mention.type}:${mention.id}:`, err)
+    }
+  }
+}
+
 function rowToMessage(row: Record<string, unknown>): ChatMessage {
   let attachments: ChatAttachment[] = []
   if (row.attachments) {

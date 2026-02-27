@@ -43,6 +43,7 @@ export interface ToolContext {
   db: Db
   agentId: string
   teamId: string
+  channelId?: string
   workspaceConfig: WorkspaceConfig
   skillsDir: string
   skipCredits?: boolean
@@ -136,6 +137,16 @@ function getBuiltinTools(): ToolDef[] {
       rowId: { type: 'string', description: 'The row ID to update' },
       data: { type: 'object', description: 'Key-value pairs to update' },
     }, ['tableName', 'rowId', 'data']),
+
+    // Knowledge base search + memory
+    toolDef('search_knowledge_base', 'Search uploaded documents in the knowledge base for relevant information. Returns matching text chunks ranked by relevance.', {
+      query: { type: 'string', description: 'Search query — describe what information you need' },
+      topK: { type: 'number', description: 'Max results to return (default 5, max 20)' },
+    }, ['query']),
+
+    toolDef('remember', 'Save an important fact or learning to long-term memory. Use this to persist key insights from conversations for future reference.', {
+      content: { type: 'string', description: 'The fact, learning, or insight to remember' },
+    }, ['content']),
 
     // Media generation
     toolDef('generate_image', 'Generate an image using AI. Returns the URL of the generated image.', {
@@ -375,6 +386,26 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       } catch (err) {
         return `3D generation failed: ${(err as Error).message}`
       }
+    }
+
+    // ---- Knowledge Base ----
+    case 'search_knowledge_base': {
+      const { searchKb } = await import('./knowledge-base.ts')
+      const query = args.query as string
+      const topK = Math.min(Math.max((args.topK as number) || 5, 1), 20)
+      const results = await searchKb(ctx.db, ctx.teamId, query, topK)
+      if (results.length === 0) return 'No relevant documents found in the knowledge base.'
+      return results.map((r, i) =>
+        `[${i + 1}] "${r.documentTitle}" (score: ${r.score.toFixed(3)})\n${r.content.slice(0, 1000)}${r.content.length > 1000 ? '...' : ''}`
+      ).join('\n\n---\n\n')
+    }
+
+    case 'remember': {
+      const { addMemory } = await import('./knowledge-base.ts')
+      const content = args.content as string
+      if (content.length > 5000) return 'Error: Memory content too long (max 5000 characters).'
+      await addMemory(ctx.db, ctx.teamId, ctx.agentId, content, ctx.channelId)
+      return `Memory saved: "${content.slice(0, 100)}${content.length > 100 ? '...' : ''}"`
     }
 
     default: {

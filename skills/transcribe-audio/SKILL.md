@@ -1,18 +1,17 @@
 ---
 name: Transcribe Audio
-description: Convert audio and video to text with timestamps via OpenAI Whisper
+description: Real-time speech-to-text via Voxtral Mini 4B Realtime — <500ms latency, 13 languages
 tags: [Tools]
 source: yokebot
-version: 1.0.0
+version: 2.0.0
 author: YokeBot
-requiredCredentials: [openai]
 ---
 
 ## Instructions
 
-Use the `transcribe_audio` tool to convert audio or video files to text using OpenAI's Whisper API. Supports multiple languages and provides timestamps for segmentation.
+Use the `transcribe_audio` tool to convert audio or video files to text using Voxtral Mini 4B Realtime by Mistral AI. Supports 13 languages with real-time streaming capability and <500ms latency. Provides timestamps for segmentation.
 
-Provide the audio file URL or base64 data. Results include timestamps for easy navigation.
+Provide the audio file URL. Results include timestamps for easy navigation.
 
 ## Tools
 
