@@ -1,10 +1,56 @@
 import { useParams, Link } from 'react-router'
+import { useEffect, useRef } from 'react'
 import { docsContent, docsOrder } from '@/lib/docs-content'
+
+function useDocMeta(title: string, description: string) {
+  useEffect(() => {
+    document.title = `${title} — YokeBot Docs`
+    let meta = document.querySelector('meta[name="description"]') as HTMLMetaElement | null
+    if (!meta) {
+      meta = document.createElement('meta')
+      meta.name = 'description'
+      document.head.appendChild(meta)
+    }
+    meta.content = description
+
+    // Open Graph
+    const setOg = (property: string, content: string) => {
+      let el = document.querySelector(`meta[property="${property}"]`) as HTMLMetaElement | null
+      if (!el) {
+        el = document.createElement('meta')
+        el.setAttribute('property', property)
+        document.head.appendChild(el)
+      }
+      el.content = content
+    }
+    setOg('og:title', `${title} — YokeBot Docs`)
+    setOg('og:description', description)
+    setOg('og:type', 'article')
+    setOg('og:site_name', 'YokeBot')
+    setOg('og:url', window.location.href)
+
+    return () => {
+      document.title = 'YokeBot — GET YOKED'
+    }
+  }, [title, description])
+}
 
 export function DocsPage() {
   const { slug, section } = useParams()
   const fullSlug = section ? `${section}/${slug}` : (slug ?? 'getting-started')
   const doc = docsContent[fullSlug]
+
+  useDocMeta(
+    doc?.title ?? 'Page Not Found',
+    doc?.description ?? 'YokeBot documentation'
+  )
+
+  // Scroll to top on page change
+  const articleRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    // The scrollable container is the <main> parent
+    articleRef.current?.closest('main')?.scrollTo(0, 0)
+  }, [fullSlug])
 
   if (!doc) {
     return (
@@ -36,7 +82,7 @@ export function DocsPage() {
   const sectionLabel = doc.section
 
   return (
-    <article>
+    <article ref={articleRef}>
       {/* Breadcrumb */}
       <div className="mb-6 flex items-center gap-2 text-sm text-text-muted">
         <Link to="/docs" className="hover:text-forest-green transition-colors">Docs</Link>

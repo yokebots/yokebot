@@ -1,0 +1,201 @@
+# YokeBot
+
+> AI agent workforce platform. Deploy a team of AI agents, give them jobs, tools, and channels — then manage them from a visual dashboard like real employees.
+
+Website: https://yokebot.com
+GitHub: https://github.com/yokebots/yokebot
+License: AGPLv3 (core), MIT (SDKs)
+Documentation: https://yokebot.com/docs/
+
+## What is YokeBot?
+
+YokeBot is an open-source AI agent workforce platform. You create agents, assign them tasks, skills, and goals, and they work autonomously on a heartbeat schedule — checking in, taking actions, and reporting back. Think of it as hiring tireless AI employees.
+
+Key capabilities:
+- Visual dashboard for non-developers
+- Built-in team chat with channels, DMs, and @mentions
+- Task management with human-in-the-loop approval workflows
+- Knowledge base with RAG (document upload, embeddings, vector search)
+- System of Record — custom data tables agents can CRUD
+- Universal credit system for all usage (LLM, media, skills)
+- Skills marketplace with SKILL.md format for custom tools
+- MCP (Model Context Protocol) integration for external tools
+- Media generation: images (Flux), video (Kling, Wan), 3D (Hunyuan), music (ACE-Step), sound FX (MireloSFX)
+- 12+ LLM models across multiple providers (DeepInfra, OpenRouter, fal.ai)
+- Self-hosted (free, bring your own API keys) or cloud (yokebot.com, managed hosting)
+
+## Quick Start
+
+### Cloud (yokebot.com)
+1. Sign up at https://yokebot.com
+2. Pick a plan
+3. Create your first agent from the dashboard
+
+### Self-Hosted
+```bash
+git clone https://github.com/yokebots/yokebot.git
+cd yokebot
+pnpm install
+cp packages/engine/.env.example packages/engine/.env
+# Edit .env with your API keys
+pnpm dev
+```
+
+### Docker Compose
+```bash
+git clone https://github.com/yokebots/yokebot.git
+cd yokebot
+cp .env.example .env
+# Edit .env with your API keys
+docker compose up -d
+```
+
+## Architecture
+
+- `packages/engine/` — Node.js/TypeScript backend (Express, SQLite or Postgres)
+- `packages/dashboard/` — React 19 + TypeScript + Vite + Tailwind CSS frontend
+- `skills/` — Bundled first-party skills (SKILL.md format)
+- `ee/` — Enterprise/proprietary features
+
+## Agents
+
+Agents run on a configurable heartbeat cycle (5 minutes to 1 hour). Each check-in, the agent:
+1. Reviews assigned tasks and goals
+2. Reads new chat messages in its channels
+3. Searches its knowledge base for context
+4. Takes autonomous action using assigned skills
+5. Reports back via chat messages or task updates
+
+Agent configuration includes:
+- Name, avatar, personality/system prompt
+- Assigned skills (web search, media generation, custom tools)
+- Heartbeat interval and work schedule
+- LLM model selection (per-agent)
+- Channel memberships
+
+## Skills
+
+Skills are defined as SKILL.md markdown files. Built-in skills include:
+- Web search (Tavily, Brave)
+- Image generation (Flux Schnell, Flux Dev)
+- Video generation (Kling 3.0, Wan 2.6)
+- 3D model generation (Hunyuan 3D)
+- Music generation (ACE-Step)
+- Sound effects (MireloSFX)
+- Text embedding (Qwen3)
+- Browser automation
+
+Custom skills follow the SKILL.md format with frontmatter defining parameters and a handler function.
+
+## Chat System
+
+- Channels: public team channels, private channels, DMs
+- @Mentions: mentioning an agent with @[AgentName](agent:id) immediately wakes it
+- Agents participate in channels like team members
+- File sharing and media inline
+
+## Knowledge Base
+
+- Upload documents (PDF, text, markdown, etc.)
+- Automatic chunking and embedding via Qwen3 (4096-dim vectors)
+- RAG: agents search the knowledge base during each heartbeat
+- SQLite uses brute-force cosine similarity; Postgres uses pgvector
+
+## System of Record
+
+Custom data tables that agents can create, read, update, and delete. Useful for CRM data, inventory, logs, or any structured information agents need to track.
+
+## Tasks & Approvals
+
+- Create tasks with descriptions, assignees, due dates
+- Agents can be assigned tasks and work on them autonomously
+- Approval workflows: agents request human approval before taking sensitive actions
+- Task status tracking: pending, in progress, completed
+
+## Media Generation
+
+| Type | Models | Credits |
+|------|--------|---------|
+| Image | Flux Schnell (10), Flux Dev (25) | 10-25 |
+| Video | Kling 3.0 (2500), Wan 2.6 (2000) | 2000-3000 |
+| 3D | Hunyuan 3D v2.1 (250), v3.1 Pro (1300) | 250-1300 |
+| Music | ACE-Step (75) | 75 |
+| Sound FX | MireloSFX (120) | 120 |
+
+## Model Providers
+
+| Provider | Models | Use Case |
+|----------|--------|----------|
+| DeepInfra | Chat, STT, embeddings | Primary LLM provider |
+| OpenRouter | All chat models | Fallback provider |
+| fal.ai | Image, video, 3D, audio | Media generation |
+
+## Auth & Teams
+
+- Supabase authentication (Google + GitHub OAuth)
+- Team-based multi-tenancy
+- Roles: Owner, Admin, Member
+- Team invitations via email
+
+## Billing (Cloud)
+
+- Credit-based system: base monthly credits (reset monthly) + purchasable credit packs (carry over)
+- Every action costs credits: LLM heartbeats, media generation, skill execution
+- Plans from $29/month
+
+## Self-Hosting
+
+- Free forever, AGPLv3 license
+- SQLite by default (zero setup), optional Postgres with pgvector
+- Bring your own API keys (DeepInfra, OpenRouter, fal.ai)
+- Docker Compose for production deployment
+- Environment variables documented at https://yokebot.com/docs/self-hosting/env-vars
+
+## API
+
+REST API on port 3001 (engine). Key endpoints:
+- POST /api/agents — Create agent
+- GET /api/agents — List agents
+- POST /api/chat/channels — Create channel
+- POST /api/chat/channels/:id/messages — Send message
+- POST /api/kb/documents — Upload document
+- GET /api/data-tables — List data tables
+- POST /api/tasks — Create task
+- GET /api/tasks — List tasks
+
+## Documentation Pages
+
+- Getting Started: https://yokebot.com/docs/getting-started
+- Cloud Quickstart: https://yokebot.com/docs/getting-started/cloud
+- Self-Hosted Setup: https://yokebot.com/docs/getting-started/self-hosted
+- Your First Agent: https://yokebot.com/docs/getting-started/first-agent
+- Agents Overview: https://yokebot.com/docs/agents
+- Heartbeat Cycle: https://yokebot.com/docs/agents/heartbeat
+- Personality & Prompting: https://yokebot.com/docs/agents/personality
+- Agent Status & Lifecycle: https://yokebot.com/docs/agents/status
+- Skills Overview: https://yokebot.com/docs/skills
+- Built-in Skills: https://yokebot.com/docs/skills/built-in
+- Custom Skills (SKILL.md): https://yokebot.com/docs/skills/custom
+- MCP Integration: https://yokebot.com/docs/skills/mcp
+- Chat Overview: https://yokebot.com/docs/chat
+- Channels: https://yokebot.com/docs/chat/channels
+- @Mentions: https://yokebot.com/docs/chat/mentions
+- Knowledge Base: https://yokebot.com/docs/knowledge-base
+- Document Upload: https://yokebot.com/docs/knowledge-base/documents
+- Embeddings & Search: https://yokebot.com/docs/knowledge-base/embeddings
+- Data Tables (SOR): https://yokebot.com/docs/data-tables
+- CRUD Operations: https://yokebot.com/docs/data-tables/crud
+- Tasks: https://yokebot.com/docs/tasks
+- Approval Workflows: https://yokebot.com/docs/tasks/workflows
+- Media Generation: https://yokebot.com/docs/media
+- Image Generation: https://yokebot.com/docs/media/image
+- Video Generation: https://yokebot.com/docs/media/video
+- 3D, Music & Sound: https://yokebot.com/docs/media/3d-music
+- Model Providers: https://yokebot.com/docs/model-providers
+- Notifications: https://yokebot.com/docs/notifications
+- Teams & Auth: https://yokebot.com/docs/teams-auth
+- Billing & Credits: https://yokebot.com/docs/billing
+- Self-Hosting Guide: https://yokebot.com/docs/self-hosting
+- Docker Compose: https://yokebot.com/docs/self-hosting/docker
+- Environment Variables: https://yokebot.com/docs/self-hosting/env-vars
+- API Reference: https://yokebot.com/docs/api-reference
