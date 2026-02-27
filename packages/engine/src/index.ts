@@ -22,7 +22,7 @@ import { createChannel, listChannels, getDmChannel, getTaskThread, sendMessage, 
 import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
-import { detectOllama, setFallbackConfig, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS } from './model.ts'
+import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS } from './model.ts'
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
 import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam } from './teams.ts'
 import { authMiddleware } from './auth-middleware.ts'
@@ -38,6 +38,19 @@ const SKILLS_DIR = process.env.YOKEBOT_SKILLS_DIR ?? join(process.cwd(), '..', '
 async function main() {
   // Initialize database (async — picks SQLite or Postgres based on DATABASE_URL)
   const db = await createDb({ dataDir: DATA_DIR })
+
+  // Register hosted mode routing if enabled (reads API keys from env vars instead of DB)
+  if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
+    try {
+      // Dynamic import from /ee — outside engine rootDir, so use string variable to avoid tsc rootDir check
+      const eePath = '../../../ee/hosted-routing.ts'
+      const ee = await import(/* @vite-ignore */ eePath) as { hostedResolveModelConfig: typeof resolveModelConfig }
+      setHostedResolver(ee.hostedResolveModelConfig)
+      console.log('[engine] Hosted mode enabled — using env var routing')
+    } catch (err) {
+      console.error('[engine] Failed to load hosted routing module:', (err as Error).message)
+    }
+  }
 
   // Initialize workspace
   const workspaceConfig: WorkspaceConfig = { rootDir: WORKSPACE_DIR }
