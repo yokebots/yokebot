@@ -30,7 +30,7 @@ const settingsNav = [
 ]
 
 export function Sidebar() {
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
   const { activeTeam } = useTeam()
   const { collapsed, toggle, mobileOpen, closeMobile } = useSidebar()
   const [approvalCount, setApprovalCount] = useState(0)
@@ -193,7 +193,7 @@ export function Sidebar() {
         {/* User Profile */}
         {showLabels ? (
           <div className="border-t border-border-subtle p-4">
-            <div className="cursor-pointer rounded-xl border border-border-subtle bg-light-surface-alt p-3 transition-colors hover:border-border-strong">
+            <div className="rounded-xl border border-border-subtle bg-light-surface-alt p-3">
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
                   <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
@@ -206,16 +206,30 @@ export function Sidebar() {
                   </p>
                   <p className="truncate text-xs text-text-muted">{activeTeam?.role ? activeTeam.role.charAt(0).toUpperCase() + activeTeam.role.slice(1) : 'Member'}</p>
                 </div>
+                <button
+                  onClick={signOut}
+                  className="rounded-lg p-1.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
+                  title="Log out"
+                >
+                  <span className="material-symbols-outlined text-[18px]">logout</span>
+                </button>
               </div>
             </div>
           </div>
         ) : (
-          <div className="border-t border-border-subtle p-2 flex justify-center">
+          <div className="border-t border-border-subtle p-2 flex flex-col items-center gap-2">
             <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
               <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
                 {user?.email?.[0]?.toUpperCase() ?? 'U'}
               </div>
             </div>
+            <button
+              onClick={signOut}
+              className="rounded-lg p-1.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
+              title="Log out"
+            >
+              <span className="material-symbols-outlined text-[16px]">logout</span>
+            </button>
           </div>
         )}
       </aside>
