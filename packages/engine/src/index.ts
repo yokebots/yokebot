@@ -14,7 +14,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { createDb } from './db/index.ts'
 import { createAgent, listAgents, getAgent, updateAgent, deleteAgent, setAgentStatus } from './agent.ts'
-import { runReactLoop } from './runtime.ts'
+import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
@@ -251,7 +251,7 @@ async function main() {
     const dmChannel = await getDmChannel(db, agent.id, teamId)
     await sendMessage(db, dmChannel.id, 'human', 'user', body.message, undefined, teamId)
 
-    const systemPrompt = agent.systemPrompt ?? `You are ${agent.name}, an AI agent. Be helpful and concise.`
+    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
 
     try {
       const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)

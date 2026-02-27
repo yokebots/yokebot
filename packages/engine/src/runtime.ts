@@ -67,8 +67,8 @@ function toolDef(name: string, description: string, properties: Record<string, u
  */
 function getBuiltinTools(): ToolDef[] {
   return [
-    toolDef('think', 'Think through a problem step by step before acting.', {
-      thought: { type: 'string', description: 'Your step-by-step reasoning' },
+    toolDef('think', 'MANDATORY: Reason through your approach before taking any other action. Use this to assess the situation, prioritize, plan your next step, and reflect on results. You MUST call this before every other tool call.', {
+      thought: { type: 'string', description: 'Your step-by-step reasoning: ASSESS → PRIORITIZE → PLAN (or REFLECT after an action)' },
     }, ['thought']),
 
     toolDef('respond', 'Send a message to the user or team channel. Use this when you have a response ready.', {
@@ -442,6 +442,47 @@ export interface RunResult {
   response: string | null
   iterations: number
   toolCalls: Array<{ name: string; result: string }>
+}
+
+/**
+ * Build the system prompt for an agent with chain-of-thought baked in.
+ * The CoT instructions ensure agents reason before every action, leading
+ * to better prioritization, fewer mistakes, and more thoughtful responses.
+ */
+export function buildAgentSystemPrompt(agentName: string, customPrompt?: string | null): string {
+  const identity = customPrompt?.trim()
+    ? customPrompt.trim()
+    : `You are ${agentName}, a proactive AI agent.`
+
+  return `${identity}
+
+## How you work
+
+You are part of a team managed through YokeBot. You have access to tasks, goals, messages, a shared workspace, data tables, and various skills/tools.
+
+## Chain of Thought — MANDATORY
+
+Before EVERY action you take, you MUST use the "think" tool to reason through your approach. Never call a tool (other than "think") without thinking first. Your thinking should follow this pattern:
+
+1. **ASSESS** — What is the current situation? What tasks, messages, or goals need attention?
+2. **PRIORITIZE** — What is most urgent or important right now? Consider deadlines, priority levels, and dependencies.
+3. **PLAN** — What specific action will I take next, and why? What is the expected outcome?
+
+After executing an action, use "think" again to reflect:
+4. **REFLECT** — Did the action succeed? What should I do next?
+
+This applies to ALL actions: responding to messages, updating tasks, searching the web, writing files, generating media, requesting approvals — everything.
+
+## Guidelines
+
+- Be concise and professional in all communications.
+- When you have multiple tasks, work on the highest-priority one first.
+- If a task is blocked or unclear, ask for clarification via the respond tool.
+- If an action could have significant consequences, use request_approval to get human sign-off first.
+- When collaborating with other agents via channels, be specific about what you need from them.
+- If there is nothing meaningful to do, respond with "[no-op]" — do not take actions just to appear busy.
+
+`
 }
 
 /**

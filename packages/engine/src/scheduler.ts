@@ -4,21 +4,26 @@
  * Each agent has a heartbeat interval. On each beat the scheduler
  * checks: is there work to do? For proactive agents, it also asks
  * the agent to think about what SHOULD be done.
+ *
+ * Heartbeats are STAGGERED so agents on the same team don't all fire
+ * at once. This lets agents see each other's outputs and collaborate
+ * naturally, rather than all acting on stale state simultaneously.
  */
 
 import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
-import { runReactLoop } from './runtime.ts'
+import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
 import { getDmChannel, sendMessage } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
 import { getSubscription, isSubscriptionActive, getCreditBalance, getModelCreditCost } from './billing.ts'
+// import { listTasks } from './tasks.ts' // Reserved for future staleness detection
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
 interface SchedulerState {
-  timers: Map<string, ReturnType<typeof setInterval>>
+  timers: Map<string, ReturnType<typeof setTimeout>>
   running: boolean
   workspaceConfig: WorkspaceConfig | null
   skillsDir: string
@@ -32,7 +37,7 @@ const state: SchedulerState = {
 }
 
 /**
- * Start the scheduler. Registers a heartbeat timer for each running agent.
+ * Start the scheduler. Registers staggered heartbeat timers for each running agent.
  */
 export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, skillsDir?: string): Promise<void> {
   if (state.running) return
@@ -41,10 +46,24 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
   if (skillsDir) state.skillsDir = skillsDir
 
   const agents = await listAgents(db)
-  for (const agent of agents) {
-    if (agent.status === 'running') {
-      scheduleAgent(db, agent)
-    }
+  const running = agents.filter((a) => a.status === 'running')
+
+  // Group by team + heartbeat interval for staggering
+  const groups = new Map<string, Agent[]>()
+  for (const agent of running) {
+    const key = `${agent.teamId}:${agent.heartbeatSeconds}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(agent)
+  }
+
+  for (const [, group] of groups) {
+    const intervalMs = group[0].heartbeatSeconds * 1000
+    const staggerMs = Math.floor(intervalMs / group.length)
+
+    group.forEach((agent, index) => {
+      const offsetMs = index * staggerMs
+      scheduleAgentWithOffset(db, agent, offsetMs)
+    })
   }
 
   console.log(`[scheduler] Started with ${state.timers.size} agent(s)`)
@@ -55,7 +74,7 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
  */
 export function stopScheduler(): void {
   for (const [id, timer] of state.timers) {
-    clearInterval(timer)
+    clearTimeout(timer)
     state.timers.delete(id)
   }
   state.running = false
@@ -64,19 +83,48 @@ export function stopScheduler(): void {
 
 /**
  * Register a heartbeat timer for a specific agent.
+ * Calculates a stagger offset based on other agents on the same team.
  */
 export function scheduleAgent(db: Db, agent: Agent): void {
   // Clear existing timer if any
   unscheduleAgent(agent.id)
 
+  // Calculate stagger offset relative to existing timers on the same team
+  let sameTeamCount = 0
+  for (const [, ] of state.timers) {
+    sameTeamCount++ // approximate — the exact offset is best-effort
+  }
+
+  const intervalMs = agent.heartbeatSeconds * 1000
+  const offsetMs = (sameTeamCount * Math.floor(intervalMs / (sameTeamCount + 1))) % intervalMs
+
+  scheduleAgentWithOffset(db, agent, offsetMs)
+}
+
+/**
+ * Schedule an agent with a specific initial offset delay.
+ * After the initial offset, it loops on a regular interval.
+ */
+function scheduleAgentWithOffset(db: Db, agent: Agent, offsetMs: number): void {
+  unscheduleAgent(agent.id)
+
   const intervalMs = agent.heartbeatSeconds * 1000
 
-  const timer = setInterval(() => {
+  // First heartbeat after offset delay, then repeating
+  const startTimer = setTimeout(() => {
     void heartbeat(db, agent)
-  }, intervalMs)
 
-  state.timers.set(agent.id, timer)
-  console.log(`[scheduler] Agent "${agent.name}" heartbeat every ${agent.heartbeatSeconds}s`)
+    // Set up recurring heartbeat
+    const recurring = setInterval(() => {
+      void heartbeat(db, agent)
+    }, intervalMs)
+
+    // Store the interval timer (replacing the timeout reference)
+    state.timers.set(agent.id, recurring as unknown as ReturnType<typeof setTimeout>)
+  }, offsetMs)
+
+  state.timers.set(agent.id, startTimer)
+  console.log(`[scheduler] Agent "${agent.name}" heartbeat every ${agent.heartbeatSeconds}s (offset: ${Math.round(offsetMs / 1000)}s)`)
 }
 
 /**
@@ -85,10 +133,28 @@ export function scheduleAgent(db: Db, agent: Agent): void {
 export function unscheduleAgent(agentId: string): void {
   const timer = state.timers.get(agentId)
   if (timer) {
+    clearTimeout(timer)
     clearInterval(timer)
     state.timers.delete(agentId)
   }
 }
+
+// --- Future: staleness detection ---
+// Uncomment buildStalenessContext() and add to heartbeat prompt when ready to test.
+// See git history for the full implementation.
+//
+// async function buildStalenessContext(db: Db, agentId: string, teamId: string): Promise<string> {
+//   const tasks = await listTasks(db, { agentId, teamId, status: 'in_progress' })
+//   const now = Date.now()
+//   const lines: string[] = []
+//   for (const task of tasks) {
+//     const hours = (now - new Date(task.updatedAt).getTime()) / (1000 * 60 * 60)
+//     if (hours >= 2) {
+//       lines.push(`⚠ STALE: "${task.title}" in-progress ${Math.round(hours)}h with no update.`)
+//     }
+//   }
+//   return lines.join('\n')
+// }
 
 /**
  * Single heartbeat cycle for an agent.
@@ -124,13 +190,17 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     // Resolve logical model ID → real endpoint + API key
     const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
 
-    const systemPrompt = agent.systemPrompt ?? `You are ${agent.name}, a proactive AI agent.`
+    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
+
     const proactivePrompt = [
-      'This is a scheduled check-in. Review your current tasks, goals, and any pending items.',
-      'If there is nothing to do, simply respond with "[no-op]".',
-      'If you have suggestions, reminders, or proactive ideas, share them.',
-      'If you notice any pending approvals that need human attention, remind about them.',
-    ].join(' ')
+      'This is a scheduled check-in. Before taking any action, use the "think" tool to:',
+      '1. ASSESS — Review your current tasks, goals, messages, and pending approvals.',
+      '2. PRIORITIZE — Decide what is most important right now (urgent tasks first, then messages, then proactive ideas).',
+      '3. PLAN — Outline the specific actions you will take this check-in and in what order.',
+      'Then execute your plan step by step. Use "think" again before any complex or multi-step action.',
+      'If after assessment there is genuinely nothing to do, respond with "[no-op]".',
+      'If you notice pending approvals that need human attention, remind about them.',
+    ].join('\n')
 
     if (!state.workspaceConfig) {
       console.error(`[scheduler] No workspace config available for heartbeat`)
