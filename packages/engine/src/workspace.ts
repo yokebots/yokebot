@@ -7,7 +7,20 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync } from 'fs'
-import { join, relative } from 'path'
+import { join, relative, resolve } from 'path'
+
+/**
+ * Resolve a user-provided path and ensure it stays within the workspace root.
+ * Prevents path traversal attacks (e.g. ../../etc/passwd).
+ */
+function safePath(rootDir: string, userPath: string): string {
+  const resolved = resolve(rootDir, userPath)
+  const rel = relative(rootDir, resolved)
+  if (rel.startsWith('..') || resolve(rel) === rel) {
+    throw new Error('Path traversal denied')
+  }
+  return resolved
+}
 
 export interface WorkspaceConfig {
   rootDir: string  // e.g. ~/yokebot/workspace
@@ -46,7 +59,7 @@ export function initWorkspace(config: WorkspaceConfig): void {
  * List files in a directory (relative to workspace root).
  */
 export function listFiles(config: WorkspaceConfig, dirPath = ''): FileEntry[] {
-  const fullPath = join(config.rootDir, dirPath)
+  const fullPath = safePath(config.rootDir, dirPath)
   if (!existsSync(fullPath)) return []
 
   const entries = readdirSync(fullPath, { withFileTypes: true })
@@ -69,7 +82,7 @@ export function listFiles(config: WorkspaceConfig, dirPath = ''): FileEntry[] {
  * Read a file from the workspace.
  */
 export function readFile(config: WorkspaceConfig, filePath: string): string | null {
-  const fullPath = join(config.rootDir, filePath)
+  const fullPath = safePath(config.rootDir, filePath)
   if (!existsSync(fullPath)) return null
   return readFileSync(fullPath, 'utf-8')
 }
@@ -94,7 +107,7 @@ export function writeFile(
     }
   }
 
-  const fullPath = join(config.rootDir, filePath)
+  const fullPath = safePath(config.rootDir, filePath)
   const dir = fullPath.substring(0, fullPath.lastIndexOf('/'))
   mkdirSync(dir, { recursive: true })
   writeFileSync(fullPath, content, 'utf-8')

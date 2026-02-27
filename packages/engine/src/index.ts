@@ -6,8 +6,10 @@
  */
 
 import 'dotenv/config'
-import express from 'express'
+import express, { type Request, type Response, type NextFunction } from 'express'
 import cors from 'cors'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
 import { homedir } from 'os'
 import { join } from 'path'
 import { createDb } from './db/index.ts'
@@ -24,6 +26,9 @@ import { detectOllama, setFallbackConfig, resolveModelConfig, getAvailableModels
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
 import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam } from './teams.ts'
 import { authMiddleware } from './auth-middleware.ts'
+import { createTeamMiddleware, requireRole } from './team-middleware.ts'
+import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam } from './notifications.ts'
+import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, AddMemberSchema, UpdateRoleSchema } from './validation.ts'
 
 const PORT = Number(process.env.PORT ?? process.env.YOKEBOT_PORT ?? 3001)
 const DATA_DIR = process.env.YOKEBOT_DATA_DIR ?? join(homedir(), '.yokebot')
@@ -40,9 +45,42 @@ async function main() {
 
   // Create Express app
   const app = express()
-  app.use(cors())
-  app.use(express.json())
+
+  // Security headers
+  app.use(helmet())
+
+  // CORS — restrict to known origins in production
+  const CORS_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
+    ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((s) => s.trim())
+    : ['http://localhost:5173', 'http://localhost:3000']
+  app.use(cors({ origin: CORS_ORIGINS, credentials: true }))
+
+  // Body size limit
+  app.use(express.json({ limit: '1mb' }))
+
+  // Rate limiting — general
+  app.use(rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later' },
+  }))
+
+  // Stricter rate limit for chat completions (LLM calls are expensive)
+  const chatLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Chat rate limit exceeded, please wait' },
+  })
+
+  // Auth
   app.use(authMiddleware)
+
+  // Team context — resolves X-Team-Id header, verifies membership
+  app.use(createTeamMiddleware(db))
 
   // ===== Health =====
 
@@ -59,8 +97,9 @@ async function main() {
 
   // ===== Agents =====
 
-  app.get('/api/agents', async (_req, res) => {
-    res.json(await listAgents(db))
+  app.get('/api/agents', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    res.json(await listAgents(db, teamId))
   })
 
   app.get('/api/agents/:id', async (req, res) => {
@@ -70,17 +109,10 @@ async function main() {
   })
 
   app.post('/api/agents', async (req, res) => {
-    const body = req.body as {
-      name: string
-      department?: string
-      systemPrompt?: string
-      modelEndpoint?: string
-      modelName?: string
-      proactive?: boolean
-      heartbeatSeconds?: number
-    }
+    const teamId = req.user!.activeTeamId!
+    const body = validate(CreateAgentSchema, req.body)
 
-    const agent = await createAgent(db, {
+    const agent = await createAgent(db, teamId, {
       name: body.name,
       department: body.department,
       systemPrompt: body.systemPrompt,
@@ -92,19 +124,22 @@ async function main() {
       heartbeatSeconds: body.heartbeatSeconds,
     })
 
-    await logActivity(db, 'agent_created', agent.id, `Agent "${agent.name}" created`)
+    await logActivity(db, 'agent_created', agent.id, `Agent "${agent.name}" created`, undefined, teamId)
     res.status(201).json(agent)
   })
 
   app.patch('/api/agents/:id', async (req, res) => {
-    const agent = await updateAgent(db, req.params.id, req.body as Record<string, unknown>)
+    const body = validate(UpdateAgentSchema, req.body)
+    const agent = await updateAgent(db, req.params.id, body as Record<string, unknown>)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
     res.json(agent)
   })
 
   app.delete('/api/agents/:id', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
     const agent = await getAgent(db, req.params.id)
-    await logActivity(db, 'agent_deleted', req.params.id, `Agent "${agent?.name ?? req.params.id}" deleted`)
+    await logActivity(db, 'agent_deleted', req.params.id, `Agent "${agent?.name ?? req.params.id}" deleted`, undefined, teamId)
     await deleteAgent(db, req.params.id)
     unscheduleAgent(req.params.id)
     res.status(204).end()
@@ -112,35 +147,37 @@ async function main() {
 
   // Start/stop agent
   app.post('/api/agents/:id/start', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
     const agent = await getAgent(db, req.params.id)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
     await setAgentStatus(db, agent.id, 'running')
     scheduleAgent(db, { ...agent, status: 'running' })
-    await logActivity(db, 'agent_started', agent.id, `Agent "${agent.name}" started`)
+    await logActivity(db, 'agent_started', agent.id, `Agent "${agent.name}" started`, undefined, teamId)
     res.json({ ...agent, status: 'running' })
   })
 
   app.post('/api/agents/:id/stop', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
     const agent = await getAgent(db, req.params.id)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
     await setAgentStatus(db, agent.id, 'stopped')
     unscheduleAgent(agent.id)
-    await logActivity(db, 'agent_stopped', agent.id, `Agent "${agent.name}" stopped`)
+    await logActivity(db, 'agent_stopped', agent.id, `Agent "${agent.name}" stopped`, undefined, teamId)
     res.json({ ...agent, status: 'stopped' })
   })
 
   // ===== Chat with Agent (ReAct loop) =====
 
-  app.post('/api/agents/:id/chat', async (req, res) => {
-    const agent = await getAgent(db, req.params.id)
+  app.post('/api/agents/:id/chat', chatLimiter, async (req: Request, res: Response) => {
+    const teamId = req.user!.activeTeamId!
+    const agent = await getAgent(db, req.params.id as string)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
 
-    const { message } = req.body as { message: string }
-    if (!message) return res.status(400).json({ error: 'Message is required' })
+    const body = validate(ChatWithAgentSchema, req.body)
 
     // Store user message in DM channel
-    const dmChannel = await getDmChannel(db, agent.id)
-    await sendMessage(db, dmChannel.id, 'human', 'user', message)
+    const dmChannel = await getDmChannel(db, agent.id, teamId)
+    await sendMessage(db, dmChannel.id, 'human', 'user', body.message, undefined, teamId)
 
     const systemPrompt = agent.systemPrompt ?? `You are ${agent.name}, an AI agent. Be helpful and concise.`
 
@@ -149,7 +186,8 @@ async function main() {
       const result = await runReactLoop(
         db,
         agent.id,
-        message,
+        teamId,
+        body.message,
         modelConfig,
         systemPrompt,
         workspaceConfig,
@@ -158,7 +196,7 @@ async function main() {
 
       // Store agent response in DM channel
       if (result.response) {
-        await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response)
+        await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response, undefined, teamId)
       }
 
       res.json(result)
@@ -170,32 +208,39 @@ async function main() {
 
   // ===== Approvals =====
 
-  app.get('/api/approvals', async (_req, res) => {
-    res.json(await listPendingApprovals(db))
+  app.get('/api/approvals', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    res.json(await listPendingApprovals(db, teamId))
   })
 
-  app.get('/api/approvals/count', async (_req, res) => {
-    res.json({ count: await countPendingApprovals(db) })
+  app.get('/api/approvals/count', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    res.json({ count: await countPendingApprovals(db, teamId) })
   })
 
   app.post('/api/approvals', async (req, res) => {
-    const body = req.body as { agentId: string; actionType: string; actionDetail: string; riskLevel: string }
-    const approval = await createApproval(db, body.agentId, body.actionType, body.actionDetail, body.riskLevel as 'low' | 'medium' | 'high' | 'critical')
+    const teamId = req.user!.activeTeamId!
+    const body = validate(CreateApprovalSchema, req.body)
+    const approval = await createApproval(db, teamId, body.agentId, body.actionType, body.actionDetail, body.riskLevel)
+    // Notify team about new approval
+    void notifyTeam(db, teamId, 'approval_needed', `Approval needed: ${body.actionType}`, body.actionDetail.slice(0, 200), '/approvals')
     res.status(201).json(approval)
   })
 
   app.post('/api/approvals/:id/resolve', async (req, res) => {
-    const { status } = req.body as { status: 'approved' | 'rejected' }
+    const teamId = req.user!.activeTeamId!
+    const { status } = validate(ResolveApprovalSchema, req.body)
     const approval = await resolveApproval(db, req.params.id, status)
     if (!approval) return res.status(404).json({ error: 'Approval not found' })
-    await logActivity(db, 'approval_resolved', approval.agentId, `Approval ${status}: ${approval.actionType} — ${approval.actionDetail.slice(0, 100)}`, { approvalId: approval.id, status })
+    await logActivity(db, 'approval_resolved', approval.agentId, `Approval ${status}: ${approval.actionType} — ${approval.actionDetail.slice(0, 100)}`, { approvalId: approval.id, status }, teamId)
     res.json(approval)
   })
 
   // ===== Tasks (Mission Control) =====
 
   app.get('/api/tasks', async (req, res) => {
-    const filters: Record<string, unknown> = {}
+    const teamId = req.user!.activeTeamId!
+    const filters: Record<string, unknown> = { teamId }
     if (req.query.status) filters.status = req.query.status
     if (req.query.agentId) filters.agentId = req.query.agentId
     if (req.query.parentId === 'null') filters.parentId = null
@@ -210,13 +255,15 @@ async function main() {
   })
 
   app.post('/api/tasks', async (req, res) => {
-    const body = req.body as { title: string; description?: string; priority?: string; assignedAgentId?: string; parentTaskId?: string; deadline?: string }
-    const task = await createTask(db, body.title, { ...body, priority: body.priority as 'low' | 'medium' | 'high' | 'urgent' | undefined })
+    const teamId = req.user!.activeTeamId!
+    const body = validate(CreateTaskSchema, req.body)
+    const task = await createTask(db, teamId, body.title, body)
     res.status(201).json(task)
   })
 
   app.patch('/api/tasks/:id', async (req, res) => {
-    const task = await updateTask(db, req.params.id, req.body as Record<string, unknown>)
+    const body = validate(UpdateTaskSchema, req.body)
+    const task = await updateTask(db, req.params.id, body as Record<string, unknown>)
     if (!task) return res.status(404).json({ error: 'Task not found' })
     res.json(task)
   })
@@ -228,23 +275,27 @@ async function main() {
 
   // ===== Chat =====
 
-  app.get('/api/chat/channels', async (_req, res) => {
-    res.json(await listChannels(db))
+  app.get('/api/chat/channels', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    res.json(await listChannels(db, teamId))
   })
 
   app.post('/api/chat/channels', async (req, res) => {
-    const { name, type } = req.body as { name: string; type: string }
-    const channel = await createChannel(db, name, type as 'dm' | 'group' | 'task_thread')
+    const teamId = req.user!.activeTeamId!
+    const { name, type } = validate(CreateChannelSchema, req.body)
+    const channel = await createChannel(db, teamId, name, type)
     res.status(201).json(channel)
   })
 
   app.get('/api/chat/dm/:agentId', async (req, res) => {
-    const channel = await getDmChannel(db, req.params.agentId)
+    const teamId = req.user!.activeTeamId!
+    const channel = await getDmChannel(db, req.params.agentId, teamId)
     res.json(channel)
   })
 
   app.get('/api/chat/task/:taskId', async (req, res) => {
-    const channel = await getTaskThread(db, req.params.taskId)
+    const teamId = req.user!.activeTeamId!
+    const channel = await getTaskThread(db, req.params.taskId, teamId)
     res.json(channel)
   })
 
@@ -255,8 +306,9 @@ async function main() {
   })
 
   app.post('/api/chat/channels/:channelId/messages', async (req, res) => {
-    const { senderType, senderId, content, taskId } = req.body as { senderType: string; senderId: string; content: string; taskId?: string }
-    const msg = await sendMessage(db, req.params.channelId, senderType as 'human' | 'agent' | 'system', senderId, content, taskId)
+    const teamId = req.user!.activeTeamId!
+    const { senderType, senderId, content, taskId } = validate(SendChatMessageSchema, req.body)
+    const msg = await sendMessage(db, req.params.channelId, senderType, senderId, content, taskId, teamId)
     res.status(201).json(msg)
   })
 
@@ -276,7 +328,7 @@ async function main() {
   })
 
   app.put('/api/workspace/file', (req, res) => {
-    const { path, content, agentId } = req.body as { path: string; content: string; agentId: string }
+    const { path, content, agentId } = validate(WriteFileSchema, req.body)
     const result = writeFile(workspaceConfig, path, content, agentId)
     if (!result.success) return res.status(423).json({ error: result.error })
     res.json({ success: true })
@@ -284,8 +336,9 @@ async function main() {
 
   // ===== Source of Record =====
 
-  app.get('/api/sor/tables', async (_req, res) => {
-    const tables = await listSorTables(db)
+  app.get('/api/sor/tables', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const tables = await listSorTables(db, teamId)
     const result = []
     for (const t of tables) {
       const rows = await listSorRows(db, t.id)
@@ -296,8 +349,9 @@ async function main() {
   })
 
   app.post('/api/sor/tables', async (req, res) => {
-    const { name, columns } = req.body as { name: string; columns?: Array<{ name: string; colType?: string }> }
-    const table = await createSorTable(db, name)
+    const teamId = req.user!.activeTeamId!
+    const { name, columns } = validate(CreateSorTableSchema, req.body)
+    const table = await createSorTable(db, teamId, name)
     if (columns) {
       for (const col of columns) await addSorColumn(db, table.id, col.name, col.colType)
     }
@@ -333,7 +387,7 @@ async function main() {
   })
 
   app.patch('/api/sor/tables/:id/permissions', async (req, res) => {
-    const { agentId, canRead, canWrite } = req.body as { agentId: string; canRead: boolean; canWrite: boolean }
+    const { agentId, canRead, canWrite } = validate(UpdateSorPermissionSchema, req.body)
     await setSorPermission(db, agentId, req.params.id, canRead, canWrite)
     res.json(await getSorPermissions(db, req.params.id))
   })
@@ -364,7 +418,7 @@ async function main() {
   app.patch('/api/models/providers/:id', async (req, res) => {
     const provider = PROVIDERS.find((p) => p.id === req.params.id)
     if (!provider) return res.status(404).json({ error: 'Unknown provider' })
-    const { apiKey, enabled } = req.body as { apiKey?: string; enabled?: boolean }
+    const { apiKey, enabled } = validate(UpdateProviderSchema, req.body)
     const stored = (await listStoredProviders(db)).find((s) => s.id === req.params.id)
     await upsertProvider(db, req.params.id, apiKey ?? stored?.apiKey ?? '', enabled ?? stored?.enabled ?? false)
     res.json({ id: req.params.id, enabled: enabled ?? stored?.enabled ?? false, hasKey: (apiKey ?? stored?.apiKey ?? '').length > 0 })
@@ -373,7 +427,8 @@ async function main() {
   // ===== Activity Log =====
 
   app.get('/api/activity', async (req, res) => {
-    const filters: { agentId?: string; eventType?: string; limit?: number; before?: number } = {}
+    const teamId = req.user!.activeTeamId!
+    const filters: { agentId?: string; eventType?: string; limit?: number; before?: number; teamId?: string } = { teamId }
     if (req.query.agentId) filters.agentId = req.query.agentId as string
     if (req.query.eventType) filters.eventType = req.query.eventType as string
     if (req.query.limit) filters.limit = Number(req.query.limit)
@@ -382,8 +437,9 @@ async function main() {
   })
 
   app.get('/api/activity/count', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
     const agentId = req.query.agentId as string | undefined
-    res.json({ count: await countActivity(db, agentId) })
+    res.json({ count: await countActivity(db, agentId, teamId) })
   })
 
   // ===== Skills =====
@@ -403,8 +459,7 @@ async function main() {
   app.post('/api/agents/:id/skills', async (req, res) => {
     const agent = await getAgent(db, req.params.id)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
-    const { skillName } = req.body as { skillName: string }
-    if (!skillName) return res.status(400).json({ error: 'skillName is required' })
+    const { skillName } = validate(InstallSkillSchema, req.body)
     await installSkill(db, agent.id, skillName)
     res.status(201).json({ agentId: agent.id, skillName, installed: true })
   })
@@ -427,8 +482,7 @@ async function main() {
   })
 
   app.post('/api/teams', async (req, res) => {
-    const { name } = req.body as { name: string }
-    if (!name) return res.status(400).json({ error: 'name is required' })
+    const { name } = validate(CreateTeamSchema, req.body)
     const team = await createTeam(db, name)
     // Auto-add creator as admin
     if (req.user?.id) {
@@ -439,6 +493,7 @@ async function main() {
   })
 
   app.delete('/api/teams/:id', async (req, res) => {
+    // Team routes are exempt from team middleware, so check membership directly
     const team = await getTeam(db, req.params.id)
     if (!team) return res.status(404).json({ error: 'Team not found' })
     await deleteTeam(db, req.params.id)
@@ -454,16 +509,14 @@ async function main() {
   app.post('/api/teams/:id/members', async (req, res) => {
     const team = await getTeam(db, req.params.id)
     if (!team) return res.status(404).json({ error: 'Team not found' })
-    const { userId, email, role } = req.body as { userId: string; email: string; role?: string }
-    if (!userId || !email) return res.status(400).json({ error: 'userId and email are required' })
+    const { userId, email, role } = validate(AddMemberSchema, req.body)
     const member = await addMember(db, team.id, userId, email, role)
     await logActivity(db, 'member_added', null, `${email} added to team "${team.name}"`)
     res.status(201).json(member)
   })
 
   app.patch('/api/teams/:id/members/:userId', async (req, res) => {
-    const { role } = req.body as { role: string }
-    if (!role) return res.status(400).json({ error: 'role is required' })
+    const { role } = validate(UpdateRoleSchema, req.body)
     const member = await updateMemberRole(db, req.params.id, req.params.userId, role)
     if (!member) return res.status(404).json({ error: 'Member not found' })
     res.json(member)
@@ -472,6 +525,54 @@ async function main() {
   app.delete('/api/teams/:id/members/:userId', async (req, res) => {
     await removeMember(db, req.params.id, req.params.userId)
     res.status(204).end()
+  })
+
+  // ===== Notifications (cross-team, uses user_id) =====
+
+  app.get('/api/notifications', async (req, res) => {
+    const userId = req.user!.id
+    const teamId = req.query.teamId as string | undefined
+    const limit = req.query.limit ? Number(req.query.limit) : undefined
+    const before = req.query.before as string | undefined
+    res.json(await listNotifications(db, userId, { limit, before, teamId }))
+  })
+
+  app.get('/api/notifications/count', async (req, res) => {
+    const userId = req.user!.id
+    res.json({ count: await countUnread(db, userId) })
+  })
+
+  app.post('/api/notifications/:id/read', async (req, res) => {
+    await markRead(db, req.params.id, req.user!.id)
+    res.json({ success: true })
+  })
+
+  app.post('/api/notifications/read-all', async (req, res) => {
+    const teamId = req.query.teamId as string | undefined
+    await markAllRead(db, req.user!.id, teamId)
+    res.json({ success: true })
+  })
+
+  app.get('/api/notifications/preferences', async (req, res) => {
+    res.json(await listPreferences(db, req.user!.id))
+  })
+
+  app.patch('/api/notifications/preferences', async (req, res) => {
+    const { teamId, inAppEnabled, emailEnabled, muted } = req.body as {
+      teamId: string; inAppEnabled?: boolean; emailEnabled?: boolean; muted?: boolean
+    }
+    if (!teamId) return res.status(400).json({ error: 'teamId is required' })
+    const pref = await setPreference(db, req.user!.id, teamId, { inAppEnabled, emailEnabled, muted })
+    res.json(pref)
+  })
+
+  // ===== Global Error Handler =====
+
+  app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
+    const status = err.status ?? 500
+    const message = status < 500 ? err.message : 'Internal server error'
+    if (status >= 500) console.error('[engine] Unhandled error:', err)
+    res.status(status).json({ error: message })
   })
 
   // ===== Start server =====

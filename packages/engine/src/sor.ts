@@ -40,9 +40,9 @@ export interface SorPermission {
 
 // ---- Tables ----
 
-export async function createSorTable(db: Db, name: string): Promise<SorTable> {
+export async function createSorTable(db: Db, teamId: string, name: string): Promise<SorTable> {
   const id = randomUUID()
-  await db.run('INSERT INTO sor_tables (id, name) VALUES ($1, $2)', [id, name])
+  await db.run('INSERT INTO sor_tables (id, team_id, name) VALUES ($1, $2, $3)', [id, teamId, name])
   return (await getSorTable(db, id))!
 }
 
@@ -63,7 +63,11 @@ export async function getSorTableByName(db: Db, name: string): Promise<SorTable 
   return { id: row.id as string, name: row.name as string, createdAt: row.created_at as string }
 }
 
-export async function listSorTables(db: Db): Promise<SorTable[]> {
+export async function listSorTables(db: Db, teamId?: string): Promise<SorTable[]> {
+  if (teamId) {
+    const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_tables WHERE team_id = $1 ORDER BY created_at DESC', [teamId])
+    return rows.map((r) => ({ id: r.id as string, name: r.name as string, createdAt: r.created_at as string }))
+  }
   const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_tables ORDER BY created_at DESC')
   return rows.map((r) => ({ id: r.id as string, name: r.name as string, createdAt: r.created_at as string }))
 }

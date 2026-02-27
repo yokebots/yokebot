@@ -2,6 +2,9 @@ import { NavLink } from 'react-router'
 import { useAuth } from '@/lib/auth'
 import { useEffect, useState } from 'react'
 import * as engine from '@/lib/engine'
+import TeamSwitcher from './TeamSwitcher'
+import NotificationBell from './NotificationBell'
+import { useTeam } from '@/lib/team-context'
 
 const mainNav = [
   { to: '/dashboard', icon: 'dashboard', label: 'Dashboard' },
@@ -25,26 +28,21 @@ const settingsNav = [
 
 export function Sidebar() {
   const { user } = useAuth()
+  const { activeTeam } = useTeam()
   const [approvalCount, setApprovalCount] = useState(0)
-  const [userRole, setUserRole] = useState('Admin')
 
   useEffect(() => {
+    if (!activeTeam) return
     const load = async () => {
       try {
-        const [approvalData, teams] = await Promise.all([
-          engine.approvalCount(),
-          engine.listTeams(),
-        ])
+        const approvalData = await engine.approvalCount()
         setApprovalCount(approvalData.count)
-        if (teams.length > 0 && teams[0].role) {
-          setUserRole(teams[0].role.charAt(0).toUpperCase() + teams[0].role.slice(1))
-        }
       } catch { /* engine offline */ }
     }
     load()
     const interval = setInterval(load, 10000)
     return () => clearInterval(interval)
-  }, [])
+  }, [activeTeam?.id])
 
   return (
     <aside className="flex w-64 flex-col border-r border-border-subtle bg-light-surface h-full fixed md:relative z-20">
@@ -53,7 +51,13 @@ export function Sidebar() {
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-forest-green text-white shadow-soft">
           <span className="text-lg">🐂</span>
         </div>
-        <span className="font-display text-lg font-bold tracking-tight text-text-main">YokeBot</span>
+        <span className="flex-1 font-display text-lg font-bold tracking-tight text-text-main">YokeBot</span>
+        <NotificationBell />
+      </div>
+
+      {/* Team Switcher */}
+      <div className="px-4 py-3 border-b border-border-subtle">
+        <TeamSwitcher />
       </div>
 
       {/* Navigation */}
@@ -144,7 +148,7 @@ export function Sidebar() {
               <p className="truncate text-sm font-bold text-text-main">
                 {user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User'}
               </p>
-              <p className="truncate text-xs text-text-muted">{userRole}</p>
+              <p className="truncate text-xs text-text-muted">{activeTeam?.role ? activeTeam.role.charAt(0).toUpperCase() + activeTeam.role.slice(1) : 'Member'}</p>
             </div>
           </div>
         </div>

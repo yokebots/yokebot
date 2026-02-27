@@ -13,9 +13,9 @@ export interface ChatMessage { id: number; channelId: string; senderType: Sender
 
 // ---- Channels ----
 
-export async function createChannel(db: Db, name: string, type: ChannelType): Promise<ChatChannel> {
+export async function createChannel(db: Db, teamId: string, name: string, type: ChannelType): Promise<ChatChannel> {
   const id = randomUUID()
-  await db.run('INSERT INTO chat_channels (id, name, type) VALUES ($1, $2, $3)', [id, name, type])
+  await db.run('INSERT INTO chat_channels (id, team_id, name, type) VALUES ($1, $2, $3, $4)', [id, teamId, name, type])
   return (await getChannel(db, id))!
 }
 
@@ -25,35 +25,39 @@ export async function getChannel(db: Db, id: string): Promise<ChatChannel | null
   return { id: row.id as string, name: row.name as string, type: row.type as ChannelType, createdAt: row.created_at as string }
 }
 
-export async function listChannels(db: Db): Promise<ChatChannel[]> {
+export async function listChannels(db: Db, teamId?: string): Promise<ChatChannel[]> {
+  if (teamId) {
+    const rows = await db.query<Record<string, unknown>>('SELECT * FROM chat_channels WHERE team_id = $1 ORDER BY created_at DESC', [teamId])
+    return rows.map((row) => ({ id: row.id as string, name: row.name as string, type: row.type as ChannelType, createdAt: row.created_at as string }))
+  }
   const rows = await db.query<Record<string, unknown>>('SELECT * FROM chat_channels ORDER BY created_at DESC')
   return rows.map((row) => ({ id: row.id as string, name: row.name as string, type: row.type as ChannelType, createdAt: row.created_at as string }))
 }
 
-export async function getDmChannel(db: Db, agentId: string): Promise<ChatChannel> {
+export async function getDmChannel(db: Db, agentId: string, teamId = ''): Promise<ChatChannel> {
   const dmName = `dm:${agentId}`
-  const existing = await db.queryOne<Record<string, unknown>>('SELECT * FROM chat_channels WHERE name = $1', [dmName])
+  const existing = await db.queryOne<Record<string, unknown>>('SELECT * FROM chat_channels WHERE name = $1 AND team_id = $2', [dmName, teamId])
   if (existing) {
     return { id: existing.id as string, name: existing.name as string, type: existing.type as ChannelType, createdAt: existing.created_at as string }
   }
-  return createChannel(db, dmName, 'dm')
+  return createChannel(db, teamId, dmName, 'dm')
 }
 
-export async function getTaskThread(db: Db, taskId: string): Promise<ChatChannel> {
+export async function getTaskThread(db: Db, taskId: string, teamId = ''): Promise<ChatChannel> {
   const threadName = `task:${taskId}`
-  const existing = await db.queryOne<Record<string, unknown>>('SELECT * FROM chat_channels WHERE name = $1', [threadName])
+  const existing = await db.queryOne<Record<string, unknown>>('SELECT * FROM chat_channels WHERE name = $1 AND team_id = $2', [threadName, teamId])
   if (existing) {
     return { id: existing.id as string, name: existing.name as string, type: existing.type as ChannelType, createdAt: existing.created_at as string }
   }
-  return createChannel(db, threadName, 'task_thread')
+  return createChannel(db, teamId, threadName, 'task_thread')
 }
 
 // ---- Messages ----
 
-export async function sendMessage(db: Db, channelId: string, senderType: SenderType, senderId: string, content: string, taskId?: string): Promise<ChatMessage> {
+export async function sendMessage(db: Db, channelId: string, senderType: SenderType, senderId: string, content: string, taskId?: string, teamId = ''): Promise<ChatMessage> {
   const insertedId = await db.insert(
-    'INSERT INTO chat_messages (channel_id, sender_type, sender_id, content, task_id) VALUES ($1, $2, $3, $4, $5)',
-    [channelId, senderType, senderId, content, taskId ?? null],
+    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id) VALUES ($1, $2, $3, $4, $5, $6)',
+    [teamId, channelId, senderType, senderId, content, taskId ?? null],
     'id',
   )
   return (await getMessage(db, Number(insertedId)))!

@@ -9,12 +9,26 @@ import { supabase } from './supabase'
 
 const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 
+// Active team ID — set by TeamProvider, included in all requests
+let _activeTeamId: string | null = null
+
+export function setActiveTeamId(teamId: string | null) {
+  _activeTeamId = teamId
+}
+
+export function getActiveTeamId(): string | null {
+  return _activeTeamId
+}
+
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   // Get the current Supabase session token for authenticated API calls
   const { data: { session } } = await supabase.auth.getSession()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (session?.access_token) {
     headers['Authorization'] = `Bearer ${session.access_token}`
+  }
+  if (_activeTeamId) {
+    headers['X-Team-Id'] = _activeTeamId
   }
 
   const res = await fetch(`${ENGINE_URL}${path}`, {
@@ -378,6 +392,55 @@ export const updateTeamMemberRole = (teamId: string, userId: string, role: strin
 
 export const removeTeamMember = (teamId: string, userId: string) =>
   request<void>(`/api/teams/${teamId}/members/${userId}`, { method: 'DELETE' })
+
+// ===== Notifications =====
+
+export interface EngineNotification {
+  id: string
+  teamId: string
+  userId: string
+  type: 'approval_needed' | 'task_assigned' | 'agent_message' | 'mention' | 'system'
+  title: string
+  body: string
+  link: string | null
+  read: boolean
+  createdAt: string
+}
+
+export interface NotificationPreference {
+  userId: string
+  teamId: string
+  inAppEnabled: boolean
+  emailEnabled: boolean
+  muted: boolean
+}
+
+export const listNotifications = (opts?: { teamId?: string; limit?: number; before?: string }) => {
+  const params = new URLSearchParams()
+  if (opts?.teamId) params.set('teamId', opts.teamId)
+  if (opts?.limit) params.set('limit', String(opts.limit))
+  if (opts?.before) params.set('before', opts.before)
+  const qs = params.toString()
+  return request<EngineNotification[]>(`/api/notifications${qs ? `?${qs}` : ''}`)
+}
+
+export const notificationCount = () => request<{ count: number }>('/api/notifications/count')
+
+export const markNotificationRead = (id: string) =>
+  request<{ success: boolean }>(`/api/notifications/${id}/read`, { method: 'POST' })
+
+export const markAllNotificationsRead = (teamId?: string) => {
+  const qs = teamId ? `?teamId=${teamId}` : ''
+  return request<{ success: boolean }>(`/api/notifications/read-all${qs}`, { method: 'POST' })
+}
+
+export const listNotificationPreferences = () =>
+  request<NotificationPreference[]>('/api/notifications/preferences')
+
+export const updateNotificationPreference = (teamId: string, updates: { inAppEnabled?: boolean; emailEnabled?: boolean; muted?: boolean }) =>
+  request<NotificationPreference>('/api/notifications/preferences', {
+    method: 'PATCH', body: JSON.stringify({ teamId, ...updates }),
+  })
 
 // ===== Ollama =====
 

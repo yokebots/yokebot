@@ -31,6 +31,7 @@ const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
 export interface ToolContext {
   db: Db
   agentId: string
+  teamId: string
   workspaceConfig: WorkspaceConfig
   skillsDir: string
 }
@@ -160,7 +161,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Tasks ----
     case 'create_task': {
-      const task = await createTask(ctx.db, args.title as string, {
+      const task = await createTask(ctx.db, ctx.teamId, args.title as string, {
         description: args.description as string | undefined,
         priority: (args.priority as 'low' | 'medium' | 'high' | 'urgent') ?? 'medium',
         assignedAgentId: ctx.agentId,
@@ -189,7 +190,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Chat ----
     case 'send_chat_message': {
-      const dmChannel = await getDmChannel(ctx.db, ctx.agentId)
+      const dmChannel = await getDmChannel(ctx.db, ctx.agentId, ctx.teamId)
       const channelId = (args.channelId as string) === 'dm'
         ? dmChannel.id
         : args.channelId as string
@@ -201,6 +202,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     case 'request_approval': {
       const approval = await createApproval(
         ctx.db,
+        ctx.teamId,
         ctx.agentId,
         args.actionType as string,
         args.actionDetail as string,
@@ -297,6 +299,7 @@ export interface RunResult {
 export async function runReactLoop(
   db: Db,
   agentId: string,
+  teamId: string,
   userMessage: string,
   modelConfig: ModelConfig,
   systemPrompt: string,
@@ -305,7 +308,7 @@ export async function runReactLoop(
   config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
 ): Promise<RunResult> {
   // Save the user message
-  await addMessage(db, agentId, 'user', userMessage)
+  await addMessage(db, agentId, 'user', userMessage, teamId)
 
   // Build the message history
   const history = await getMessages(db, agentId, 50)
@@ -321,7 +324,7 @@ export async function runReactLoop(
   const installedSkills = (await getAgentSkills(db, agentId)).map((s) => s.skillName)
   const skillTools = getSkillTools(skillsDir, installedSkills)
   const tools = [...getBuiltinTools(), ...skillTools]
-  const toolCtx: ToolContext = { db, agentId, workspaceConfig, skillsDir }
+  const toolCtx: ToolContext = { db, agentId, teamId, workspaceConfig, skillsDir }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
 
@@ -365,7 +368,7 @@ export async function runReactLoop(
 
       // If agent responded, we're done
       if (response !== null) {
-        await addMessage(db, agentId, 'assistant', response)
+        await addMessage(db, agentId, 'assistant', response, teamId)
         return { response, iterations: i + 1, toolCalls: toolCallLog }
       }
 
@@ -376,7 +379,7 @@ export async function runReactLoop(
     // No tool calls — model gave a direct text response
     if (completion.content) {
       response = completion.content
-      await addMessage(db, agentId, 'assistant', response)
+      await addMessage(db, agentId, 'assistant', response, teamId)
       return { response, iterations: i + 1, toolCalls: toolCallLog }
     }
 
@@ -386,6 +389,6 @@ export async function runReactLoop(
 
   // If we hit max iterations without a response
   const fallback = response ?? 'I was unable to complete the task within the iteration limit.'
-  await addMessage(db, agentId, 'assistant', fallback)
+  await addMessage(db, agentId, 'assistant', fallback, teamId)
   return { response: fallback, iterations: config.maxIterations, toolCalls: toolCallLog }
 }

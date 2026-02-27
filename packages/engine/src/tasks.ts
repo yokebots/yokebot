@@ -14,13 +14,13 @@ export interface Task {
   createdAt: string; updatedAt: string
 }
 
-export async function createTask(db: Db, title: string, opts?: {
+export async function createTask(db: Db, teamId: string, title: string, opts?: {
   description?: string; priority?: TaskPriority; assignedAgentId?: string; parentTaskId?: string; deadline?: string
 }): Promise<Task> {
   const id = randomUUID()
   await db.run(
-    'INSERT INTO tasks (id, title, description, priority, assigned_agent_id, parent_task_id, deadline) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-    [id, title, opts?.description ?? null, opts?.priority ?? 'medium', opts?.assignedAgentId ?? null, opts?.parentTaskId ?? null, opts?.deadline ?? null],
+    'INSERT INTO tasks (id, team_id, title, description, priority, assigned_agent_id, parent_task_id, deadline) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+    [id, teamId, title, opts?.description ?? null, opts?.priority ?? 'medium', opts?.assignedAgentId ?? null, opts?.parentTaskId ?? null, opts?.deadline ?? null],
   )
   return (await getTask(db, id))!
 }
@@ -31,11 +31,12 @@ export async function getTask(db: Db, id: string): Promise<Task | null> {
   return rowToTask(row)
 }
 
-export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; parentId?: string | null }): Promise<Task[]> {
+export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; parentId?: string | null; teamId?: string }): Promise<Task[]> {
   let sql = 'SELECT * FROM tasks WHERE 1=1'
   const params: unknown[] = []
   let paramIdx = 1
 
+  if (filters?.teamId) { sql += ` AND team_id = $${paramIdx++}`; params.push(filters.teamId) }
   if (filters?.status) { sql += ` AND status = $${paramIdx++}`; params.push(filters.status) }
   if (filters?.agentId) { sql += ` AND assigned_agent_id = $${paramIdx++}`; params.push(filters.agentId) }
   if (filters?.parentId !== undefined) {

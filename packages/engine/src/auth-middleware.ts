@@ -11,6 +11,8 @@ import jwt from 'jsonwebtoken'
 export interface AuthUser {
   id: string
   email: string
+  activeTeamId?: string
+  teamRole?: string
 }
 
 // Extend Express Request to include user
@@ -34,8 +36,9 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return
   }
 
-  // Skip auth if no JWT secret is configured (dev mode)
+  // Dev mode: no JWT secret configured — use a deterministic dev user
   if (!JWT_SECRET) {
+    req.user = { id: 'dev-user-local', email: 'dev@localhost' }
     next()
     return
   }

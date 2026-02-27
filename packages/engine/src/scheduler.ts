@@ -116,12 +116,12 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     }
 
     try {
-      const result = await runReactLoop(db, agent.id, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir)
+      const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir)
       if (result.response && !result.response.includes('[no-op]')) {
         // Route proactive messages to the agent's DM channel
-        const dmChannel = await getDmChannel(db, agent.id)
-        await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response)
-        await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`)
+        const dmChannel = await getDmChannel(db, agent.id, agent.teamId)
+        await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response, undefined, agent.teamId)
+        await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`, undefined, agent.teamId)
         console.log(`[scheduler] Proactive message from "${agent.name}" posted to DM`)
       }
     } catch (err) {

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router'
 import { AuthProvider, useAuth } from '@/lib/auth'
+import { TeamProvider } from '@/lib/team-context'
 import { DashboardLayout } from '@/layouts/DashboardLayout'
 import { HomePage } from '@/pages/HomePage'
 import { DashboardPage } from '@/pages/DashboardPage'
@@ -35,7 +36,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   if (loading) return <LoadingScreen />
   if (!user) return <Navigate to="/" replace />
-  return <>{children}</>
+  return <TeamProvider>{children}</TeamProvider>
 }
 
 function RootRoute() {

@@ -23,6 +23,7 @@ export type AgentStatus = 'running' | 'paused' | 'stopped' | 'error'
 
 export interface Agent {
   id: string
+  teamId: string
   name: string
   status: AgentStatus
   department: string | null
@@ -41,18 +42,18 @@ export interface Agent {
 
 // ---- CRUD ----
 
-export async function createAgent(db: Db, config: AgentConfig): Promise<Agent> {
+export async function createAgent(db: Db, teamId: string, config: AgentConfig): Promise<Agent> {
   const id = randomUUID()
   const now = new Date().toISOString()
 
   await db.run(
-    `INSERT INTO agents (id, name, department, icon_name, icon_color,
+    `INSERT INTO agents (id, team_id, name, department, icon_name, icon_color,
       model_endpoint, model_name, system_prompt, proactive,
       heartbeat_seconds, active_hours_start, active_hours_end,
       created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
     [
-      id, config.name, config.department ?? null, config.iconName ?? null, config.iconColor ?? null,
+      id, teamId, config.name, config.department ?? null, config.iconName ?? null, config.iconColor ?? null,
       config.modelConfig.endpoint, config.modelConfig.model, config.systemPrompt ?? null,
       config.proactive ? 1 : 0, config.heartbeatSeconds ?? 3600,
       config.activeHoursStart ?? 9, config.activeHoursEnd ?? 17, now, now,
@@ -68,7 +69,11 @@ export async function getAgent(db: Db, id: string): Promise<Agent | null> {
   return rowToAgent(row)
 }
 
-export async function listAgents(db: Db): Promise<Agent[]> {
+export async function listAgents(db: Db, teamId?: string): Promise<Agent[]> {
+  if (teamId) {
+    const rows = await db.query<Record<string, unknown>>('SELECT * FROM agents WHERE team_id = $1 ORDER BY created_at DESC', [teamId])
+    return rows.map(rowToAgent)
+  }
   const rows = await db.query<Record<string, unknown>>('SELECT * FROM agents ORDER BY created_at DESC')
   return rows.map(rowToAgent)
 }
@@ -109,10 +114,10 @@ export async function deleteAgent(db: Db, id: string): Promise<void> {
 
 // ---- Conversation history ----
 
-export async function addMessage(db: Db, agentId: string, role: string, content: string): Promise<void> {
+export async function addMessage(db: Db, agentId: string, role: string, content: string, teamId = ''): Promise<void> {
   await db.run(
-    'INSERT INTO messages (agent_id, role, content) VALUES ($1, $2, $3)',
-    [agentId, role, content],
+    'INSERT INTO messages (team_id, agent_id, role, content) VALUES ($1, $2, $3, $4)',
+    [teamId, agentId, role, content],
   )
 }
 
@@ -129,6 +134,7 @@ export async function getMessages(db: Db, agentId: string, limit = 50): Promise<
 function rowToAgent(row: Record<string, unknown>): Agent {
   return {
     id: row.id as string,
+    teamId: (row.team_id as string) ?? '',
     name: row.name as string,
     status: row.status as AgentStatus,
     department: row.department as string | null,

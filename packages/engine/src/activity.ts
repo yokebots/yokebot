@@ -22,21 +22,23 @@ export async function logActivity(
   agentId: string | null,
   description: string,
   details?: Record<string, unknown>,
+  teamId = '',
 ): Promise<void> {
   await db.run(
-    'INSERT INTO activity_log (event_type, agent_id, description, details) VALUES ($1, $2, $3, $4)',
-    [eventType, agentId, description, details ? JSON.stringify(details) : null],
+    'INSERT INTO activity_log (team_id, event_type, agent_id, description, details) VALUES ($1, $2, $3, $4, $5)',
+    [teamId, eventType, agentId, description, details ? JSON.stringify(details) : null],
   )
 }
 
 export async function listActivity(
   db: Db,
-  filters?: { agentId?: string; eventType?: string; limit?: number; before?: number },
+  filters?: { agentId?: string; eventType?: string; limit?: number; before?: number; teamId?: string },
 ): Promise<ActivityEntry[]> {
   const clauses: string[] = []
   const params: unknown[] = []
   let paramIdx = 1
 
+  if (filters?.teamId) { clauses.push(`team_id = $${paramIdx++}`); params.push(filters.teamId) }
   if (filters?.agentId) { clauses.push(`agent_id = $${paramIdx++}`); params.push(filters.agentId) }
   if (filters?.eventType) { clauses.push(`event_type = $${paramIdx++}`); params.push(filters.eventType) }
   if (filters?.before) { clauses.push(`id < $${paramIdx++}`); params.push(filters.before) }
@@ -60,11 +62,12 @@ export async function listActivity(
   }))
 }
 
-export async function countActivity(db: Db, agentId?: string): Promise<number> {
-  if (agentId) {
-    const row = await db.queryOne<{ count: number }>('SELECT COUNT(*) as count FROM activity_log WHERE agent_id = $1', [agentId])
-    return row?.count ?? 0
-  }
-  const row = await db.queryOne<{ count: number }>('SELECT COUNT(*) as count FROM activity_log')
+export async function countActivity(db: Db, agentId?: string, teamId?: string): Promise<number> {
+  let sql = 'SELECT COUNT(*) as count FROM activity_log WHERE 1=1'
+  const params: unknown[] = []
+  let paramIdx = 1
+  if (teamId) { sql += ` AND team_id = $${paramIdx++}`; params.push(teamId) }
+  if (agentId) { sql += ` AND agent_id = $${paramIdx++}`; params.push(agentId) }
+  const row = await db.queryOne<{ count: number }>(sql, params)
   return row?.count ?? 0
 }

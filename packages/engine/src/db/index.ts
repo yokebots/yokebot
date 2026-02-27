@@ -8,6 +8,7 @@
 import { createSqliteDb } from './sqlite.ts'
 import { createPostgresDb } from './postgres.ts'
 import { migrate } from '../state.ts'
+import { runMigrations } from '../migrations.ts'
 import type { Db } from './types.ts'
 
 export type { Db } from './types.ts'
@@ -30,6 +31,7 @@ export async function createDb(config: DbConfig): Promise<Db> {
   }
 
   await migrate(db)
+  await runMigrations(db)
 
   return db
 }
