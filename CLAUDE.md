@@ -37,3 +37,16 @@
 ### GitHub org: yokebots
 ### Domain: yokebot.com
 ### Supabase project: rljrhmhminepleixezau
+
+### Deployment:
+- **Dashboard:** Vercel (project: yokebot, aliased to yokebot.com)
+- **Engine:** Railway (Dockerfile at `packages/engine/Dockerfile`, deploy from repo root via `railway up`)
+- Railway auto-deploy is NOT connected — must deploy manually via `railway up` from the repo root
+- After modifying engine code, always run `pnpm --filter @yokebot/engine build` locally first to catch TypeScript errors before deploying
+
+### CRITICAL: Vercel environment variables
+- **NEVER use `echo` to pipe values to `vercel env add`** — `echo` appends a trailing newline (`\n`) that gets baked into the env var value, corrupting it silently
+- **ALWAYS use `printf`** when adding env vars: `printf 'value' | vercel env add VAR_NAME environment`
+- After adding/changing Vercel env vars, ALWAYS verify them with: `vercel env pull .env.check --environment production --yes && cat -e .env.check | grep VITE_` (values should end with `"$`, NOT `\n"$`)
+- Delete the verification file after checking: `rm .env.check`
+- Corrupted Supabase URL/anon key causes ALL API calls to return 401 — the JWT tokens become invalid because they're signed for a malformed project URL

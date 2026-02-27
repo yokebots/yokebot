@@ -12,7 +12,7 @@ import { randomUUID } from 'crypto'
 
 export type SubscriptionTier = 'none' | 'team' | 'business' | 'enterprise'
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'inactive'
-export type CreditTransactionType = 'subscription_renewal' | 'credit_pack' | 'media_debit' | 'heartbeat_debit' | 'skill_debit' | 'credit_reset' | 'adjustment'
+export type CreditTransactionType = 'subscription_renewal' | 'credit_pack' | 'starter_credits' | 'media_debit' | 'heartbeat_debit' | 'skill_debit' | 'credit_reset' | 'adjustment'
 
 export interface TeamSubscription {
   teamId: string

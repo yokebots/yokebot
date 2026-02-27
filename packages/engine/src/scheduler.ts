@@ -208,7 +208,11 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     }
 
     try {
-      const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, undefined, agent.modelId || undefined)
+      // AdvisorBot is always free — skip credit deduction
+      const runtimeConfig = agent.templateId === 'advisor-bot'
+        ? { maxIterations: 10, skipCredits: true }
+        : undefined
+      const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
       if (result.response && !result.response.includes('[no-op]')) {
         // Route proactive messages to the agent's DM channel
         const dmChannel = await getDmChannel(db, agent.id, agent.teamId)

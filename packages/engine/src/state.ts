@@ -343,8 +343,11 @@ const SQLITE_DDL = `
   CREATE TABLE IF NOT EXISTS team_profiles (
     team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
     company_name TEXT,
+    company_url TEXT,
     industry TEXT,
     company_size TEXT,
+    business_summary TEXT,
+    target_market TEXT,
     primary_goal TEXT,
     onboarded_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -712,8 +715,11 @@ const POSTGRES_DDL = `
   CREATE TABLE IF NOT EXISTS team_profiles (
     team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
     company_name TEXT,
+    company_url TEXT,
     industry TEXT,
     company_size TEXT,
+    business_summary TEXT,
+    target_market TEXT,
     primary_goal TEXT,
     onboarded_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -730,6 +736,11 @@ const POSTGRES_DDL = `
   ALTER TABLE approvals ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
   ALTER TABLE sor_tables ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
   ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+
+  -- Migrations: Add new profile columns for enriched onboarding context
+  ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS company_url TEXT;
+  ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS business_summary TEXT;
+  ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS target_market TEXT;
 
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);

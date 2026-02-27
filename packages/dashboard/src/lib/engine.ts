@@ -734,10 +734,26 @@ export const testMcpServer = (agentId: string, serverName: string) =>
 export interface TeamProfile {
   teamId: string
   companyName: string | null
+  companyUrl: string | null
   industry: string | null
   companySize: string | null
+  businessSummary: string | null
+  targetMarket: string | null
   primaryGoal: string | null
   onboardedAt: string | null
+}
+
+export interface WebsiteScanResult {
+  companyName: string | null
+  industry: string | null
+  problemSolved: string | null
+  solution: string | null
+  targetMarket: string | null
+  geographicFocus: string | null
+  productsServices: string | null
+  pricePoints: string | null
+  uniqueDifferentiators: string | null
+  buyingMotivations: string | null
 }
 
 export const getTeamProfile = (teamId: string) =>
@@ -746,6 +762,11 @@ export const getTeamProfile = (teamId: string) =>
 export const updateTeamProfile = (teamId: string, data: Partial<TeamProfile>) =>
   request<{ success: boolean }>(`/api/teams/${teamId}/profile`, {
     method: 'PUT', body: JSON.stringify(data),
+  })
+
+export const scanWebsite = (teamId: string, url: string) =>
+  request<WebsiteScanResult>(`/api/teams/${teamId}/scan-website`, {
+    method: 'POST', body: JSON.stringify({ url }),
   })
 
 export const setupAdvisor = (teamId: string) =>

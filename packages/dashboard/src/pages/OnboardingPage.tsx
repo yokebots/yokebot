@@ -2,7 +2,7 @@
  * OnboardingPage.tsx — 4-step guided onboarding for new hosted users
  *
  * Steps:
- *   1. Welcome & business context form
+ *   1. Welcome & business context (URL scan + editable fields)
  *   2. Quick tutorial walkthrough (3 slides)
  *   3. AdvisorBot chat (recommends & deploys agents)
  *   4. Completion summary
@@ -52,6 +52,45 @@ const TUTORIAL_SLIDES = [
   },
 ]
 
+// Structured fields from website scan, in logical display order
+interface ScanFields {
+  companyName: string
+  industry: string
+  problemSolved: string
+  solution: string
+  targetMarket: string
+  geographicFocus: string
+  productsServices: string
+  uniqueDifferentiators: string
+  buyingMotivations: string
+  pricePoints: string
+}
+
+const SCAN_FIELD_LABELS: Record<keyof ScanFields, { label: string; icon: string }> = {
+  companyName: { label: 'Company Name', icon: 'business' },
+  industry: { label: 'Industry', icon: 'category' },
+  problemSolved: { label: 'Problem Solved', icon: 'report_problem' },
+  solution: { label: 'Solution', icon: 'lightbulb' },
+  targetMarket: { label: 'Target Market', icon: 'groups' },
+  geographicFocus: { label: 'Geographic Focus', icon: 'public' },
+  productsServices: { label: 'Products / Services', icon: 'inventory_2' },
+  uniqueDifferentiators: { label: 'Unique Differentiators', icon: 'star' },
+  buyingMotivations: { label: 'Buying Motivations', icon: 'psychology' },
+  pricePoints: { label: 'Price Points', icon: 'payments' },
+}
+
+const SCAN_FIELD_ORDER: (keyof ScanFields)[] = [
+  'companyName', 'industry', 'problemSolved', 'solution',
+  'targetMarket', 'geographicFocus', 'productsServices',
+  'uniqueDifferentiators', 'buyingMotivations', 'pricePoints',
+]
+
+const EMPTY_SCAN: ScanFields = {
+  companyName: '', industry: '', problemSolved: '', solution: '',
+  targetMarket: '', geographicFocus: '', productsServices: '',
+  uniqueDifferentiators: '', buyingMotivations: '', pricePoints: '',
+}
+
 export function OnboardingPage() {
   const { user } = useAuth()
   const { activeTeam } = useTeam()
@@ -61,8 +100,11 @@ export function OnboardingPage() {
   const [slideIndex, setSlideIndex] = useState(0)
 
   // Step 1 form state
-  const [companyName, setCompanyName] = useState('')
-  const [industry, setIndustry] = useState('')
+  const [companyUrl, setCompanyUrl] = useState('')
+  const [scanning, setScanning] = useState(false)
+  const [scanned, setScanned] = useState(false)
+  const [scanError, setScanError] = useState('')
+  const [scanFields, setScanFields] = useState<ScanFields>(EMPTY_SCAN)
   const [companySize, setCompanySize] = useState('')
   const [primaryGoal, setPrimaryGoal] = useState('')
   const [saving, setSaving] = useState(false)
@@ -80,13 +122,6 @@ export function OnboardingPage() {
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0] ?? 'there'
 
-  // Pre-fill company name from team name
-  useEffect(() => {
-    if (activeTeam?.name && !companyName) {
-      setCompanyName(activeTeam.name === 'My Team' ? '' : activeTeam.name)
-    }
-  }, [activeTeam])
-
   // Scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -100,15 +135,63 @@ export function OnboardingPage() {
     navigate('/dashboard', { replace: true })
   }, [activeTeam, navigate])
 
+  // Step 1: Scan website
+  const handleScanWebsite = async () => {
+    if (!activeTeam || !companyUrl.trim()) return
+    setScanning(true)
+    setScanError('')
+    try {
+      let url = companyUrl.trim()
+      if (!url.startsWith('http')) url = `https://${url}`
+      setCompanyUrl(url)
+
+      const result = await engine.scanWebsite(activeTeam.id, url)
+
+      // Check if we actually got data back
+      const hasData = result.companyName || result.industry || result.targetMarket || result.problemSolved
+      if (!hasData) {
+        setScanError('Could not extract business info from that URL. You can fill in the fields manually.')
+      }
+
+      setScanFields({
+        companyName: result.companyName ?? '',
+        industry: result.industry ?? '',
+        problemSolved: result.problemSolved ?? '',
+        solution: result.solution ?? '',
+        targetMarket: result.targetMarket ?? '',
+        geographicFocus: result.geographicFocus ?? '',
+        productsServices: result.productsServices ?? '',
+        uniqueDifferentiators: result.uniqueDifferentiators ?? '',
+        buyingMotivations: result.buyingMotivations ?? '',
+        pricePoints: result.pricePoints ?? '',
+      })
+      setScanned(true)
+    } catch {
+      setScanError('Scan failed — please fill in the fields manually.')
+      setScanned(true)
+    } finally {
+      setScanning(false)
+    }
+  }
+
   // Step 1: Save profile + start deploying advisor
   const handleProfileSubmit = async () => {
     if (!activeTeam) return
     setSaving(true)
     try {
+      // Build a combined business summary from structured fields for storage
+      const summaryParts = SCAN_FIELD_ORDER
+        .filter((k) => k !== 'companyName' && k !== 'industry' && scanFields[k])
+        .map((k) => `${SCAN_FIELD_LABELS[k].label}: ${scanFields[k]}`)
+      const businessSummary = summaryParts.join('\n')
+
       await engine.updateTeamProfile(activeTeam.id, {
-        companyName: companyName || null,
-        industry: industry || null,
+        companyName: scanFields.companyName || null,
+        companyUrl: companyUrl || null,
+        industry: scanFields.industry || null,
         companySize: companySize || null,
+        businessSummary: businessSummary || null,
+        targetMarket: scanFields.targetMarket || null,
         primaryGoal: primaryGoal || null,
       } as Partial<engine.TeamProfile>)
 
@@ -117,13 +200,11 @@ export function OnboardingPage() {
         setAdvisorAgentId(result.agentId)
         setAdvisorReady(true)
       }).catch(() => {
-        // AdvisorBot may already be deployed
         setAdvisorReady(true)
       })
 
       setStep(2)
     } catch {
-      // Continue anyway
       setStep(2)
     } finally {
       setSaving(false)
@@ -152,17 +233,25 @@ export function OnboardingPage() {
   // Step 3: Auto-send context on mount
   useEffect(() => {
     if (step === 3 && advisorReady && advisorAgentId && messages.length === 0) {
-      const context = [
-        `New user just joined! Here's their context:`,
-        companyName ? `Company: ${companyName}` : '',
-        industry ? `Industry: ${industry}` : '',
+      const contextLines = [
+        `New user just joined! Here's their business context:`,
+        scanFields.companyName ? `Company: ${scanFields.companyName}` : '',
+        scanFields.industry ? `Industry: ${scanFields.industry}` : '',
+        scanFields.problemSolved ? `Problem solved: ${scanFields.problemSolved}` : '',
+        scanFields.solution ? `Solution: ${scanFields.solution}` : '',
+        scanFields.targetMarket ? `Target market: ${scanFields.targetMarket}` : '',
+        scanFields.geographicFocus ? `Geographic focus: ${scanFields.geographicFocus}` : '',
+        scanFields.productsServices ? `Products/services: ${scanFields.productsServices}` : '',
+        scanFields.uniqueDifferentiators ? `Differentiators: ${scanFields.uniqueDifferentiators}` : '',
+        scanFields.buyingMotivations ? `Buying motivations: ${scanFields.buyingMotivations}` : '',
+        scanFields.pricePoints ? `Price points: ${scanFields.pricePoints}` : '',
         companySize ? `Company size: ${companySize}` : '',
         primaryGoal ? `Primary goal: ${primaryGoal}` : '',
         ``,
-        `Please introduce yourself briefly, then recommend 2-3 agents that would help them most based on their goal. Use the recommend_agents tool.`,
+        `Based on this business context, recommend 2-3 agents that would help them most. Use the recommend_agents tool.`,
       ].filter(Boolean).join('\n')
 
-      sendAdvisorMessage(context)
+      sendAdvisorMessage(contextLines)
     }
   }, [step, advisorReady, advisorAgentId])
 
@@ -179,14 +268,12 @@ export function OnboardingPage() {
   // If no advisor ready and we hit step 3, wait
   useEffect(() => {
     if (step === 3 && !advisorReady && activeTeam) {
-      // Try to find existing advisor
       engine.listAgents().then((agents) => {
         const advisor = agents.find((a) => a.templateId === 'advisor-bot')
         if (advisor) {
           setAdvisorAgentId(advisor.id)
           setAdvisorReady(true)
         } else {
-          // Try deploying
           engine.setupAdvisor(activeTeam.id).then((r) => {
             setAdvisorAgentId(r.agentId)
             setAdvisorReady(true)
@@ -195,6 +282,11 @@ export function OnboardingPage() {
       }).catch(() => setAdvisorReady(true))
     }
   }, [step, advisorReady, activeTeam])
+
+  // Helper to update a single scan field
+  const updateField = (key: keyof ScanFields, value: string) => {
+    setScanFields((prev) => ({ ...prev, [key]: value }))
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-light-bg">
@@ -228,95 +320,183 @@ export function OnboardingPage() {
       </header>
 
       {/* Content */}
-      <main className="flex flex-1 items-center justify-center p-6">
-        {/* Step 1: Welcome & Context */}
+      <main className="flex flex-1 justify-center overflow-y-auto p-6">
+        {/* Step 1: Welcome & Business Context */}
         {step === 1 && (
-          <div className="w-full max-w-lg">
+          <div className="w-full max-w-2xl">
             <div className="mb-8 text-center">
               <h1 className="font-display text-3xl font-bold text-text-main">
                 Welcome, {firstName}!
               </h1>
               <p className="mt-2 text-text-secondary">
-                Tell us a bit about your business so we can set up the right AI workforce for you.
+                Let's learn about your business so your AI agents have the right context.
               </p>
             </div>
 
             <div className="space-y-5 rounded-2xl border border-border-subtle bg-white p-6 shadow-card">
-              {/* Company Name */}
+              {/* Website URL + Scan */}
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-main">Company Name</label>
-                <input
-                  type="text"
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder="Acme Corp"
-                  className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
-                />
+                <label className="mb-1.5 block text-sm font-medium text-text-main">Website URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={companyUrl}
+                    onChange={(e) => setCompanyUrl(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && companyUrl.trim()) handleScanWebsite() }}
+                    placeholder="https://yourcompany.com"
+                    disabled={scanning}
+                    className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50"
+                  />
+                  <button
+                    onClick={handleScanWebsite}
+                    disabled={scanning || !companyUrl.trim()}
+                    className="flex items-center gap-1.5 rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green-hover transition-colors disabled:opacity-50"
+                  >
+                    {scanning ? (
+                      <>
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                        Scanning...
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[16px]">search</span>
+                        Scan
+                      </>
+                    )}
+                  </button>
+                </div>
+                {!scanned && (
+                  <p className="mt-1.5 text-xs text-text-muted">
+                    We'll scan your site to auto-fill your business profile. Or skip and fill in manually below.
+                  </p>
+                )}
               </div>
 
-              {/* Industry */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-main">Industry</label>
-                <select
-                  value={industry}
-                  onChange={(e) => setIndustry(e.target.value)}
-                  className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+              {/* Scanned / manual fields */}
+              {scanned && (
+                <div className="space-y-3">
+                  {scanError ? (
+                    <div className="flex items-center gap-2 pb-1">
+                      <span className="material-symbols-outlined text-[16px] text-amber-500">warning</span>
+                      <p className="text-sm font-medium text-amber-600">{scanError}</p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 pb-1">
+                      <span className="material-symbols-outlined text-[16px] text-forest-green">check_circle</span>
+                      <p className="text-sm font-medium text-forest-green">Business profile generated — review and edit as needed</p>
+                    </div>
+                  )}
+
+                  {SCAN_FIELD_ORDER.map((key) => {
+                    const { label, icon } = SCAN_FIELD_LABELS[key]
+                    const value = scanFields[key]
+                    // Industry uses a dropdown
+                    if (key === 'industry') {
+                      return (
+                        <div key={key} className="flex items-start gap-3">
+                          <span className="material-symbols-outlined mt-2 text-[18px] text-text-muted shrink-0">{icon}</span>
+                          <div className="flex-1">
+                            <label className="mb-1 block text-xs font-medium text-text-muted uppercase tracking-wide">{label}</label>
+                            <select
+                              value={value}
+                              onChange={(e) => updateField(key, e.target.value)}
+                              className="w-full rounded-lg border border-border-subtle px-3 py-1.5 text-sm text-text-main focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                            >
+                              <option value="">Select an industry</option>
+                              {INDUSTRIES.map((ind) => (
+                                <option key={ind} value={ind}>{ind}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      )
+                    }
+                    return (
+                      <div key={key} className="flex items-start gap-3">
+                        <span className="material-symbols-outlined mt-2 text-[18px] text-text-muted shrink-0">{icon}</span>
+                        <div className="flex-1">
+                          <label className="mb-1 block text-xs font-medium text-text-muted uppercase tracking-wide">{label}</label>
+                          <input
+                            type="text"
+                            value={value}
+                            onChange={(e) => updateField(key, e.target.value)}
+                            placeholder={`Enter ${label.toLowerCase()}...`}
+                            className="w-full rounded-lg border border-border-subtle px-3 py-1.5 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Manual entry when not scanned */}
+              {!scanned && !scanning && (
+                <button
+                  onClick={() => setScanned(true)}
+                  className="text-sm text-forest-green hover:text-forest-green-hover transition-colors"
                 >
-                  <option value="">Select an industry</option>
-                  {INDUSTRIES.map((ind) => (
-                    <option key={ind} value={ind}>{ind}</option>
-                  ))}
-                </select>
-              </div>
+                  Or fill in manually without scanning
+                </button>
+              )}
 
               {/* Company Size */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-main">Company Size</label>
-                <div className="flex flex-wrap gap-2">
-                  {COMPANY_SIZES.map((size) => (
-                    <button
-                      key={size}
-                      onClick={() => setCompanySize(size)}
-                      className={`rounded-lg border px-4 py-2 text-sm transition-colors ${
-                        companySize === size
-                          ? 'border-forest-green bg-forest-green/10 text-forest-green font-medium'
-                          : 'border-border-subtle text-text-secondary hover:border-forest-green/30'
-                      }`}
-                    >
-                      {size}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {scanned && (
+                <>
+                  <div className="border-t border-border-subtle pt-4">
+                    <label className="mb-1.5 block text-sm font-medium text-text-main">Company Size</label>
+                    <div className="flex flex-wrap gap-2">
+                      {COMPANY_SIZES.map((size) => (
+                        <button
+                          key={size}
+                          onClick={() => setCompanySize(size)}
+                          className={`rounded-lg border px-4 py-2 text-sm transition-colors ${
+                            companySize === size
+                              ? 'border-forest-green bg-forest-green/10 text-forest-green font-medium'
+                              : 'border-border-subtle text-text-secondary hover:border-forest-green/30'
+                          }`}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              {/* Primary Goal */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-main">
-                  What would you like your AI workforce to help with?
-                </label>
-                <textarea
-                  value={primaryGoal}
-                  onChange={(e) => setPrimaryGoal(e.target.value)}
-                  placeholder="e.g., Generate more B2B leads, automate customer support, scale content marketing..."
-                  rows={3}
-                  className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green resize-none"
-                />
-              </div>
+                  {/* Primary Goal */}
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-text-main">
+                      What would you like your AI workforce to help with?
+                    </label>
+                    <textarea
+                      value={primaryGoal}
+                      onChange={(e) => setPrimaryGoal(e.target.value)}
+                      placeholder="e.g., Generate more B2B leads, automate customer support, scale content marketing..."
+                      rows={3}
+                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green resize-none"
+                    />
+                  </div>
 
-              <button
-                onClick={handleProfileSubmit}
-                disabled={saving}
-                className="w-full rounded-lg bg-forest-green px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Continue'}
-              </button>
+                  <button
+                    onClick={handleProfileSubmit}
+                    disabled={saving}
+                    className="w-full rounded-lg bg-forest-green px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-50"
+                  >
+                    {saving ? 'Saving...' : 'Continue'}
+                  </button>
+
+                  <p className="text-center text-xs text-text-muted">
+                    Your answers here become the foundation of business context for your team of agents.
+                    If you have multiple businesses, you can create more teams later.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}
 
         {/* Step 2: Tutorial Walkthrough */}
         {step === 2 && (
-          <div className="w-full max-w-lg">
+          <div className="w-full max-w-lg self-center">
             <div className="rounded-2xl border border-border-subtle bg-white p-8 shadow-card">
               <div className="mb-8 flex justify-center">
                 <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-forest-green/10 text-forest-green">
@@ -475,7 +655,7 @@ export function OnboardingPage() {
 
         {/* Step 4: Completion */}
         {step === 4 && (
-          <div className="w-full max-w-lg text-center">
+          <div className="w-full max-w-lg self-center text-center">
             <div className="mb-6 flex justify-center">
               <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-forest-green/10 text-forest-green">
                 <span className="material-symbols-outlined text-[40px]">celebration</span>

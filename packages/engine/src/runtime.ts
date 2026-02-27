@@ -31,6 +31,7 @@ const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
 export interface RuntimeConfig {
   maxIterations: number  // safety limit to prevent infinite loops
+  skipCredits?: boolean  // bypass credit deduction (e.g. AdvisorBot is free)
 }
 
 const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -44,6 +45,7 @@ export interface ToolContext {
   teamId: string
   workspaceConfig: WorkspaceConfig
   skillsDir: string
+  skipCredits?: boolean
 }
 
 /** Helper to reduce boilerplate when defining tool schemas. */
@@ -376,8 +378,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     default: {
-      // Deduct skill credits before executing (hosted mode only)
-      if (HOSTED_MODE) {
+      // Deduct skill credits before executing (hosted mode only, skip for free agents like AdvisorBot)
+      if (HOSTED_MODE && !ctx.skipCredits) {
         const skillCost = await getSkillCreditCost(ctx.db, toolCall.function.name)
         if (skillCost > 0) {
           const { success, balance } = await deductCredits(ctx.db, ctx.teamId, skillCost, 'skill_debit',
@@ -498,13 +500,13 @@ export async function runReactLoop(
   const skillTools = getSkillTools(skillsDir, installedSkills)
   const mcpTools = await loadMcpTools(db, agentId)
   const tools = [...getBuiltinTools(), ...skillTools, ...mcpTools]
-  const toolCtx: ToolContext = { db, agentId, teamId, workspaceConfig, skillsDir }
+  const toolCtx: ToolContext = { db, agentId, teamId, workspaceConfig, skillsDir, skipCredits: config.skipCredits }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
 
   for (let i = 0; i < config.maxIterations; i++) {
-    // Deduct LLM credits before each ReAct iteration (hosted mode only)
-    if (HOSTED_MODE && logicalModelId) {
+    // Deduct LLM credits before each ReAct iteration (hosted mode only, skip for free agents like AdvisorBot)
+    if (HOSTED_MODE && logicalModelId && !config.skipCredits) {
       const llmCost = await getModelCreditCost(db, logicalModelId)
       if (llmCost > 0) {
         const { success, balance } = await deductCredits(db, teamId, llmCost, 'heartbeat_debit',

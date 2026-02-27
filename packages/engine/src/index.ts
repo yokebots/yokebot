@@ -22,10 +22,9 @@ import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, s
 import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
-import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS } from './model.ts'
+import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS, chatCompletion } from './model.ts'
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
 import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, findUserByEmail } from './teams.ts'
-import jwt from 'jsonwebtoken'
 import { authMiddleware } from './auth-middleware.ts'
 import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
@@ -36,6 +35,7 @@ import { listCredentials, setCredential, deleteCredential } from './credentials.
 import { listServices } from './services.ts'
 import { listTemplates, getTemplate } from './templates.ts'
 import { listMcpServers, addMcpServer, removeMcpServer, connectMcpServer } from './mcp-client.ts'
+import { addCredits } from './billing.ts'
 
 const PORT = Number(process.env.PORT ?? process.env.YOKEBOT_PORT ?? 3001)
 const DATA_DIR = process.env.YOKEBOT_DATA_DIR ?? join(homedir(), '.yokebot')
@@ -65,6 +65,9 @@ async function main() {
 
   // Create Express app
   const app = express()
+
+  // Trust proxy — Railway uses 1 reverse proxy layer (X-Forwarded-For)
+  app.set('trust proxy', 1)
 
   // Security headers
   app.use(helmet())
@@ -295,6 +298,10 @@ async function main() {
 
     try {
       const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
+      // AdvisorBot is always free — skip credit deduction
+      const runtimeConfig = agent.templateId === 'advisor-bot'
+        ? { maxIterations: 10, skipCredits: true }
+        : undefined
       const result = await runReactLoop(
         db,
         agent.id,
@@ -304,7 +311,7 @@ async function main() {
         systemPrompt,
         workspaceConfig,
         SKILLS_DIR,
-        undefined,
+        runtimeConfig,
         agent.modelId || undefined,
       )
 
@@ -875,6 +882,15 @@ async function main() {
       } catch (err) {
         console.error('[engine] Failed to auto-deploy AdvisorBot:', (err as Error).message)
       }
+
+      // Grant 1,250 starter credits for the user's first team only
+      if (req.user?.id) {
+        const userTeams = await getUserTeams(db, req.user.id)
+        if (userTeams.length === 1) {
+          await addCredits(db, team.id, 1250, 'starter_credits', 'Welcome bonus: 1,250 starter credits')
+          console.log(`[engine] Granted 1,250 starter credits to team ${team.id}`)
+        }
+      }
     }
 
     await logActivity(db, 'team_created', null, `Team "${name}" created`)
@@ -958,20 +974,23 @@ async function main() {
 
     // Self-hosted users are always "onboarded" (no guided flow)
     if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
-      return res.json({ teamId: req.params.id, companyName: null, industry: null, companySize: null, primaryGoal: null, onboardedAt: 'self-hosted' })
+      return res.json({ teamId: req.params.id, companyName: null, companyUrl: null, industry: null, companySize: null, businessSummary: null, targetMarket: null, primaryGoal: null, onboardedAt: 'self-hosted' })
     }
 
     const profile = await db.queryOne<Record<string, unknown>>(
       'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
     )
     if (!profile) {
-      return res.json({ teamId: req.params.id, companyName: null, industry: null, companySize: null, primaryGoal: null, onboardedAt: null })
+      return res.json({ teamId: req.params.id, companyName: null, companyUrl: null, industry: null, companySize: null, businessSummary: null, targetMarket: null, primaryGoal: null, onboardedAt: null })
     }
     res.json({
       teamId: profile.team_id,
       companyName: profile.company_name,
+      companyUrl: profile.company_url,
       industry: profile.industry,
       companySize: profile.company_size,
+      businessSummary: profile.business_summary,
+      targetMarket: profile.target_market,
       primaryGoal: profile.primary_goal,
       onboardedAt: profile.onboarded_at,
     })
@@ -984,7 +1003,16 @@ async function main() {
     const caller = members.find((m) => m.userId === req.user!.id)
     if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
 
-    const { companyName, industry, companySize, primaryGoal, onboardedAt } = req.body as Record<string, string | null>
+    const body = req.body as Record<string, string | null | undefined>
+    // Coerce undefined to null — Postgres driver rejects undefined values
+    const companyName = body.companyName ?? null
+    const companyUrl = body.companyUrl ?? null
+    const industry = body.industry ?? null
+    const companySize = body.companySize ?? null
+    const businessSummary = body.businessSummary ?? null
+    const targetMarket = body.targetMarket ?? null
+    const primaryGoal = body.primaryGoal ?? null
+    const onboardedAt = body.onboardedAt ?? null
 
     const existing = await db.queryOne<Record<string, unknown>>(
       'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
@@ -994,22 +1022,127 @@ async function main() {
       await db.run(
         `UPDATE team_profiles SET
           company_name = COALESCE($1, company_name),
-          industry = COALESCE($2, industry),
-          company_size = COALESCE($3, company_size),
-          primary_goal = COALESCE($4, primary_goal),
-          onboarded_at = COALESCE($5, onboarded_at),
+          company_url = COALESCE($2, company_url),
+          industry = COALESCE($3, industry),
+          company_size = COALESCE($4, company_size),
+          business_summary = COALESCE($5, business_summary),
+          target_market = COALESCE($6, target_market),
+          primary_goal = COALESCE($7, primary_goal),
+          onboarded_at = COALESCE($8, onboarded_at),
           updated_at = ${db.now()}
-        WHERE team_id = $6`,
-        [companyName, industry, companySize, primaryGoal, onboardedAt, req.params.id],
+        WHERE team_id = $9`,
+        [companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, req.params.id],
       )
     } else {
       await db.run(
-        `INSERT INTO team_profiles (team_id, company_name, industry, company_size, primary_goal, onboarded_at)
-        VALUES ($1, $2, $3, $4, $5, $6)`,
-        [req.params.id, companyName ?? null, industry ?? null, companySize ?? null, primaryGoal ?? null, onboardedAt ?? null],
+        `INSERT INTO team_profiles (team_id, company_name, company_url, industry, company_size, business_summary, target_market, primary_goal, onboarded_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [req.params.id, companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt],
       )
     }
     res.json({ success: true })
+  })
+
+  // ===== Website Scan (Tavily + LLM, hosted only, platform cost) =====
+
+  app.post('/api/teams/:id/scan-website', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Website scanning is only available on YokeBot Cloud' })
+    }
+
+    const team = await getTeam(db, req.params.id)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
+
+    const { url } = req.body as { url?: string }
+    if (!url) return res.status(400).json({ error: 'URL is required' })
+
+    const tavilyKey = process.env.TAVILY_API_KEY
+    if (!tavilyKey) {
+      console.error('[scan] TAVILY_API_KEY not configured')
+      return res.json({ companyName: null, industry: null, businessSummary: null, targetMarket: null })
+    }
+
+    try {
+      // Step 1: Extract content via Tavily
+      const tavilyRes = await fetch('https://api.tavily.com/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` },
+        body: JSON.stringify({ urls: [url], extract_depth: 'basic', format: 'text' }),
+      })
+      if (!tavilyRes.ok) {
+        console.error(`[scan] Tavily error: ${tavilyRes.status}`)
+        return res.json({ companyName: null, industry: null, businessSummary: null, targetMarket: null })
+      }
+      const tavilyData = await tavilyRes.json() as { results?: Array<{ raw_content?: string }> }
+      const pageContent = tavilyData.results?.[0]?.raw_content
+      if (!pageContent) {
+        return res.json({ companyName: null, industry: null, businessSummary: null, targetMarket: null })
+      }
+
+      // Truncate to ~6K chars to keep LLM cost low
+      const truncated = pageContent.length > 6000 ? pageContent.slice(0, 6000) : pageContent
+
+      // Step 2: LLM analysis via DeepSeek V3.2
+      const modelConfig = await resolveModelConfig(db, 'deepseek-v3.2')
+      if (!modelConfig) {
+        console.error('[scan] Could not resolve deepseek-v3.2 model config')
+        return res.json({ companyName: null, industry: null, businessSummary: null, targetMarket: null })
+      }
+
+      const llmMessages = [
+        {
+          role: 'system' as const,
+          content: `You are a business analyst. Extract structured business information from website content. Respond ONLY with valid JSON, no other text.`,
+        },
+        {
+          role: 'user' as const,
+          content: `Analyze this website content and extract the following fields. If a field cannot be determined, use null.
+
+Return JSON with these fields (in this exact order):
+{
+  "companyName": "The company/brand name",
+  "industry": "One of: Technology, E-commerce, SaaS, Agency, Healthcare, Finance, Education, Real Estate, Hospitality, Manufacturing, Professional Services, Other",
+  "problemSolved": "What problem does this company solve? (1-2 sentences)",
+  "solution": "How does the company solve it? Their core product/service (1-2 sentences)",
+  "targetMarket": "Who is their ideal customer? Demographics, business type, etc. (1-2 sentences)",
+  "geographicFocus": "Where do they operate? Local, regional, national, global? (brief)",
+  "productsServices": "Key products or services offered (comma-separated list)",
+  "pricePoints": "Pricing info if available — free tier, starting price, enterprise, etc. (brief, or null)",
+  "uniqueDifferentiators": "What makes them different from competitors? (1-2 sentences)",
+  "buyingMotivations": "Why would customers choose them? Key value props (1-2 sentences)"
+}
+
+Website content:
+${truncated}`,
+        },
+      ]
+
+      const completion = await chatCompletion(modelConfig, llmMessages)
+      const raw = (completion.content ?? '').trim()
+
+      // Parse JSON from LLM response (handle markdown code fences)
+      const jsonStr = raw.startsWith('{') ? raw : (raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}')
+      const parsed = JSON.parse(jsonStr) as Record<string, string | null>
+
+      res.json({
+        companyName: parsed.companyName ?? null,
+        industry: parsed.industry ?? null,
+        problemSolved: parsed.problemSolved ?? null,
+        solution: parsed.solution ?? null,
+        targetMarket: parsed.targetMarket ?? null,
+        geographicFocus: parsed.geographicFocus ?? null,
+        productsServices: parsed.productsServices ?? null,
+        pricePoints: parsed.pricePoints ?? null,
+        uniqueDifferentiators: parsed.uniqueDifferentiators ?? null,
+        buyingMotivations: parsed.buyingMotivations ?? null,
+      })
+    } catch (err) {
+      console.error('[scan] Website scan error:', (err as Error).message)
+      res.json({ companyName: null, industry: null, businessSummary: null, targetMarket: null })
+    }
   })
 
   // ===== Setup AdvisorBot (idempotent, hosted only) =====
@@ -1056,23 +1189,6 @@ async function main() {
 
   app.get('/api/config', (_req, res) => {
     res.json({ hostedMode: process.env.YOKEBOT_HOSTED_MODE === 'true' })
-  })
-
-  // Temporary debug endpoint — test JWT verification (public, remove after debugging)
-  app.post('/api/debug/verify-token', (req, res) => {
-    const jwtSecret = process.env.SUPABASE_JWT_SECRET ?? ''
-    const authHeader = req.headers.authorization
-    if (!authHeader?.startsWith('Bearer ')) {
-      return res.json({ error: 'No Bearer token', secretLength: jwtSecret.length, secretPrefix: jwtSecret.slice(0, 6) })
-    }
-    const token = authHeader.slice(7)
-    try {
-      const payload = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] })
-      return res.json({ success: true, payload })
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : 'Unknown'
-      return res.json({ success: false, error: errMsg, secretLength: jwtSecret.length, secretPrefix: jwtSecret.slice(0, 6), tokenPrefix: token.slice(0, 30) })
-    }
   })
 
   // ===== Notifications (cross-team, uses user_id) =====
