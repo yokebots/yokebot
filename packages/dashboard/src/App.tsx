@@ -30,11 +30,24 @@ import * as engine from '@/lib/engine'
 
 const LoadingScreen = () => (
   <div className="flex h-screen items-center justify-center bg-light-bg">
-    <div className="flex items-center gap-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest-green text-white shadow-md">
-        <span className="text-2xl">🐂</span>
+    <div className="flex flex-col items-center gap-5">
+      <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-forest-green text-white shadow-lg">
+        <span className="text-3xl">🐂</span>
+        <div className="absolute -inset-1 animate-ping rounded-2xl bg-forest-green/20" />
       </div>
-      <span className="font-display text-xl font-bold tracking-tight text-text-main">Loading...</span>
+      <div className="flex flex-col items-center gap-2">
+        <span className="font-display text-xl font-bold tracking-tight text-text-main">
+          Getting everything ready...
+        </span>
+        <span className="text-base text-text-secondary">
+          Hang tight while we spin up your workspace
+        </span>
+      </div>
+      <div className="mt-1 flex gap-1.5">
+        <div className="h-2 w-2 animate-bounce rounded-full bg-forest-green" style={{ animationDelay: '0ms' }} />
+        <div className="h-2 w-2 animate-bounce rounded-full bg-forest-green" style={{ animationDelay: '150ms' }} />
+        <div className="h-2 w-2 animate-bounce rounded-full bg-forest-green" style={{ animationDelay: '300ms' }} />
+      </div>
     </div>
   </div>
 )

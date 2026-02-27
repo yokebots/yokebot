@@ -3,9 +3,9 @@ import * as engine from '@/lib/engine'
 import type { BillingStatus, CreditTransaction } from '@/lib/engine'
 
 const TIER_LABELS: Record<string, string> = {
-  team: 'Team',
-  business: 'Business',
-  enterprise: 'Enterprise',
+  team: 'Starter Crew',
+  business: 'Growth Crew',
+  enterprise: 'Power Crew',
   none: 'No Plan',
 }
 
@@ -35,12 +35,12 @@ const TXN_TYPE_LABELS: Record<string, { label: string; color: string }> = {
 
 const PLANS = [
   {
-    tier: 'team', name: 'Team', price: '$29', period: '/mo',
+    tier: 'team', name: 'Starter Crew', price: '$29', period: '/mo',
     subtitle: 'Hire your first part-time team members',
     features: [
-      '2 agent team members',
+      '3 agent team members',
       '30-min heartbeat interval',
-      'Active hours: 6am – 10pm',
+      'Part-Time',
       '50,000 universal credits/mo',
     ],
     workHours: 'Avg 64 work hrs/week',
@@ -48,12 +48,12 @@ const PLANS = [
     envKey: 'VITE_STRIPE_PRICE_TEAM',
   },
   {
-    tier: 'business', name: 'Business', price: '$59', period: '/mo', popular: true,
+    tier: 'business', name: 'Growth Crew', price: '$59', period: '/mo', popular: true,
     subtitle: 'A full-time team that never calls in sick',
     features: [
-      '5 agent team members',
+      '9 agent team members',
       '15-min heartbeat interval',
-      'Always-on schedule (24/7)',
+      'Full-Time',
       '150,000 universal credits/mo',
     ],
     workHours: 'Avg 840 work hrs/week',
@@ -61,12 +61,12 @@ const PLANS = [
     envKey: 'VITE_STRIPE_PRICE_BUSINESS',
   },
   {
-    tier: 'enterprise', name: 'Enterprise', price: '$149', period: '/mo',
+    tier: 'enterprise', name: 'Power Crew', price: '$149', period: '/mo',
     subtitle: 'An always-on workforce that never sleeps',
     features: [
-      '15 agent team members',
+      '30 agent team members',
       '5-min heartbeat interval',
-      'Always-on schedule (24/7)',
+      '24/7 Always On',
       '500,000 universal credits/mo',
     ],
     workHours: 'Avg 2,520 work hrs/week',

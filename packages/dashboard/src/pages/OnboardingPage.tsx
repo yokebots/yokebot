@@ -20,7 +20,6 @@ const INDUSTRIES = [
   'Manufacturing', 'Professional Services', 'Other',
 ]
 
-const COMPANY_SIZES = ['Solo', '2-10', '11-50', '51-200', '200+']
 
 const TUTORIAL_SLIDES = [
   {
@@ -63,7 +62,6 @@ interface ScanFields {
   productsServices: string
   uniqueDifferentiators: string
   buyingMotivations: string
-  pricePoints: string
 }
 
 const SCAN_FIELD_LABELS: Record<keyof ScanFields, { label: string; icon: string }> = {
@@ -76,19 +74,29 @@ const SCAN_FIELD_LABELS: Record<keyof ScanFields, { label: string; icon: string 
   productsServices: { label: 'Products / Services', icon: 'inventory_2' },
   uniqueDifferentiators: { label: 'Unique Differentiators', icon: 'star' },
   buyingMotivations: { label: 'Buying Motivations', icon: 'psychology' },
-  pricePoints: { label: 'Price Points', icon: 'payments' },
 }
 
 const SCAN_FIELD_ORDER: (keyof ScanFields)[] = [
   'companyName', 'industry', 'problemSolved', 'solution',
   'targetMarket', 'geographicFocus', 'productsServices',
-  'uniqueDifferentiators', 'buyingMotivations', 'pricePoints',
+  'uniqueDifferentiators', 'buyingMotivations',
+]
+
+const THINKING_PHRASES = [
+  'Analyzing your business context...',
+  'Reviewing your goals and priorities...',
+  'Matching agent capabilities to your needs...',
+  'Evaluating the best team composition...',
+  'Cross-referencing 40+ agent templates...',
+  'Ranking recommendations by impact...',
+  'Considering your industry specifics...',
+  'Almost there, finalizing suggestions...',
 ]
 
 const EMPTY_SCAN: ScanFields = {
   companyName: '', industry: '', problemSolved: '', solution: '',
   targetMarket: '', geographicFocus: '', productsServices: '',
-  uniqueDifferentiators: '', buyingMotivations: '', pricePoints: '',
+  uniqueDifferentiators: '', buyingMotivations: '',
 }
 
 export function OnboardingPage() {
@@ -102,11 +110,14 @@ export function OnboardingPage() {
   // Step 1 form state
   const [companyUrl, setCompanyUrl] = useState('')
   const [scanning, setScanning] = useState(false)
+  const [scanProgress, setScanProgress] = useState(0)
+  const [scanStatus, setScanStatus] = useState('')
+  const scanTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [scanned, setScanned] = useState(false)
   const [scanError, setScanError] = useState('')
   const [scanFields, setScanFields] = useState<ScanFields>(EMPTY_SCAN)
-  const [companySize, setCompanySize] = useState('')
   const [primaryGoal, setPrimaryGoal] = useState('')
+  const [secondaryGoals, setSecondaryGoals] = useState('')
   const [saving, setSaving] = useState(false)
 
   // Step 3 chat state
@@ -115,6 +126,8 @@ export function OnboardingPage() {
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'agent'; content: string }>>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
+  const [thinkingPhrase, setThinkingPhrase] = useState(THINKING_PHRASES[0])
+  const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Step 4 state
@@ -127,6 +140,24 @@ export function OnboardingPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Rotate thinking phrases while loading
+  useEffect(() => {
+    if (chatLoading) {
+      let idx = 0
+      setThinkingPhrase(THINKING_PHRASES[0])
+      thinkingTimerRef.current = setInterval(() => {
+        idx = (idx + 1) % THINKING_PHRASES.length
+        setThinkingPhrase(THINKING_PHRASES[idx])
+      }, 2500)
+    } else if (thinkingTimerRef.current) {
+      clearInterval(thinkingTimerRef.current)
+      thinkingTimerRef.current = null
+    }
+    return () => {
+      if (thinkingTimerRef.current) clearInterval(thinkingTimerRef.current)
+    }
+  }, [chatLoading])
+
   const skipOnboarding = useCallback(async () => {
     if (!activeTeam) return
     try {
@@ -136,10 +167,39 @@ export function OnboardingPage() {
   }, [activeTeam, navigate])
 
   // Step 1: Scan website
+  const startScanProgress = () => {
+    setScanProgress(0)
+    setScanStatus('Fetching website content...')
+    let progress = 0
+    const steps = [
+      { at: 15, msg: 'Fetching website content...' },
+      { at: 40, msg: 'Analyzing business model...' },
+      { at: 65, msg: 'Extracting key details...' },
+      { at: 85, msg: 'Building your profile...' },
+    ]
+    scanTimerRef.current = setInterval(() => {
+      progress += Math.random() * 3 + 1
+      if (progress > 92) progress = 92 // Cap at 92% until real completion
+      setScanProgress(Math.min(progress, 92))
+      const step = [...steps].reverse().find((s) => progress >= s.at)
+      if (step) setScanStatus(step.msg)
+    }, 200)
+  }
+
+  const stopScanProgress = (success: boolean) => {
+    if (scanTimerRef.current) clearInterval(scanTimerRef.current)
+    scanTimerRef.current = null
+    if (success) {
+      setScanProgress(100)
+      setScanStatus('Done!')
+    }
+  }
+
   const handleScanWebsite = async () => {
     if (!activeTeam || !companyUrl.trim()) return
     setScanning(true)
     setScanError('')
+    startScanProgress()
     try {
       let url = companyUrl.trim()
       if (!url.startsWith('http')) url = `https://${url}`
@@ -151,6 +211,9 @@ export function OnboardingPage() {
       const hasData = result.companyName || result.industry || result.targetMarket || result.problemSolved
       if (!hasData) {
         setScanError('Could not extract business info from that URL. You can fill in the fields manually.')
+        stopScanProgress(false)
+      } else {
+        stopScanProgress(true)
       }
 
       setScanFields({
@@ -163,10 +226,12 @@ export function OnboardingPage() {
         productsServices: result.productsServices ?? '',
         uniqueDifferentiators: result.uniqueDifferentiators ?? '',
         buyingMotivations: result.buyingMotivations ?? '',
-        pricePoints: result.pricePoints ?? '',
       })
+      if (result.primaryGoal) setPrimaryGoal(result.primaryGoal)
+      if (result.secondaryGoals) setSecondaryGoals(result.secondaryGoals)
       setScanned(true)
     } catch {
+      stopScanProgress(false)
       setScanError('Scan failed — please fill in the fields manually.')
       setScanned(true)
     } finally {
@@ -189,10 +254,9 @@ export function OnboardingPage() {
         companyName: scanFields.companyName || null,
         companyUrl: companyUrl || null,
         industry: scanFields.industry || null,
-        companySize: companySize || null,
         businessSummary: businessSummary || null,
         targetMarket: scanFields.targetMarket || null,
-        primaryGoal: primaryGoal || null,
+        primaryGoal: [primaryGoal, secondaryGoals].filter(Boolean).join(' | Secondary: ') || null,
       } as Partial<engine.TeamProfile>)
 
       // Deploy AdvisorBot in background
@@ -244,9 +308,8 @@ export function OnboardingPage() {
         scanFields.productsServices ? `Products/services: ${scanFields.productsServices}` : '',
         scanFields.uniqueDifferentiators ? `Differentiators: ${scanFields.uniqueDifferentiators}` : '',
         scanFields.buyingMotivations ? `Buying motivations: ${scanFields.buyingMotivations}` : '',
-        scanFields.pricePoints ? `Price points: ${scanFields.pricePoints}` : '',
-        companySize ? `Company size: ${companySize}` : '',
         primaryGoal ? `Primary goal: ${primaryGoal}` : '',
+        secondaryGoals ? `Secondary goals: ${secondaryGoals}` : '',
         ``,
         `Based on this business context, recommend 2-3 agents that would help them most. Use the recommend_agents tool.`,
       ].filter(Boolean).join('\n')
@@ -328,15 +391,15 @@ export function OnboardingPage() {
               <h1 className="font-display text-3xl font-bold text-text-main">
                 Welcome, {firstName}!
               </h1>
-              <p className="mt-2 text-text-secondary">
+              <p className="mt-2 text-lg text-text-secondary">
                 Let's learn about your business so your AI agents have the right context.
               </p>
             </div>
 
-            <div className="space-y-5 rounded-2xl border border-border-subtle bg-white p-6 shadow-card">
+            <div className="space-y-6 rounded-2xl border border-border-subtle bg-white p-8 shadow-card">
               {/* Website URL + Scan */}
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-main">Website URL</label>
+                <label className="mb-2 block text-base font-medium text-text-main">Website URL</label>
                 <div className="flex gap-2">
                   <input
                     type="url"
@@ -345,12 +408,12 @@ export function OnboardingPage() {
                     onKeyDown={(e) => { if (e.key === 'Enter' && companyUrl.trim()) handleScanWebsite() }}
                     placeholder="https://yourcompany.com"
                     disabled={scanning}
-                    className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50"
+                    className="flex-1 rounded-lg border border-border-subtle px-3 py-2.5 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50"
                   />
                   <button
                     onClick={handleScanWebsite}
                     disabled={scanning || !companyUrl.trim()}
-                    className="flex items-center gap-1.5 rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green-hover transition-colors disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-lg bg-forest-green px-5 py-2.5 text-base font-medium text-white hover:bg-forest-green-hover transition-colors disabled:opacity-50"
                   >
                     {scanning ? (
                       <>
@@ -365,8 +428,19 @@ export function OnboardingPage() {
                     )}
                   </button>
                 </div>
-                {!scanned && (
-                  <p className="mt-1.5 text-xs text-text-muted">
+                {scanning && (
+                  <div className="mt-3 space-y-1.5">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-border-subtle">
+                      <div
+                        className="h-full rounded-full bg-forest-green transition-all duration-300 ease-out"
+                        style={{ width: `${scanProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-sm text-text-muted">{scanStatus}</p>
+                  </div>
+                )}
+                {!scanned && !scanning && (
+                  <p className="mt-2 text-sm text-text-muted">
                     We'll scan your site to auto-fill your business profile. Or skip and fill in manually below.
                   </p>
                 )}
@@ -374,16 +448,16 @@ export function OnboardingPage() {
 
               {/* Scanned / manual fields */}
               {scanned && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {scanError ? (
                     <div className="flex items-center gap-2 pb-1">
-                      <span className="material-symbols-outlined text-[16px] text-amber-500">warning</span>
-                      <p className="text-sm font-medium text-amber-600">{scanError}</p>
+                      <span className="material-symbols-outlined text-[18px] text-amber-500">warning</span>
+                      <p className="text-base font-medium text-amber-600">{scanError}</p>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 pb-1">
-                      <span className="material-symbols-outlined text-[16px] text-forest-green">check_circle</span>
-                      <p className="text-sm font-medium text-forest-green">Business profile generated — review and edit as needed</p>
+                      <span className="material-symbols-outlined text-[18px] text-forest-green">check_circle</span>
+                      <p className="text-base font-medium text-forest-green">Business profile generated — review and edit as needed</p>
                     </div>
                   )}
 
@@ -394,13 +468,13 @@ export function OnboardingPage() {
                     if (key === 'industry') {
                       return (
                         <div key={key} className="flex items-start gap-3">
-                          <span className="material-symbols-outlined mt-2 text-[18px] text-text-muted shrink-0">{icon}</span>
+                          <span className="material-symbols-outlined mt-2.5 text-[20px] text-text-muted shrink-0">{icon}</span>
                           <div className="flex-1">
-                            <label className="mb-1 block text-xs font-medium text-text-muted uppercase tracking-wide">{label}</label>
+                            <label className="mb-1 block text-sm font-medium text-text-muted uppercase tracking-wide">{label}</label>
                             <select
                               value={value}
                               onChange={(e) => updateField(key, e.target.value)}
-                              className="w-full rounded-lg border border-border-subtle px-3 py-1.5 text-sm text-text-main focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                              className="w-full rounded-lg border border-border-subtle px-3 py-2 text-base text-text-main focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
                             >
                               <option value="">Select an industry</option>
                               {INDUSTRIES.map((ind) => (
@@ -413,15 +487,15 @@ export function OnboardingPage() {
                     }
                     return (
                       <div key={key} className="flex items-start gap-3">
-                        <span className="material-symbols-outlined mt-2 text-[18px] text-text-muted shrink-0">{icon}</span>
+                        <span className="material-symbols-outlined mt-2.5 text-[20px] text-text-muted shrink-0">{icon}</span>
                         <div className="flex-1">
-                          <label className="mb-1 block text-xs font-medium text-text-muted uppercase tracking-wide">{label}</label>
+                          <label className="mb-1 block text-sm font-medium text-text-muted uppercase tracking-wide">{label}</label>
                           <input
                             type="text"
                             value={value}
                             onChange={(e) => updateField(key, e.target.value)}
                             placeholder={`Enter ${label.toLowerCase()}...`}
-                            className="w-full rounded-lg border border-border-subtle px-3 py-1.5 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                            className="w-full rounded-lg border border-border-subtle px-3 py-2 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
                           />
                         </div>
                       </div>
@@ -434,57 +508,55 @@ export function OnboardingPage() {
               {!scanned && !scanning && (
                 <button
                   onClick={() => setScanned(true)}
-                  className="text-sm text-forest-green hover:text-forest-green-hover transition-colors"
+                  className="text-base text-forest-green hover:text-forest-green-hover transition-colors"
                 >
                   Or fill in manually without scanning
                 </button>
               )}
 
-              {/* Company Size */}
+              {/* Goals */}
               {scanned && (
                 <>
-                  <div className="border-t border-border-subtle pt-4">
-                    <label className="mb-1.5 block text-sm font-medium text-text-main">Company Size</label>
-                    <div className="flex flex-wrap gap-2">
-                      {COMPANY_SIZES.map((size) => (
-                        <button
-                          key={size}
-                          onClick={() => setCompanySize(size)}
-                          className={`rounded-lg border px-4 py-2 text-sm transition-colors ${
-                            companySize === size
-                              ? 'border-forest-green bg-forest-green/10 text-forest-green font-medium'
-                              : 'border-border-subtle text-text-secondary hover:border-forest-green/30'
-                          }`}
-                        >
-                          {size}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
                   {/* Primary Goal */}
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-main">
-                      What would you like your AI workforce to help with?
+                    <label className="mb-2 block text-base font-medium text-text-main">
+                      <span className="material-symbols-outlined text-[20px] align-middle mr-1">flag</span>
+                      Primary Goal
                     </label>
-                    <textarea
+                    <input
+                      type="text"
                       value={primaryGoal}
                       onChange={(e) => setPrimaryGoal(e.target.value)}
-                      placeholder="e.g., Generate more B2B leads, automate customer support, scale content marketing..."
-                      rows={3}
-                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green resize-none"
+                      placeholder="e.g., Drive global brand awareness through automated content distribution"
+                      className="w-full rounded-lg border border-border-subtle px-3 py-2.5 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
                     />
+                  </div>
+
+                  {/* Secondary Goals */}
+                  <div>
+                    <label className="mb-2 block text-base font-medium text-text-main">
+                      <span className="material-symbols-outlined text-[20px] align-middle mr-1">checklist</span>
+                      Secondary Goals
+                    </label>
+                    <input
+                      type="text"
+                      value={secondaryGoals}
+                      onChange={(e) => setSecondaryGoals(e.target.value)}
+                      placeholder="e.g., Build community on Discord, Increase user acquisition, Automate support"
+                      className="w-full rounded-lg border border-border-subtle px-3 py-2.5 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                    />
+                    <p className="mt-1.5 text-sm text-text-muted">Comma-separated — what else should your AI workforce tackle?</p>
                   </div>
 
                   <button
                     onClick={handleProfileSubmit}
                     disabled={saving}
-                    className="w-full rounded-lg bg-forest-green px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-50"
+                    className="w-full rounded-lg bg-forest-green px-4 py-3 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-50"
                   >
                     {saving ? 'Saving...' : 'Continue'}
                   </button>
 
-                  <p className="text-center text-xs text-text-muted">
+                  <p className="text-center text-sm text-text-muted">
                     Your answers here become the foundation of business context for your team of agents.
                     If you have multiple businesses, you can create more teams later.
                   </p>
@@ -512,8 +584,8 @@ export function OnboardingPage() {
 
               <ul className="mb-8 space-y-3">
                 {TUTORIAL_SLIDES[slideIndex].bullets.map((bullet, i) => (
-                  <li key={i} className="flex items-start gap-3 text-sm text-text-secondary">
-                    <span className="material-symbols-outlined mt-0.5 text-[16px] text-forest-green">check_circle</span>
+                  <li key={i} className="flex items-start gap-3 text-base text-text-secondary">
+                    <span className="material-symbols-outlined mt-0.5 text-[18px] text-forest-green">check_circle</span>
                     {bullet}
                   </li>
                 ))}
@@ -536,7 +608,7 @@ export function OnboardingPage() {
                 {slideIndex > 0 && (
                   <button
                     onClick={() => setSlideIndex(slideIndex - 1)}
-                    className="flex-1 rounded-lg border border-border-subtle px-4 py-2.5 text-sm font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
+                    className="flex-1 rounded-lg border border-border-subtle px-4 py-3 text-base font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
                   >
                     Back
                   </button>
@@ -549,7 +621,7 @@ export function OnboardingPage() {
                       setStep(3)
                     }
                   }}
-                  className="flex-1 rounded-lg bg-forest-green px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
+                  className="flex-1 rounded-lg bg-forest-green px-4 py-3 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
                 >
                   {slideIndex < TUTORIAL_SLIDES.length - 1 ? 'Next' : 'Meet Your Advisor'}
                 </button>
@@ -561,92 +633,119 @@ export function OnboardingPage() {
         {/* Step 3: AdvisorBot Chat */}
         {step === 3 && (
           <div className="flex w-full max-w-2xl flex-col" style={{ height: 'calc(100vh - 140px)' }}>
-            <div className="mb-4 text-center">
-              <h2 className="font-display text-2xl font-bold text-text-main">Chat with AdvisorBot</h2>
-              <p className="mt-1 text-sm text-text-secondary">
-                Tell AdvisorBot what you need — it'll recommend and set up agents for you.
-              </p>
-            </div>
-
-            {/* Chat messages */}
-            <div className="flex-1 overflow-y-auto rounded-2xl border border-border-subtle bg-white p-4 shadow-card">
-              {!advisorReady ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="text-center">
-                    <div className="mb-3 flex justify-center">
-                      <div className="h-10 w-10 animate-spin rounded-full border-2 border-border-subtle border-t-forest-green" />
-                    </div>
-                    <p className="text-sm text-text-muted">Setting up AdvisorBot...</p>
+            {/* Chat container with header */}
+            <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-border-subtle shadow-lg">
+              {/* Chat header */}
+              <div className="flex items-center gap-3 border-b border-border-subtle bg-gradient-to-r from-forest-green to-forest-green/80 px-5 py-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+                  <span className="material-symbols-outlined text-[22px] text-white">smart_toy</span>
+                </div>
+                <div className="flex-1">
+                  <h2 className="font-display text-lg font-bold text-white">AdvisorBot</h2>
+                  <p className="text-sm text-white/70">
+                    {chatLoading ? 'Thinking...' : advisorReady ? 'Online — ready to help' : 'Connecting...'}
+                  </p>
+                </div>
+                {chatLoading && (
+                  <div className="flex gap-1">
+                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/60" style={{ animationDelay: '0ms' }} />
+                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/60" style={{ animationDelay: '300ms' }} />
+                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/60" style={{ animationDelay: '600ms' }} />
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((msg, i) => (
-                    <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                      {msg.role === 'agent' && (
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-forest-green/10 text-forest-green">
-                          <span className="material-symbols-outlined text-[16px]">smart_toy</span>
-                        </div>
-                      )}
-                      <div className={`max-w-[75%] rounded-xl px-4 py-2.5 text-sm whitespace-pre-wrap ${
-                        msg.role === 'user'
-                          ? 'bg-forest-green/10 text-text-main'
-                          : 'border border-border-subtle bg-white text-text-main'
-                      }`}>
-                        {msg.role === 'agent' && (
-                          <p className="mb-1 text-[11px] font-bold text-forest-green">AdvisorBot</p>
-                        )}
-                        {msg.content}
-                      </div>
-                    </div>
-                  ))}
-                  {chatLoading && (
-                    <div className="flex gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-forest-green/10 text-forest-green">
-                        <span className="material-symbols-outlined text-[16px]">smart_toy</span>
-                      </div>
-                      <div className="rounded-xl border border-border-subtle bg-white px-4 py-2.5 text-sm text-text-muted">
-                        <span className="inline-flex gap-1">
-                          <span className="animate-bounce">.</span>
-                          <span className="animate-bounce" style={{ animationDelay: '0.1s' }}>.</span>
-                          <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>.</span>
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  <div ref={chatEndRef} />
-                </div>
-              )}
-            </div>
+                )}
+              </div>
 
-            {/* Chat input */}
-            <div className="mt-3 flex gap-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && chatInput.trim() && !chatLoading) {
-                    sendAdvisorMessage(chatInput.trim())
-                  }
-                }}
-                placeholder="Ask AdvisorBot anything..."
-                disabled={!advisorReady || chatLoading}
-                className="flex-1 rounded-lg border border-border-subtle px-4 py-2.5 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50"
-              />
-              <button
-                onClick={() => chatInput.trim() && sendAdvisorMessage(chatInput.trim())}
-                disabled={!advisorReady || chatLoading || !chatInput.trim()}
-                className="rounded-lg bg-forest-green px-4 py-2.5 text-white hover:bg-forest-green-hover transition-colors disabled:opacity-50"
-              >
-                <span className="material-symbols-outlined text-[18px]">send</span>
-              </button>
+              {/* Chat messages area */}
+              <div className="flex-1 overflow-y-auto bg-gradient-to-b from-gray-50 to-white p-5">
+                {!advisorReady ? (
+                  <div className="flex h-full items-center justify-center">
+                    <div className="text-center">
+                      <div className="mb-4 flex justify-center">
+                        <div className="relative flex h-14 w-14 items-center justify-center rounded-full bg-forest-green/10">
+                          <span className="material-symbols-outlined text-[28px] text-forest-green">smart_toy</span>
+                          <div className="absolute -inset-1 animate-ping rounded-full bg-forest-green/10" />
+                        </div>
+                      </div>
+                      <p className="text-base font-medium text-text-main">Waking up AdvisorBot...</p>
+                      <p className="mt-1 text-sm text-text-muted">This only takes a moment</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {messages.map((msg, i) => (
+                      <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                        {msg.role === 'agent' && (
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest-green shadow-sm">
+                            <span className="material-symbols-outlined text-[18px] text-white">smart_toy</span>
+                          </div>
+                        )}
+                        <div className={`max-w-[78%] rounded-2xl px-4 py-3 text-base leading-relaxed whitespace-pre-wrap shadow-sm ${
+                          msg.role === 'user'
+                            ? 'bg-forest-green text-white rounded-br-md'
+                            : 'bg-white border border-gray-100 text-text-main rounded-bl-md'
+                        }`}>
+                          {msg.content}
+                        </div>
+                        {msg.role === 'user' && (
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200">
+                            <span className="material-symbols-outlined text-[18px] text-gray-600">person</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {chatLoading && (
+                      <div className="flex gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest-green shadow-sm">
+                          <span className="material-symbols-outlined text-[18px] text-white animate-pulse">psychology</span>
+                        </div>
+                        <div className="rounded-2xl rounded-bl-md bg-white border border-gray-100 px-4 py-3 shadow-sm">
+                          <div className="flex items-center gap-2">
+                            <div className="flex gap-0.5">
+                              <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '0ms' }} />
+                              <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '150ms' }} />
+                              <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '300ms' }} />
+                            </div>
+                          </div>
+                          <p className="mt-1.5 text-sm text-text-muted italic transition-all duration-300">{thinkingPhrase}</p>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+                )}
+              </div>
+
+              {/* Chat input area */}
+              <div className="border-t border-border-subtle bg-white px-4 py-3">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && chatInput.trim() && !chatLoading) {
+                        sendAdvisorMessage(chatInput.trim())
+                      }
+                    }}
+                    placeholder="Ask AdvisorBot anything..."
+                    disabled={!advisorReady || chatLoading}
+                    className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:bg-white focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50 transition-colors"
+                  />
+                  <button
+                    onClick={() => chatInput.trim() && sendAdvisorMessage(chatInput.trim())}
+                    disabled={!advisorReady || chatLoading || !chatInput.trim()}
+                    className="rounded-xl bg-forest-green px-5 py-3 text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-40"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">send</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Finish button */}
             <button
               onClick={() => setStep(4)}
-              className="mt-3 w-full rounded-lg border border-border-subtle px-4 py-2.5 text-sm font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
+              className="mt-4 w-full rounded-xl border border-border-subtle bg-white px-4 py-3 text-base font-medium text-text-secondary shadow-sm hover:bg-light-surface-alt transition-colors"
             >
               Finish Setup
             </button>
@@ -663,7 +762,7 @@ export function OnboardingPage() {
             </div>
 
             <h2 className="font-display text-3xl font-bold text-text-main">You're all set!</h2>
-            <p className="mt-2 text-text-secondary">
+            <p className="mt-2 text-lg text-text-secondary">
               Your AI workforce is ready to go. Here's what we set up for you:
             </p>
 
@@ -673,19 +772,19 @@ export function OnboardingPage() {
                 {deployedAgents.map((agent) => (
                   <div
                     key={agent.id}
-                    className="flex items-center gap-3 rounded-xl border border-border-subtle bg-white px-4 py-3 text-left shadow-sm"
+                    className="flex items-center gap-3 rounded-xl border border-border-subtle bg-white px-4 py-3.5 text-left shadow-sm"
                   >
                     <div
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
                       style={{ backgroundColor: `${agent.iconColor}20`, color: agent.iconColor ?? '#0F4D26' }}
                     >
-                      <span className="material-symbols-outlined text-[20px]">{agent.iconName ?? 'smart_toy'}</span>
+                      <span className="material-symbols-outlined text-[22px]">{agent.iconName ?? 'smart_toy'}</span>
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-text-main truncate">{agent.name}</p>
-                      <p className="text-xs text-text-muted">{agent.department ?? 'General'}</p>
+                      <p className="text-base font-medium text-text-main truncate">{agent.name}</p>
+                      <p className="text-sm text-text-muted">{agent.department ?? 'General'}</p>
                     </div>
-                    <span className="text-xs text-accent-green font-medium">Ready</span>
+                    <span className="text-sm text-accent-green font-medium">Ready</span>
                   </div>
                 ))}
               </div>
@@ -695,20 +794,20 @@ export function OnboardingPage() {
             <div className="mt-8 flex flex-col gap-3">
               <button
                 onClick={() => navigate('/dashboard', { replace: true })}
-                className="w-full rounded-lg bg-forest-green px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
+                className="w-full rounded-lg bg-forest-green px-4 py-3 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
               >
                 Go to Dashboard
               </button>
               <div className="flex gap-3">
                 <button
                   onClick={() => navigate('/chat', { replace: true })}
-                  className="flex-1 rounded-lg border border-border-subtle px-4 py-2.5 text-sm font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
+                  className="flex-1 rounded-lg border border-border-subtle px-4 py-3 text-base font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
                 >
                   Chat with Agents
                 </button>
                 <button
                   onClick={() => navigate('/templates', { replace: true })}
-                  className="flex-1 rounded-lg border border-border-subtle px-4 py-2.5 text-sm font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
+                  className="flex-1 rounded-lg border border-border-subtle px-4 py-3 text-base font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
                 >
                   Browse Templates
                 </button>

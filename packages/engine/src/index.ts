@@ -1112,7 +1112,9 @@ Return JSON with these fields (in this exact order):
   "productsServices": "Key products or services offered (comma-separated list)",
   "pricePoints": "Pricing info if available — free tier, starting price, enterprise, etc. (brief, or null)",
   "uniqueDifferentiators": "What makes them different from competitors? (1-2 sentences)",
-  "buyingMotivations": "Why would customers choose them? Key value props (1-2 sentences)"
+  "buyingMotivations": "Why would customers choose them? Key value props (1-2 sentences)",
+  "primaryGoal": "The #1 thing this business probably wants to accomplish, stated simply and plainly like a human would say it (e.g. 'Grow the user base', 'Get more customers', 'Increase monthly revenue'). No corporate jargon or marketing speak — just the obvious core goal.",
+  "secondaryGoals": "2 additional simple goals, comma-separated, written the way the business owner would say them (e.g. 'Grow the Discord community, Sell more premium subscriptions'). Keep it plain and specific to what this business actually does."
 }
 
 Website content:
@@ -1138,6 +1140,8 @@ ${truncated}`,
         pricePoints: parsed.pricePoints ?? null,
         uniqueDifferentiators: parsed.uniqueDifferentiators ?? null,
         buyingMotivations: parsed.buyingMotivations ?? null,
+        primaryGoal: parsed.primaryGoal ?? null,
+        secondaryGoals: parsed.secondaryGoals ?? null,
       })
     } catch (err) {
       console.error('[scan] Website scan error:', (err as Error).message)

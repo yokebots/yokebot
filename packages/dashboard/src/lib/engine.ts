@@ -754,6 +754,8 @@ export interface WebsiteScanResult {
   pricePoints: string | null
   uniqueDifferentiators: string | null
   buyingMotivations: string | null
+  primaryGoal: string | null
+  secondaryGoals: string | null
 }
 
 export const getTeamProfile = (teamId: string) =>

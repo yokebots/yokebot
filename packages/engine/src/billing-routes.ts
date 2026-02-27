@@ -23,9 +23,9 @@ const TIER_CONFIG: Record<string, {
   hoursStart: number; hoursEnd: number
   monthlyCredits: number; includedCredits: number
 }> = {
-  team:       { maxAgents: 2,  fastestHeartbeat: 1800, hoursStart: 6,  hoursEnd: 22, monthlyCredits: 50000,  includedCredits: 50000 },
-  business:   { maxAgents: 5,  fastestHeartbeat: 900,  hoursStart: 0,  hoursEnd: 24, monthlyCredits: 150000, includedCredits: 150000 },
-  enterprise: { maxAgents: 15, fastestHeartbeat: 300,  hoursStart: 0,  hoursEnd: 24, monthlyCredits: 500000, includedCredits: 500000 },
+  team:       { maxAgents: 3,  fastestHeartbeat: 1800, hoursStart: 6,  hoursEnd: 22, monthlyCredits: 50000,  includedCredits: 50000 },
+  business:   { maxAgents: 9,  fastestHeartbeat: 900,  hoursStart: 0,  hoursEnd: 24, monthlyCredits: 150000, includedCredits: 150000 },
+  enterprise: { maxAgents: 30, fastestHeartbeat: 300,  hoursStart: 0,  hoursEnd: 24, monthlyCredits: 500000, includedCredits: 500000 },
 }
 
 // Map Stripe Price IDs → tier names
