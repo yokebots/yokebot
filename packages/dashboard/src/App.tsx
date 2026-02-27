@@ -14,6 +14,9 @@ import { KnowledgeBasePage } from '@/pages/KnowledgeBasePage'
 import { SkillsPage } from '@/pages/SkillsPage'
 import { TemplatesPage } from '@/pages/TemplatesPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { TeamPage } from '@/pages/TeamPage'
+import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
+import { LoginPage } from '@/pages/LoginPage'
 import { ToastProvider } from '@/components/ToastNotifications'
 import type { ReactNode } from 'react'
 
@@ -46,6 +49,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route index element={<RootRoute />} />
+      <Route path="login" element={<LoginPage />} />
+      <Route path="auth/callback" element={<AuthCallbackPage />} />
 
       <Route
         element={
@@ -67,6 +72,7 @@ function AppRoutes() {
         <Route path="skills" element={<SkillsPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="team" element={<TeamPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

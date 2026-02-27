@@ -10,36 +10,42 @@ interface SkillCard {
   installed: boolean
 }
 
-const BUILT_IN_SKILLS: SkillCard[] = [
-  { name: 'Slack Connect', icon: 'chat', category: 'Channels', source: 'YokeBot', installed: false, description: 'Seamlessly integrate your agents into Slack channels for real-time team collaboration.' },
-  { name: 'Google Sheets', icon: 'table_chart', category: 'Tools', source: 'Community', installed: false, description: 'Read and write data directly to spreadsheets for reporting agents.' },
+// Placeholder cards for skills not yet available as SKILL.md files
+const MARKETPLACE_SKILLS: SkillCard[] = [
   { name: 'DALL-E 3', icon: 'image', category: 'Creative', source: 'Community', installed: false, description: 'Advanced image generation capabilities directly within your chat interface.' },
   { name: 'Zapier', icon: 'hub', category: 'Tools', source: 'Community', installed: false, description: 'Connect your agents to 6,000+ apps without writing a single line of code.' },
-  { name: 'Python Interpreter', icon: 'terminal', category: 'Tools', source: 'Community', installed: false, description: 'Execute Python code safely in a sandboxed environment for data analysis.' },
-  { name: 'Web Browser', icon: 'language', category: 'Tools', source: 'Community', installed: false, description: 'Allow agents to browse the internet to find information and take actions.' },
   { name: 'Jira Cloud', icon: 'task_alt', category: 'Tools', source: 'Community', installed: false, description: 'Create and track Jira tickets directly from agent conversations.' },
   { name: 'Gmail', icon: 'mail', category: 'Channels', source: 'Community', installed: false, description: 'Read, send, and summarize emails. Manage calendar events through agents.' },
   { name: 'Notion', icon: 'edit_note', category: 'Tools', source: 'Community', installed: false, description: 'Read and write Notion pages and databases for knowledge management.' },
 ]
 
-const categories = ['All', 'Channels', 'Tools', 'Creative', 'Models']
+const SKILL_ICONS: Record<string, string> = {
+  'Web Search': 'language',
+  'Code Interpreter': 'terminal',
+  'Slack Notify': 'chat',
+  'Google Sheets': 'table_chart',
+}
+
+const categories = ['All', 'Channels', 'Tools', 'Creative']
 
 export function SkillsPage() {
   const [filter, setFilter] = useState('All')
   const [search, setSearch] = useState('')
-  const [skills, setSkills] = useState<SkillCard[]>(BUILT_IN_SKILLS)
+  const [skills, setSkills] = useState<SkillCard[]>(MARKETPLACE_SKILLS)
 
   useEffect(() => {
     engine.listSkills().then((loaded) => {
       const loadedCards: SkillCard[] = loaded.map((s) => ({
         name: s.metadata.name,
         description: s.metadata.description,
-        icon: 'extension',
+        icon: SKILL_ICONS[s.metadata.name] ?? 'extension',
         category: s.metadata.tags[0] ?? 'Tools',
-        source: s.metadata.source,
+        source: s.metadata.source === 'yokebot' ? 'YokeBot' : s.metadata.source,
         installed: true,
       }))
-      setSkills([...loadedCards, ...BUILT_IN_SKILLS])
+      // Merge real skills with marketplace placeholders, avoiding duplicates
+      const realNames = new Set(loadedCards.map((s) => s.name))
+      setSkills([...loadedCards, ...MARKETPLACE_SKILLS.filter((s) => !realNames.has(s.name))])
     }).catch(() => { /* offline */ })
   }, [])
 
@@ -108,13 +114,13 @@ export function SkillsPage() {
                   <h3 className="font-display text-base font-bold text-text-main">{skill.name}</h3>
                   <p className="mt-1 text-sm text-text-muted">{skill.description}</p>
                 </div>
-                <button className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium ${
+                <span className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium ${
                   skill.installed
                     ? 'border border-green-200 bg-green-50 text-green-700'
-                    : 'bg-forest-green text-white hover:bg-forest-green/90'
+                    : 'border border-border-subtle text-text-muted'
                 }`}>
-                  {skill.installed ? 'Installed' : 'Install'}
-                </button>
+                  {skill.installed ? 'Available' : 'Coming Soon'}
+                </span>
               </div>
             ))}
           </div>
@@ -142,13 +148,13 @@ export function SkillsPage() {
               </div>
               <h3 className="mb-1 text-sm font-bold text-text-main">{skill.name}</h3>
               <p className="mb-4 text-xs text-text-muted line-clamp-2">{skill.description}</p>
-              <button className={`w-full rounded-lg py-2 text-sm font-medium ${
+              <span className={`block w-full rounded-lg py-2 text-center text-sm font-medium ${
                 skill.installed
                   ? 'border border-green-200 bg-green-50 text-green-700'
-                  : 'border border-border-subtle text-text-secondary hover:border-forest-green hover:text-forest-green'
+                  : 'border border-border-subtle text-text-muted'
               }`}>
-                {skill.installed ? 'Installed' : 'Install'}
-              </button>
+                {skill.installed ? 'Available' : 'Coming Soon'}
+              </span>
             </div>
           ))}
         </div>

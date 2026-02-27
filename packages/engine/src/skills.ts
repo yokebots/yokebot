@@ -8,6 +8,8 @@
 
 import { readFileSync, existsSync, readdirSync } from 'fs'
 import { join } from 'path'
+import type Database from 'better-sqlite3'
+import type { ToolDef } from './model.ts'
 
 export interface SkillMetadata {
   name: string
@@ -105,4 +107,55 @@ export function loadSkill(skillsDir: string, skillName: string): Skill | null {
 
   const content = readFileSync(skillMdPath, 'utf-8')
   return parseSkillFile(content, skillMdPath)
+}
+
+/**
+ * Extract tool definitions from ```tools code blocks in SKILL.md instructions.
+ */
+export function parseToolSchemas(instructions: string): ToolDef[] {
+  const regex = /```tools\s*\n([\s\S]*?)```/g
+  const tools: ToolDef[] = []
+
+  let match
+  while ((match = regex.exec(instructions)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]) as Array<{ name: string; description: string; parameters: Record<string, unknown> }>
+      for (const t of parsed) {
+        tools.push({
+          type: 'function',
+          function: { name: t.name, description: t.description, parameters: t.parameters },
+        })
+      }
+    } catch { /* malformed tool block, skip */ }
+  }
+
+  return tools
+}
+
+/**
+ * Load tool schemas for a list of installed skill names.
+ */
+export function getSkillTools(skillsDir: string, skillNames: string[]): ToolDef[] {
+  const tools: ToolDef[] = []
+  for (const name of skillNames) {
+    const skill = loadSkill(skillsDir, name)
+    if (skill) tools.push(...parseToolSchemas(skill.instructions))
+  }
+  return tools
+}
+
+// ---- DB helpers for agent_skills table ----
+
+export function getAgentSkills(db: Database.Database, agentId: string): Array<{ skillName: string; source: string; installedAt: string }> {
+  const rows = db.prepare('SELECT skill_name, source, installed_at FROM agent_skills WHERE agent_id = ?')
+    .all(agentId) as Array<Record<string, string>>
+  return rows.map((r) => ({ skillName: r.skill_name, source: r.source, installedAt: r.installed_at }))
+}
+
+export function installSkill(db: Database.Database, agentId: string, skillName: string, source = 'yokebot'): void {
+  db.prepare('INSERT OR IGNORE INTO agent_skills (agent_id, skill_name, source) VALUES (?, ?, ?)').run(agentId, skillName, source)
+}
+
+export function uninstallSkill(db: Database.Database, agentId: string, skillName: string): void {
+  db.prepare('DELETE FROM agent_skills WHERE agent_id = ? AND skill_name = ?').run(agentId, skillName)
 }

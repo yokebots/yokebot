@@ -5,6 +5,7 @@ import { CreateAgentModal } from '@/components/CreateAgentModal'
 import { mockAgents } from '@/lib/mock-data'
 import * as engine from '@/lib/engine'
 import type { Agent } from '@/types/agent'
+import type { ActivityLogEntry } from '@/lib/engine'
 
 /** Map engine agent to dashboard Agent shape */
 function toDisplayAgent(a: engine.EngineAgent): Agent {
@@ -45,6 +46,7 @@ export function DashboardPage() {
   const [agents, setAgents] = useState<Agent[]>(mockAgents)
   const [engineConnected, setEngineConnected] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [recentActivity, setRecentActivity] = useState<ActivityLogEntry[]>([])
   const [stats, setStats] = useState({
     activeAgents: 0,
     totalAgents: 0,
@@ -54,10 +56,11 @@ export function DashboardPage() {
 
   const loadData = async () => {
     try {
-      const [agentList, approvalData, taskList] = await Promise.all([
+      const [agentList, approvalData, taskList, activity] = await Promise.all([
         engine.listAgents(),
         engine.approvalCount(),
         engine.listTasks(),
+        engine.listActivityLog({ limit: 5 }),
       ])
 
       setEngineConnected(true)
@@ -67,6 +70,7 @@ export function DashboardPage() {
       }
       // If no agents in engine yet, keep mock data for visual demo
 
+      setRecentActivity(activity)
       setStats({
         activeAgents: agentList.filter((a) => a.status === 'running').length,
         totalAgents: agentList.length,
@@ -127,6 +131,24 @@ export function DashboardPage() {
         totalTasks={stats.totalTasks}
         connected={engineConnected}
       />
+
+      {/* Recent Activity */}
+      {recentActivity.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-text-muted">Recent Activity</h2>
+          <div className="rounded-lg border border-border-subtle bg-white divide-y divide-border-subtle">
+            {recentActivity.map((entry) => (
+              <div key={entry.id} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-forest-green" />
+                <p className="flex-1 truncate text-sm text-text-main">{entry.description}</p>
+                <span className="shrink-0 text-xs text-text-muted">
+                  {new Date(entry.createdAt + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Agent Grid */}
       <div className="grid grid-cols-1 gap-6 pb-20 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

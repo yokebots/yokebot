@@ -145,6 +145,14 @@ function migrate(db: Database.Database): void {
       PRIMARY KEY (agent_id, table_id)
     );
 
+    -- Model provider API keys (e.g. DeepInfra, Together, OpenAI)
+    CREATE TABLE IF NOT EXISTS model_providers (
+      id TEXT PRIMARY KEY,
+      api_key TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Skills installed per agent
     CREATE TABLE IF NOT EXISTS agent_skills (
       agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -154,7 +162,36 @@ function migrate(db: Database.Database): void {
       PRIMARY KEY (agent_id, skill_name)
     );
 
+    -- Teams
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Team members
+    CREATE TABLE IF NOT EXISTS team_members (
+      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (team_id, user_id)
+    );
+
+    -- Activity / audit log
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL,
+      agent_id TEXT,
+      description TEXT NOT NULL,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_activity_agent ON activity_log(agent_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_activity_type ON activity_log(event_type, created_at);
     CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(assigned_agent_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);

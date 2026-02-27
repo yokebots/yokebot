@@ -35,11 +35,21 @@ export function ChatPage() {
 
   const sendMsg = async () => {
     if (!newMessage.trim() || !activeChannelId) return
-    await engine.sendMessage(activeChannelId, {
-      senderType: 'human',
-      senderId: 'user',
-      content: newMessage.trim(),
-    })
+    const ch = channels.find((c) => c.id === activeChannelId)
+    if (ch?.type === 'dm') {
+      // DM channel — route through ReAct endpoint (handles chat_messages too)
+      const agentId = ch.name.replace('dm:', '')
+      try {
+        await engine.chatWithAgent(agentId, newMessage.trim())
+      } catch { /* model not available */ }
+    } else {
+      // Group/task channels — post directly
+      await engine.sendMessage(activeChannelId, {
+        senderType: 'human',
+        senderId: 'user',
+        content: newMessage.trim(),
+      })
+    }
     setNewMessage('')
     loadMessages()
   }

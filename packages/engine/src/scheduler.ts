@@ -9,24 +9,33 @@
 import type Database from 'better-sqlite3'
 import { listAgents, type Agent } from './agent.ts'
 import { runReactLoop } from './runtime.ts'
-import type { ModelConfig } from './model.ts'
+import { resolveModelConfig } from './model.ts'
+import { getDmChannel, sendMessage } from './chat.ts'
+import type { WorkspaceConfig } from './workspace.ts'
+import { logActivity } from './activity.ts'
 
 interface SchedulerState {
   timers: Map<string, ReturnType<typeof setInterval>>
   running: boolean
+  workspaceConfig: WorkspaceConfig | null
+  skillsDir: string
 }
 
 const state: SchedulerState = {
   timers: new Map(),
   running: false,
+  workspaceConfig: null,
+  skillsDir: '',
 }
 
 /**
  * Start the scheduler. Registers a heartbeat timer for each running agent.
  */
-export function startScheduler(db: Database.Database): void {
+export function startScheduler(db: Database.Database, workspaceConfig?: WorkspaceConfig, skillsDir?: string): void {
   if (state.running) return
   state.running = true
+  if (workspaceConfig) state.workspaceConfig = workspaceConfig
+  if (skillsDir) state.skillsDir = skillsDir
 
   const agents = listAgents(db)
   for (const agent of agents) {
@@ -90,10 +99,9 @@ async function heartbeat(db: Database.Database, agent: Agent): Promise<void> {
 
   // For proactive agents: prompt the agent to review its state
   if (agent.proactive) {
-    const modelConfig: ModelConfig = {
-      endpoint: agent.modelEndpoint,
-      model: agent.modelName,
-    }
+    // Resolve provider ID → real endpoint + API key
+    // Note: db is captured from the heartbeat closure
+    const modelConfig = resolveModelConfig(db, agent.modelEndpoint, agent.modelName)
 
     const systemPrompt = agent.systemPrompt ?? `You are ${agent.name}, a proactive AI agent.`
     const proactivePrompt = [
@@ -103,11 +111,19 @@ async function heartbeat(db: Database.Database, agent: Agent): Promise<void> {
       'If you notice any pending approvals that need human attention, remind about them.',
     ].join(' ')
 
+    if (!state.workspaceConfig) {
+      console.error(`[scheduler] No workspace config available for heartbeat`)
+      return
+    }
+
     try {
-      const result = await runReactLoop(db, agent.id, proactivePrompt, modelConfig, systemPrompt)
+      const result = await runReactLoop(db, agent.id, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir)
       if (result.response && !result.response.includes('[no-op]')) {
-        console.log(`[scheduler] Proactive message from "${agent.name}": ${result.response.slice(0, 100)}...`)
-        // TODO: Route proactive messages to chat/notifications
+        // Route proactive messages to the agent's DM channel
+        const dmChannel = getDmChannel(db, agent.id)
+        sendMessage(db, dmChannel.id, 'agent', agent.id, result.response)
+        logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`)
+        console.log(`[scheduler] Proactive message from "${agent.name}" posted to DM`)
       }
     } catch (err) {
       console.error(`[scheduler] Heartbeat error for "${agent.name}":`, err)

@@ -89,7 +89,7 @@ export function listAgents(db: Database.Database): Agent[] {
 export function updateAgent(
   db: Database.Database,
   id: string,
-  updates: Partial<Pick<AgentConfig, 'name' | 'department' | 'systemPrompt' | 'proactive' | 'heartbeatSeconds'>>,
+  updates: Partial<Pick<AgentConfig, 'name' | 'department' | 'systemPrompt' | 'proactive' | 'heartbeatSeconds'>> & { modelEndpoint?: string; modelName?: string },
 ): Agent | null {
   const fields: string[] = []
   const values: unknown[] = []
@@ -99,6 +99,8 @@ export function updateAgent(
   if (updates.systemPrompt !== undefined) { fields.push('system_prompt = ?'); values.push(updates.systemPrompt) }
   if (updates.proactive !== undefined) { fields.push('proactive = ?'); values.push(updates.proactive ? 1 : 0) }
   if (updates.heartbeatSeconds !== undefined) { fields.push('heartbeat_seconds = ?'); values.push(updates.heartbeatSeconds) }
+  if (updates.modelEndpoint !== undefined) { fields.push('model_endpoint = ?'); values.push(updates.modelEndpoint) }
+  if (updates.modelName !== undefined) { fields.push('model_name = ?'); values.push(updates.modelName) }
 
   if (fields.length === 0) return getAgent(db, id)
 

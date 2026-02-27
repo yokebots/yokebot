@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { EngineAgent, ChatMessage } from '@/lib/engine'
+import type { EngineAgent, ChatMessage, AvailableProvider, AgentSkill } from '@/lib/engine'
 
 export function AgentDetailPage() {
   const { agentId } = useParams()
@@ -11,15 +11,29 @@ export function AgentDetailPage() {
   const [channelId, setChannelId] = useState('')
   const [newMessage, setNewMessage] = useState('')
   const [editPrompt, setEditPrompt] = useState('')
+  const [editProvider, setEditProvider] = useState('')
   const [editModel, setEditModel] = useState('')
+  const [providers, setProviders] = useState<AvailableProvider[]>([])
+  const [agentSkills, setAgentSkills] = useState<AgentSkill[]>([])
+  const [availableSkills, setAvailableSkills] = useState<Array<{ metadata: { name: string; description: string; tags: string[]; source: string }; filePath: string }>>([])
+  const [installingSkill, setInstallingSkill] = useState(false)
 
   const loadData = async () => {
     if (!agentId) return
     try {
-      const a = await engine.getAgent(agentId)
+      const [a, p, skills, allSkills] = await Promise.all([
+        engine.getAgent(agentId),
+        engine.getAvailableModels(),
+        engine.getAgentSkills(agentId),
+        engine.listSkills(),
+      ])
       setAgent(a)
       setEditPrompt(a.systemPrompt ?? '')
+      setEditProvider(a.modelEndpoint)
       setEditModel(a.modelName)
+      setProviders(p)
+      setAgentSkills(skills)
+      setAvailableSkills(allSkills)
       const ch = await engine.getDmChannel(agentId)
       setChannelId(ch.id)
       const msgs = await engine.getMessages(ch.id)
@@ -30,23 +44,9 @@ export function AgentDetailPage() {
   useEffect(() => { loadData() }, [agentId])
 
   const sendMsg = async () => {
-    if (!newMessage.trim() || !channelId || !agentId) return
-    // Send via chat
-    await engine.sendMessage(channelId, {
-      senderType: 'human',
-      senderId: 'user',
-      content: newMessage.trim(),
-    })
-    // Also trigger agent ReAct loop
+    if (!newMessage.trim() || !agentId) return
     try {
-      const result = await engine.chatWithAgent(agentId, newMessage.trim())
-      if (result.response) {
-        await engine.sendMessage(channelId, {
-          senderType: 'agent',
-          senderId: agentId,
-          content: result.response,
-        })
-      }
+      await engine.chatWithAgent(agentId, newMessage.trim())
     } catch { /* model not available */ }
     setNewMessage('')
     loadData()
@@ -62,11 +62,27 @@ export function AgentDetailPage() {
     loadData()
   }
 
+  const handleProviderChange = (providerId: string) => {
+    setEditProvider(providerId)
+    const prov = providers.find((p) => p.providerId === providerId)
+    if (prov && prov.models.length > 0) {
+      setEditModel(prov.models[0].id)
+    }
+  }
+
   const saveConfig = async () => {
     if (!agentId) return
-    await engine.updateAgent(agentId, { systemPrompt: editPrompt, modelName: editModel })
+    await engine.updateAgent(agentId, {
+      systemPrompt: editPrompt,
+      modelEndpoint: editProvider,
+      modelName: editModel,
+    })
     loadData()
   }
+
+  const currentProvider = providers.find((p) => p.providerId === editProvider)
+  const currentModels = currentProvider?.models ?? []
+  const providerLabel = currentProvider?.providerName ?? editProvider
 
   if (!agent) {
     return <div className="flex items-center justify-center py-24"><p className="text-text-muted">Loading agent...</p></div>
@@ -90,7 +106,7 @@ export function AgentDetailPage() {
           <div>
             <h1 className="font-display text-2xl font-bold text-text-main">{agent.name}</h1>
             <p className="text-sm text-text-muted">
-              {agent.department ?? 'General'} &middot; {agent.modelName}
+              {agent.department ?? 'General'} &middot; {providerLabel} &middot; {agent.modelName}
             </p>
           </div>
           <span className={`ml-2 rounded-full px-3 py-1 text-xs font-bold ${
@@ -142,19 +158,36 @@ export function AgentDetailPage() {
                 <h3 className="mb-3 text-sm font-bold text-text-main">Model Configuration</h3>
                 <div className="space-y-3">
                   <div>
+                    <label className="mb-1 block text-xs text-text-muted">Provider</label>
+                    <select
+                      value={editProvider}
+                      onChange={(e) => handleProviderChange(e.target.value)}
+                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+                    >
+                      {providers.map((p) => (
+                        <option key={p.providerId} value={p.providerId} disabled={!p.enabled}>
+                          {p.providerName}{!p.enabled ? ' (not configured)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
                     <label className="mb-1 block text-xs text-text-muted">Model</label>
-                    <input
-                      type="text"
+                    <select
                       value={editModel}
                       onChange={(e) => setEditModel(e.target.value)}
                       className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm font-mono focus:border-forest-green focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs text-text-muted">Endpoint</label>
-                    <p className="rounded-lg border border-border-subtle bg-light-surface-alt px-3 py-2 font-mono text-sm text-text-muted">
-                      {agent.modelEndpoint}
-                    </p>
+                    >
+                      {currentModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ''}
+                        </option>
+                      ))}
+                      {/* If current model isn't in the list, show it anyway */}
+                      {!currentModels.find((m) => m.id === editModel) && (
+                        <option value={editModel}>{editModel}</option>
+                      )}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -205,9 +238,79 @@ export function AgentDetailPage() {
           )}
 
           {tab === 'skills' && (
-            <div className="rounded-lg border border-border-subtle bg-white p-6 text-center">
-              <span className="material-symbols-outlined mb-2 text-4xl text-text-muted">extension</span>
-              <p className="text-sm text-text-muted">No skills installed yet. Visit the <Link to="/skills" className="text-forest-green hover:underline">Skills Marketplace</Link> to add capabilities.</p>
+            <div className="space-y-4">
+              {/* Installed Skills */}
+              {agentSkills.length > 0 && (
+                <div className="space-y-2">
+                  {agentSkills.map((skill) => {
+                    const meta = availableSkills.find((s) => s.metadata.name.toLowerCase().replace(/\s+/g, '-') === skill.skillName)
+                    return (
+                      <div key={skill.skillName} className="flex items-center justify-between rounded-lg border border-border-subtle bg-white p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest-green/10 text-forest-green">
+                            <span className="material-symbols-outlined">extension</span>
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-text-main">{meta?.metadata.name ?? skill.skillName}</h4>
+                            <p className="text-xs text-text-muted">{meta?.metadata.description ?? `Source: ${skill.source}`}</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={async () => { await engine.removeAgentSkill(agentId!, skill.skillName); loadData() }}
+                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                        >
+                          Uninstall
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Available Skills to Install */}
+              {(() => {
+                const installedNames = new Set(agentSkills.map((s) => s.skillName))
+                const notInstalled = availableSkills.filter((s) => !installedNames.has(s.metadata.name.toLowerCase().replace(/\s+/g, '-')))
+                if (notInstalled.length === 0 && agentSkills.length === 0) {
+                  return (
+                    <div className="rounded-lg border border-border-subtle bg-white p-6 text-center">
+                      <span className="material-symbols-outlined mb-2 text-4xl text-text-muted">extension</span>
+                      <p className="text-sm text-text-muted">No skills available. Add SKILL.md files to the skills directory.</p>
+                    </div>
+                  )
+                }
+                if (notInstalled.length === 0) return null
+                return (
+                  <div>
+                    <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-text-muted">Available Skills</h4>
+                    <div className="space-y-2">
+                      {notInstalled.map((skill) => {
+                        const skillId = skill.metadata.name.toLowerCase().replace(/\s+/g, '-')
+                        return (
+                          <div key={skillId} className="flex items-center justify-between rounded-lg border border-border-subtle bg-white p-4">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-500">
+                                <span className="material-symbols-outlined">extension</span>
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-bold text-text-main">{skill.metadata.name}</h4>
+                                <p className="text-xs text-text-muted">{skill.metadata.description}</p>
+                              </div>
+                            </div>
+                            <button
+                              disabled={installingSkill}
+                              onClick={async () => { setInstallingSkill(true); await engine.installAgentSkill(agentId!, skillId); setInstallingSkill(false); loadData() }}
+                              className="rounded-lg bg-forest-green px-3 py-1.5 text-xs font-medium text-white hover:bg-forest-green/90 disabled:opacity-50"
+                            >
+                              Install
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           )}
 

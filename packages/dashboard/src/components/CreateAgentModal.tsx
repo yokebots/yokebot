@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as engine from '@/lib/engine'
+import type { AvailableProvider } from '@/lib/engine'
 
 interface Props {
   onClose: () => void
@@ -12,9 +13,34 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
   const [name, setName] = useState(defaultName ?? '')
   const [department, setDepartment] = useState('')
   const [systemPrompt, setSystemPrompt] = useState(defaultPrompt ?? '')
-  const [modelName, setModelName] = useState('llama3.2')
+  const [providers, setProviders] = useState<AvailableProvider[]>([])
+  const [selectedProvider, setSelectedProvider] = useState('ollama')
+  const [selectedModel, setSelectedModel] = useState('llama3.2')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    engine.getAvailableModels().then((p) => {
+      setProviders(p)
+      // Default to first enabled provider
+      const enabled = p.find((prov) => prov.enabled)
+      if (enabled) {
+        setSelectedProvider(enabled.providerId)
+        if (enabled.models.length > 0) setSelectedModel(enabled.models[0].id)
+      }
+    }).catch(() => {})
+  }, [])
+
+  const currentProvider = providers.find((p) => p.providerId === selectedProvider)
+  const currentModels = currentProvider?.models ?? []
+
+  const handleProviderChange = (providerId: string) => {
+    setSelectedProvider(providerId)
+    const prov = providers.find((p) => p.providerId === providerId)
+    if (prov && prov.models.length > 0) {
+      setSelectedModel(prov.models[0].id)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -28,7 +54,8 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
         name: name.trim(),
         department: department.trim() || undefined,
         systemPrompt: systemPrompt.trim() || undefined,
-        modelName,
+        modelEndpoint: selectedProvider,
+        modelName: selectedModel,
       })
       onCreated()
     } catch (err) {
@@ -82,14 +109,33 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-text-secondary">Model</label>
-            <input
-              type="text"
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              placeholder="e.g. llama3.2"
+            <label className="mb-1 block text-sm font-medium text-text-secondary">Model Provider</label>
+            <select
+              value={selectedProvider}
+              onChange={(e) => handleProviderChange(e.target.value)}
               className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
-            />
+            >
+              {providers.map((p) => (
+                <option key={p.providerId} value={p.providerId} disabled={!p.enabled}>
+                  {p.providerName}{!p.enabled ? ' (not configured)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-text-secondary">Model</label>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+            >
+              {currentModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>

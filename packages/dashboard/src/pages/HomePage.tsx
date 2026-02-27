@@ -1,4 +1,4 @@
-import { useAuth } from '@/lib/auth'
+import { useNavigate } from 'react-router'
 import { ParticleConstellation } from '@/components/ParticleConstellation'
 
 const agentCards = [
@@ -18,7 +18,8 @@ const modelCards = [
 ]
 
 export function HomePage() {
-  const { signInWithGoogle, signInWithGitHub } = useAuth()
+  const navigate = useNavigate()
+  const goToLogin = () => navigate('/login')
 
   return (
     <div className="relative min-h-screen flex flex-col overflow-x-hidden bg-white text-text-main font-body selection:bg-accent-gold/30 selection:text-forest-green">
@@ -43,10 +44,10 @@ export function HomePage() {
             <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#pricing">Pricing</a>
           </nav>
           <div className="flex items-center gap-4">
-            <button onClick={signInWithGitHub} className="hidden text-sm font-bold text-text-main hover:text-forest-green transition-colors sm:block">
+            <button onClick={goToLogin} className="hidden text-sm font-bold text-text-main hover:text-forest-green transition-colors sm:block">
               Log In
             </button>
-            <button onClick={signInWithGitHub} className="primary-btn rounded-lg border border-transparent bg-forest-green px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:shadow-forest-green/20 hover:bg-forest-green-hover">
+            <button onClick={goToLogin} className="primary-btn rounded-lg border border-transparent bg-forest-green px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:shadow-forest-green/20 hover:bg-forest-green-hover">
               Start Free
             </button>
           </div>
@@ -76,7 +77,7 @@ export function HomePage() {
                 </p>
               </div>
               <div className="flex flex-col gap-4 pt-4 sm:flex-row">
-                <button onClick={signInWithGitHub} className="primary-btn group flex h-14 items-center justify-center gap-2 rounded-lg bg-forest-green px-8 font-display text-lg font-bold text-white shadow-xl shadow-forest-green/15 hover:bg-forest-green-hover">
+                <button onClick={goToLogin} className="primary-btn group flex h-14 items-center justify-center gap-2 rounded-lg bg-forest-green px-8 font-display text-lg font-bold text-white shadow-xl shadow-forest-green/15 hover:bg-forest-green-hover">
                   Start Free
                   <span className="material-symbols-outlined text-white transition-transform group-hover:translate-x-1">arrow_forward</span>
                 </button>
@@ -205,7 +206,7 @@ export function HomePage() {
                   </div>
                   <h3 className="mb-3 font-display text-2xl font-bold text-text-main">YokeBot Cloud</h3>
                   <p className="mb-8 flex-grow text-text-muted">The fastest way to scale. Hosted by us, managed for you. Get instant access to powerful AI agents without infrastructure headaches.</p>
-                  <button onClick={signInWithGitHub} className="primary-btn flex w-full items-center justify-center gap-2 rounded-lg bg-forest-green py-3.5 font-bold text-white shadow-md transition-all hover:bg-forest-green-hover hover:shadow-lg">
+                  <button onClick={goToLogin} className="primary-btn flex w-full items-center justify-center gap-2 rounded-lg bg-forest-green py-3.5 font-bold text-white shadow-md transition-all hover:bg-forest-green-hover hover:shadow-lg">
                     Start Free
                     <span className="material-symbols-outlined text-sm">arrow_forward</span>
                   </button>
@@ -280,7 +281,7 @@ export function HomePage() {
                     </li>
                   ))}
                 </ul>
-                <button onClick={signInWithGitHub} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Started</button>
+                <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Started</button>
               </div>
               {/* Starter — popular */}
               <div className="pricing-card-hover relative z-10 flex scale-105 flex-col rounded-xl border border-accent-gold/50 bg-white p-8 shadow-2xl shadow-accent-gold/10" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03), 0 25px 50px -12px rgba(212, 160, 23, 0.15)' }}>
@@ -299,7 +300,7 @@ export function HomePage() {
                     </li>
                   ))}
                 </ul>
-                <button onClick={signInWithGitHub} className="primary-btn w-full rounded-lg bg-forest-green py-3 font-bold text-white shadow-lg shadow-forest-green/20 transition-colors hover:bg-forest-green-hover">Get Starter</button>
+                <button onClick={goToLogin} className="primary-btn w-full rounded-lg bg-forest-green py-3 font-bold text-white shadow-lg shadow-forest-green/20 transition-colors hover:bg-forest-green-hover">Get Starter</button>
               </div>
               {/* Growth */}
               <div className="pricing-card-hover group relative flex flex-col rounded-xl border border-border-subtle bg-white p-8 transition-all duration-300 hover:border-forest-green/30" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)' }}>
@@ -317,7 +318,7 @@ export function HomePage() {
                     </li>
                   ))}
                 </ul>
-                <button onClick={signInWithGitHub} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Growth</button>
+                <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Growth</button>
               </div>
             </div>
           </div>

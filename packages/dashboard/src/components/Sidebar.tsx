@@ -19,18 +19,26 @@ const resourceNav = [
 ]
 
 const settingsNav = [
+  { to: '/team', icon: 'group', label: 'Team' },
   { to: '/settings', icon: 'settings', label: 'Settings' },
 ]
 
 export function Sidebar() {
   const { user } = useAuth()
   const [approvalCount, setApprovalCount] = useState(0)
+  const [userRole, setUserRole] = useState('Admin')
 
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await engine.approvalCount()
-        setApprovalCount(data.count)
+        const [approvalData, teams] = await Promise.all([
+          engine.approvalCount(),
+          engine.listTeams(),
+        ])
+        setApprovalCount(approvalData.count)
+        if (teams.length > 0 && teams[0].role) {
+          setUserRole(teams[0].role.charAt(0).toUpperCase() + teams[0].role.slice(1))
+        }
       } catch { /* engine offline */ }
     }
     load()
@@ -136,7 +144,7 @@ export function Sidebar() {
               <p className="truncate text-sm font-bold text-text-main">
                 {user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User'}
               </p>
-              <p className="truncate text-xs text-text-muted">Admin</p>
+              <p className="truncate text-xs text-text-muted">{userRole}</p>
             </div>
           </div>
         </div>
