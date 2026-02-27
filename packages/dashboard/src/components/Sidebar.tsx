@@ -32,7 +32,7 @@ const settingsNav = [
 export function Sidebar() {
   const { user } = useAuth()
   const { activeTeam } = useTeam()
-  const { collapsed, toggle } = useSidebar()
+  const { collapsed, toggle, mobileOpen, closeMobile } = useSidebar()
   const [approvalCount, setApprovalCount] = useState(0)
 
   useEffect(() => {
@@ -48,134 +48,177 @@ export function Sidebar() {
     return () => clearInterval(interval)
   }, [activeTeam?.id])
 
+  // On mobile, always show expanded sidebar (not icon-only)
+  const showLabels = mobileOpen || !collapsed
+
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
       isActive
         ? 'border border-forest-green/20 bg-forest-green-light text-forest-green'
         : 'text-text-secondary hover:bg-light-surface-alt hover:text-text-main'
-    } ${collapsed ? 'justify-center' : ''}`
+    } ${!showLabels ? 'justify-center' : ''}`
+
+  const handleNavClick = () => {
+    // Auto-close sidebar on mobile after navigation
+    closeMobile()
+  }
 
   return (
-    <aside className={`flex flex-col border-r border-border-subtle bg-light-surface h-full fixed md:relative z-20 transition-all duration-200 ${collapsed ? 'w-16' : 'w-64'}`}>
-      {/* Logo */}
-      <div className={`flex h-16 items-center border-b border-border-subtle ${collapsed ? 'justify-center px-2' : 'gap-3 px-6'}`}>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-forest-green text-white shadow-soft">
-          <span className="text-lg">🐂</span>
-        </div>
-        {!collapsed && (
-          <span className="flex-1 font-display text-lg font-bold tracking-tight text-text-main">YokeBot</span>
-        )}
-        <button
-          onClick={toggle}
-          className="rounded-lg p-1.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            {collapsed ? 'chevron_right' : 'chevron_left'}
-          </span>
-        </button>
-      </div>
-
-      {/* Team Switcher */}
-      {!collapsed && (
-        <div className="px-4 py-3 border-b border-border-subtle">
-          <TeamSwitcher />
-        </div>
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/40 md:hidden"
+          onClick={closeMobile}
+        />
       )}
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-6">
-        {mainNav.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            className={navLinkClass}
-            title={collapsed ? item.label : undefined}
-          >
-            <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
-              {item.icon}
-            </span>
-            {!collapsed && item.label}
-            {!collapsed && item.badgeKey === 'approvals' && approvalCount > 0 && (
-              <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-                {approvalCount}
-              </span>
-            )}
-            {collapsed && item.badgeKey === 'approvals' && approvalCount > 0 && (
-              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
-            )}
-          </NavLink>
-        ))}
-
-        {/* Resources section */}
-        <div className="mt-6 border-t border-border-subtle pt-6">
-          {!collapsed && (
-            <p className="mb-2 px-3 font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
-              Resources
-            </p>
+      <aside
+        className={[
+          'flex flex-col border-r border-border-subtle bg-light-surface h-full z-30 transition-all duration-200',
+          // Mobile: fixed, off-screen by default, slide in when open
+          'fixed -translate-x-full md:translate-x-0',
+          mobileOpen ? 'translate-x-0' : '',
+          // Mobile always 64w (w-64), desktop respects collapsed
+          'w-64',
+          // Desktop: relative positioning, respect collapsed width
+          'md:relative',
+          collapsed ? 'md:w-16' : 'md:w-64',
+        ].join(' ')}
+      >
+        {/* Logo / Toggle */}
+        <div className={`flex h-16 items-center border-b border-border-subtle ${!showLabels ? 'justify-center px-2' : 'gap-3 px-6'}`}>
+          {showLabels && (
+            <>
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-forest-green text-white shadow-soft">
+                <span className="text-lg">🐂</span>
+              </div>
+              <span className="flex-1 font-display text-lg font-bold tracking-tight text-text-main">YokeBot</span>
+            </>
           )}
-          {resourceNav.map((item) => (
+          {/* Desktop toggle — hidden on mobile (hamburger in TopBar handles it) */}
+          <button
+            onClick={toggle}
+            className="hidden md:flex rounded-lg p-1.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              {collapsed ? 'chevron_right' : 'chevron_left'}
+            </span>
+          </button>
+          {/* Mobile close button */}
+          <button
+            onClick={closeMobile}
+            className="md:hidden rounded-lg p-1.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        </div>
+
+        {/* Team Switcher */}
+        {showLabels && (
+          <div className="px-4 py-3 border-b border-border-subtle">
+            <TeamSwitcher />
+          </div>
+        )}
+
+        {/* Navigation */}
+        <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-6">
+          {mainNav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.end}
               className={navLinkClass}
-              title={collapsed ? item.label : undefined}
+              title={!showLabels ? item.label : undefined}
+              onClick={handleNavClick}
             >
               <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
                 {item.icon}
               </span>
-              {!collapsed && item.label}
+              {showLabels && item.label}
+              {showLabels && item.badgeKey === 'approvals' && approvalCount > 0 && (
+                <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                  {approvalCount}
+                </span>
+              )}
+              {!showLabels && item.badgeKey === 'approvals' && approvalCount > 0 && (
+                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
+              )}
             </NavLink>
           ))}
-        </div>
 
-        {/* Settings section */}
-        <div className="mt-6 border-t border-border-subtle pt-6">
-          {settingsNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={navLinkClass}
-              title={collapsed ? item.label : undefined}
-            >
-              <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
-                {item.icon}
-              </span>
-              {!collapsed && item.label}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
+          {/* Resources section */}
+          <div className="mt-6 border-t border-border-subtle pt-6">
+            {showLabels && (
+              <p className="mb-2 px-3 font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+                Resources
+              </p>
+            )}
+            {resourceNav.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={navLinkClass}
+                title={!showLabels ? item.label : undefined}
+                onClick={handleNavClick}
+              >
+                <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
+                  {item.icon}
+                </span>
+                {showLabels && item.label}
+              </NavLink>
+            ))}
+          </div>
 
-      {/* User Profile */}
-      {!collapsed ? (
-        <div className="border-t border-border-subtle p-4">
-          <div className="cursor-pointer rounded-xl border border-border-subtle bg-light-surface-alt p-3 transition-colors hover:border-border-strong">
-            <div className="flex items-center gap-3">
-              <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
-                <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
-                  {user?.email?.[0]?.toUpperCase() ?? 'U'}
+          {/* Settings section */}
+          <div className="mt-6 border-t border-border-subtle pt-6">
+            {settingsNav.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={navLinkClass}
+                title={!showLabels ? item.label : undefined}
+                onClick={handleNavClick}
+              >
+                <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
+                  {item.icon}
+                </span>
+                {showLabels && item.label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+
+        {/* User Profile */}
+        {showLabels ? (
+          <div className="border-t border-border-subtle p-4">
+            <div className="cursor-pointer rounded-xl border border-border-subtle bg-light-surface-alt p-3 transition-colors hover:border-border-strong">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
+                  <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
+                    {user?.email?.[0]?.toUpperCase() ?? 'U'}
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-text-main">
+                    {user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User'}
+                  </p>
+                  <p className="truncate text-xs text-text-muted">{activeTeam?.role ? activeTeam.role.charAt(0).toUpperCase() + activeTeam.role.slice(1) : 'Member'}</p>
                 </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-text-main">
-                  {user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User'}
-                </p>
-                <p className="truncate text-xs text-text-muted">{activeTeam?.role ? activeTeam.role.charAt(0).toUpperCase() + activeTeam.role.slice(1) : 'Member'}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="border-t border-border-subtle p-2 flex justify-center">
+            <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
+              <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
+                {user?.email?.[0]?.toUpperCase() ?? 'U'}
               </div>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="border-t border-border-subtle p-2 flex justify-center">
-          <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
-            <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
-              {user?.email?.[0]?.toUpperCase() ?? 'U'}
-            </div>
-          </div>
-        </div>
-      )}
-    </aside>
+        )}
+      </aside>
+    </>
   )
 }

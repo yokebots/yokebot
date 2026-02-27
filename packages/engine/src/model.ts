@@ -473,11 +473,18 @@ export async function getAvailableModels(db: Db): Promise<LogicalModel[]> {
   const available: LogicalModel[] = []
 
   // Check which cloud providers have keys configured
+  const hostedMode = process.env.YOKEBOT_HOSTED_MODE === 'true'
   const providerKeys = new Map<string, boolean>()
   for (const provider of PROVIDERS) {
     if (!provider.requiresKey) continue
-    const stored = await getStoredProvider(db, provider.id)
-    providerKeys.set(provider.id, !!(stored?.enabled && stored.apiKey))
+    // In hosted mode, check env vars for API keys
+    if (hostedMode) {
+      const envKey = `${provider.id.toUpperCase()}_API_KEY`
+      providerKeys.set(provider.id, !!process.env[envKey])
+    } else {
+      const stored = await getStoredProvider(db, provider.id)
+      providerKeys.set(provider.id, !!(stored?.enabled && stored.apiKey))
+    }
   }
 
   // Filter catalog to models with at least one available backend

@@ -113,7 +113,7 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 pt-[15vh]" onClick={onClose}>
       <div
-        className="w-full max-w-2xl rounded-2xl border border-border-subtle bg-white shadow-2xl"
+        className="w-full max-w-2xl mx-4 md:mx-0 rounded-2xl border border-border-subtle bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}

@@ -83,7 +83,7 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
-        className="w-full max-w-2xl rounded-2xl border border-border-subtle bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-2xl mx-4 md:mx-0 rounded-2xl border border-border-subtle bg-white p-4 md:p-6 shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-6 flex items-center justify-between">

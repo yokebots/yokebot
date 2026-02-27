@@ -167,8 +167,8 @@ export function MissionControlPage() {
       {view === 'list' && (
         <div className="flex-1 overflow-y-auto">
           <div className="rounded-xl border border-border-subtle bg-white shadow-card overflow-hidden">
-            {/* Table header */}
-            <div className="grid grid-cols-[1fr_120px_100px_140px_120px] gap-4 border-b border-border-subtle bg-light-surface-alt px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-text-muted">
+            {/* Table header — desktop only */}
+            <div className="hidden md:grid grid-cols-[1fr_120px_100px_140px_120px] gap-4 border-b border-border-subtle bg-light-surface-alt px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-text-muted">
               <span>Task</span>
               <span>Status</span>
               <span>Priority</span>
@@ -185,26 +185,46 @@ export function MissionControlPage() {
                   <Link
                     key={task.id}
                     to={`/tasks/${task.id}`}
-                    className="grid grid-cols-[1fr_120px_100px_140px_120px] gap-4 border-b border-border-subtle px-4 py-3 hover:bg-light-surface-alt/50 transition-colors"
+                    className="block md:grid md:grid-cols-[1fr_120px_100px_140px_120px] md:gap-4 border-b border-border-subtle px-4 py-3 hover:bg-light-surface-alt/50 transition-colors"
                   >
+                    {/* Mobile: stacked card layout */}
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-text-main truncate">{task.title}</p>
                       {task.description && (
                         <p className="text-xs text-text-muted truncate mt-0.5">{task.description}</p>
                       )}
                     </div>
-                    <div className="flex items-center">
+                    <div className="flex md:hidden items-center gap-3 mt-2 flex-wrap">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`h-2 w-2 rounded-full ${statusColors[task.status] ?? 'bg-gray-400'}`} />
+                        <span className="text-xs capitalize text-text-secondary">{task.status.replace('_', ' ')}</span>
+                      </span>
+                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${priorityStyle[task.priority]}`}>
+                        {task.priority}
+                      </span>
+                      {agent && (
+                        <span className="flex items-center gap-1 text-xs text-text-secondary">
+                          <span className="material-symbols-outlined text-[14px] text-forest-green">smart_toy</span>
+                          {agent.name}
+                        </span>
+                      )}
+                      {task.deadline && (
+                        <span className="text-xs text-text-muted">{new Date(task.deadline).toLocaleDateString()}</span>
+                      )}
+                    </div>
+                    {/* Desktop: grid columns */}
+                    <div className="hidden md:flex items-center">
                       <span className="flex items-center gap-1.5">
                         <span className={`h-2 w-2 rounded-full ${statusColors[task.status] ?? 'bg-gray-400'}`} />
                         <span className="text-xs capitalize text-text-secondary">{task.status.replace('_', ' ')}</span>
                       </span>
                     </div>
-                    <div>
+                    <div className="hidden md:block">
                       <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${priorityStyle[task.priority]}`}>
                         {task.priority}
                       </span>
                     </div>
-                    <div className="flex items-center">
+                    <div className="hidden md:flex items-center">
                       {agent ? (
                         <div className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-[14px] text-forest-green">smart_toy</span>
@@ -214,7 +234,7 @@ export function MissionControlPage() {
                         <span className="text-xs text-text-muted">Unassigned</span>
                       )}
                     </div>
-                    <div className="flex items-center">
+                    <div className="hidden md:flex items-center">
                       <span className="text-xs text-text-muted">
                         {task.deadline ? new Date(task.deadline).toLocaleDateString() : '—'}
                       </span>

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { UniversalSearch } from '@/components/UniversalSearch'
 import { NotificationCenter } from '@/components/NotificationCenter'
 import { getBillingStatus, notificationCount } from '@/lib/engine'
+import { useSidebar } from '@/lib/sidebar-context'
 
 export function TopBar() {
   const [showSearch, setShowSearch] = useState(false)
@@ -10,6 +11,7 @@ export function TopBar() {
   const [credits, setCredits] = useState<number | null>(null)
   const [unread, setUnread] = useState(0)
   const navigate = useNavigate()
+  const { setMobileOpen } = useSidebar()
 
   // Cmd+K shortcut
   useEffect(() => {
@@ -40,32 +42,41 @@ export function TopBar() {
 
   return (
     <>
-      <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border-subtle bg-white/80 backdrop-blur-md px-6">
-        {/* Search trigger */}
-        <div className="flex flex-1 items-center max-w-xl">
+      <header className="sticky top-0 z-10 flex h-14 md:h-16 items-center justify-between border-b border-border-subtle bg-white/80 backdrop-blur-md px-3 md:px-6">
+        {/* Left: Hamburger (mobile) + Search */}
+        <div className="flex flex-1 items-center gap-2 md:gap-0 max-w-xl">
+          {/* Mobile hamburger */}
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="md:hidden rounded-lg p-1.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
+          >
+            <span className="material-symbols-outlined text-[22px]">menu</span>
+          </button>
+
           <button
             onClick={() => setShowSearch(true)}
             className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-light-surface-alt py-2 pl-3 pr-4 text-sm text-text-muted transition-colors hover:border-forest-green"
           >
             <span className="material-symbols-outlined text-[20px]">search</span>
-            <span className="flex-1 text-left">Search agents, tasks, or files...</span>
-            <kbd className="rounded border border-border-subtle bg-white px-1.5 py-0.5 text-[10px] font-mono text-text-muted">⌘K</kbd>
+            <span className="flex-1 text-left hidden sm:inline">Search agents, tasks, or files...</span>
+            <span className="flex-1 text-left sm:hidden">Search...</span>
+            <kbd className="hidden sm:inline rounded border border-border-subtle bg-white px-1.5 py-0.5 text-[10px] font-mono text-text-muted">⌘K</kbd>
           </button>
         </div>
 
         {/* Right side */}
-        <div className="flex items-center gap-6 pl-6">
+        <div className="flex items-center gap-3 md:gap-6 pl-3 md:pl-6">
           {/* Credits */}
           <button
             onClick={() => navigate('/settings/billing')}
-            className="flex items-center gap-2 rounded-full border border-border-subtle bg-white px-3 py-1.5 shadow-sm hover:border-forest-green transition-colors"
+            className="flex items-center gap-1.5 md:gap-2 rounded-full border border-border-subtle bg-white px-2.5 md:px-3 py-1.5 shadow-sm hover:border-forest-green transition-colors"
           >
             <span className="material-symbols-outlined text-accent-gold text-[18px]">bolt</span>
             <span className="font-mono text-sm font-bold text-text-main">{credits !== null ? credits.toLocaleString() : '--'}</span>
-            <span className="text-xs text-text-muted">credits</span>
+            <span className="hidden sm:inline text-xs text-text-muted">credits</span>
           </button>
 
-          <div className="h-6 w-px bg-border-subtle" />
+          <div className="hidden sm:block h-6 w-px bg-border-subtle" />
 
           {/* Notifications */}
           <button

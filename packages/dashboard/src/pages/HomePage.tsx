@@ -49,6 +49,7 @@ export function HomePage() {
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
   const [openFaq, setOpenFaq] = useState<number | null>(null)
+  const [mobileNav, setMobileNav] = useState(false)
 
   return (
     <div className="relative min-h-screen flex flex-col overflow-x-hidden bg-white text-text-main font-body selection:bg-accent-gold/30 selection:text-forest-green">
@@ -73,11 +74,27 @@ export function HomePage() {
             <button onClick={goToLogin} className="hidden text-sm font-bold text-text-main hover:text-forest-green transition-colors sm:block">
               Log In
             </button>
-            <button onClick={goToLogin} className="primary-btn rounded-lg border border-transparent bg-forest-green px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:shadow-forest-green/20 hover:bg-forest-green-hover">
+            <button onClick={goToLogin} className="primary-btn hidden sm:inline-flex rounded-lg border border-transparent bg-forest-green px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:shadow-forest-green/20 hover:bg-forest-green-hover">
               Start Free
+            </button>
+            {/* Mobile hamburger */}
+            <button onClick={() => setMobileNav(!mobileNav)} className="md:hidden rounded-lg p-1.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors">
+              <span className="material-symbols-outlined text-[24px]">{mobileNav ? 'close' : 'menu'}</span>
             </button>
           </div>
         </div>
+        {/* Mobile nav dropdown */}
+        {mobileNav && (
+          <div className="md:hidden border-t border-border-subtle bg-white/95 backdrop-blur-md px-6 py-4 space-y-3">
+            {['Agents', 'Tasks', 'Goals', 'Workspace', 'Team Chat', 'Contact'].map((item) => (
+              <a key={item} href={item === 'Contact' ? '#contact' : '#features'} onClick={() => setMobileNav(false)} className="block text-sm font-medium text-text-muted hover:text-forest-green transition-colors">{item}</a>
+            ))}
+            <div className="pt-3 border-t border-border-subtle flex flex-col gap-2">
+              <button onClick={goToLogin} className="text-sm font-bold text-text-main hover:text-forest-green transition-colors text-left">Log In</button>
+              <button onClick={goToLogin} className="rounded-lg bg-forest-green px-5 py-2.5 text-sm font-bold text-white text-center">Start Free</button>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="relative z-10 flex-grow flex flex-col">

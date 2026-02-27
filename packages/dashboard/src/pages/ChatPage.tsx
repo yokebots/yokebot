@@ -71,6 +71,7 @@ export function ChatPage() {
   const openDm = async (agentId: string) => {
     const ch = await engine.getDmChannel(agentId)
     setActiveChannelId(ch.id)
+    setShowChannelsMobile(false)
     await loadChannels()
   }
 
@@ -116,10 +117,16 @@ export function ChatPage() {
     return agents.find((a) => a.id === agentId) ?? null
   }
 
+  const [showChannelsMobile, setShowChannelsMobile] = useState(false)
+
   return (
-    <div className="flex h-[calc(100vh-8rem)] -m-6 border-t border-border-subtle">
+    <div className="flex h-[calc(100vh-8rem)] -m-4 md:-m-6 border-t border-border-subtle">
+      {/* Mobile channels backdrop */}
+      {showChannelsMobile && (
+        <div className="fixed inset-0 z-20 bg-black/40 md:hidden" onClick={() => setShowChannelsMobile(false)} />
+      )}
       {/* Left Sidebar - Channels */}
-      <div className="w-64 shrink-0 border-r border-border-subtle bg-light-surface overflow-y-auto">
+      <div className={`w-64 shrink-0 border-r border-border-subtle bg-light-surface overflow-y-auto fixed md:relative z-30 md:z-auto h-full md:block transition-transform duration-200 ${showChannelsMobile ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="p-4">
           <h2 className="mb-4 font-display text-lg font-bold text-text-main">Chat</h2>
 
@@ -187,7 +194,7 @@ export function ChatPage() {
                 }`}
               >
                 <button
-                  onClick={() => setActiveChannelId(ch.id)}
+                  onClick={() => { setActiveChannelId(ch.id); setShowChannelsMobile(false) }}
                   className={`flex flex-1 items-center gap-2 px-2 py-2 text-sm ${
                     ch.id === activeChannelId
                       ? 'text-forest-green font-medium'
@@ -240,7 +247,7 @@ export function ChatPage() {
               {taskThreads.map((ch) => (
                 <button
                   key={ch.id}
-                  onClick={() => setActiveChannelId(ch.id)}
+                  onClick={() => { setActiveChannelId(ch.id); setShowChannelsMobile(false) }}
                   className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
                     ch.id === activeChannelId
                       ? 'bg-forest-green/10 text-forest-green font-medium'
@@ -259,8 +266,15 @@ export function ChatPage() {
       {/* Main Chat Area */}
       <div className="flex flex-1 flex-col">
         {/* Chat Header */}
-        <div className="flex h-14 items-center justify-between border-b border-border-subtle bg-white px-6">
-          <div className="flex items-center gap-3">
+        <div className="flex h-14 items-center justify-between border-b border-border-subtle bg-white px-3 md:px-6">
+          <div className="flex items-center gap-2 md:gap-3">
+            {/* Mobile channels toggle */}
+            <button
+              onClick={() => setShowChannelsMobile(true)}
+              className="md:hidden rounded-lg p-1 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
+            >
+              <span className="material-symbols-outlined text-[20px]">menu</span>
+            </button>
             {activeChannel ? (
               <>
                 <span className="material-symbols-outlined text-[20px] text-text-muted">

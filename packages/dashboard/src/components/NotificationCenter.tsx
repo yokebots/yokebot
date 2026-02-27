@@ -112,7 +112,7 @@ export function NotificationCenter({ onClose }: { onClose: () => void }) {
   )
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 flex w-96 flex-col border-l border-border-subtle bg-white shadow-2xl">
+    <div className="fixed inset-y-0 right-0 z-50 flex w-full sm:w-96 flex-col border-l border-border-subtle bg-white shadow-2xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4">
         <div className="flex items-center gap-2">
