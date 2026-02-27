@@ -129,6 +129,26 @@ export function OnboardingPage() {
   const [thinkingPhrase, setThinkingPhrase] = useState(THINKING_PHRASES[0])
   const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const [agentsDeployed, setAgentsDeployed] = useState(false)
+  const [deploying, setDeploying] = useState(false)
+
+  // Meet-and-greet state
+  const [meetingId, setMeetingId] = useState<string | null>(null)
+  const [meetingMessages, setMeetingMessages] = useState<Array<{
+    id: string
+    type: 'agent' | 'human'
+    agentName?: string
+    agentIcon?: string
+    agentIconColor?: string
+    content: string
+  }>>([])
+  const [meetingActive, setMeetingActive] = useState(false)
+  const [meetingEnded, setMeetingEnded] = useState(false)
+  const [speakingAgent, setSpeakingAgent] = useState<{ name: string; icon: string; iconColor: string } | null>(null)
+  const [meetingInput, setMeetingInput] = useState('')
+  const [audioEnabled, setAudioEnabled] = useState(true)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const meetingEndRef = useRef<HTMLDivElement>(null)
 
   // Step 4 state
   const [deployedAgents, setDeployedAgents] = useState<engine.EngineAgent[]>([])
@@ -317,6 +337,87 @@ export function OnboardingPage() {
       sendAdvisorMessage(contextLines)
     }
   }, [step, advisorReady, advisorAgentId])
+
+  // Scroll meeting chat to bottom
+  useEffect(() => {
+    meetingEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [meetingMessages, speakingAgent])
+
+  // SSE connection for meet-and-greet
+  useEffect(() => {
+    if (!meetingId || !meetingActive || !activeTeam) return
+
+    const cleanup = engine.connectMeetingStream(
+      activeTeam.id,
+      meetingId,
+      (event) => {
+        switch (event.type) {
+          case 'agent_speaking':
+            setSpeakingAgent({
+              name: event.data.agentName ?? 'Agent',
+              icon: event.data.agentIcon ?? 'smart_toy',
+              iconColor: event.data.agentIconColor ?? '#0F4D26',
+            })
+            break
+
+          case 'agent_message':
+            setSpeakingAgent(null)
+            setMeetingMessages((prev) => [...prev, {
+              id: `agent-${event.data.messageId ?? Date.now()}`,
+              type: 'agent',
+              agentName: event.data.agentName,
+              agentIcon: event.data.agentIcon ?? 'smart_toy',
+              agentIconColor: event.data.agentIconColor ?? '#0F4D26',
+              content: event.data.content ?? '',
+            }])
+            // Play audio if enabled
+            if (audioEnabled && event.data.audioBase64) {
+              try {
+                if (audioRef.current) audioRef.current.pause()
+                const audio = new Audio(`data:audio/mpeg;base64,${event.data.audioBase64}`)
+                audioRef.current = audio
+                audio.play().catch(() => {})
+              } catch { /* ignore audio errors */ }
+            }
+            break
+
+          case 'human_message':
+            setMeetingMessages((prev) => [...prev, {
+              id: `human-${event.data.messageId ?? Date.now()}`,
+              type: 'human',
+              content: event.data.content ?? '',
+            }])
+            break
+
+          case 'meeting_ended':
+            setMeetingEnded(true)
+            setMeetingActive(false)
+            setSpeakingAgent(null)
+            break
+
+          case 'error':
+            console.error('[meeting] Error:', event.data.content)
+            break
+        }
+      },
+      (err) => {
+        console.error('[meeting] SSE connection error:', err)
+      },
+    )
+
+    return cleanup
+  }, [meetingId, meetingActive, activeTeam, audioEnabled])
+
+  // Send message during meeting
+  const sendMeetingMsg = useCallback(async (content: string) => {
+    if (!meetingId || !activeTeam || !content.trim()) return
+    setMeetingInput('')
+    try {
+      await engine.sendMeetingMessage(activeTeam.id, meetingId, content.trim())
+    } catch (err) {
+      console.error('[meeting] Failed to send message:', err)
+    }
+  }, [meetingId, activeTeam])
 
   // Step 4: Load deployed agents
   useEffect(() => {
@@ -630,34 +731,118 @@ export function OnboardingPage() {
           </div>
         )}
 
-        {/* Step 3: AdvisorBot Chat */}
+        {/* Step 3: AdvisorBot Chat → Meet-and-Greet */}
         {step === 3 && (
           <div className="flex w-full max-w-2xl flex-col" style={{ height: 'calc(100vh - 140px)' }}>
             {/* Chat container with header */}
             <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-border-subtle shadow-lg">
-              {/* Chat header */}
-              <div className="flex items-center gap-3 border-b border-border-subtle bg-gradient-to-r from-forest-green to-forest-green/80 px-5 py-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
-                  <span className="material-symbols-outlined text-[22px] text-white">smart_toy</span>
-                </div>
-                <div className="flex-1">
-                  <h2 className="font-display text-lg font-bold text-white">AdvisorBot</h2>
-                  <p className="text-sm text-white/70">
-                    {chatLoading ? 'Thinking...' : advisorReady ? 'Online — ready to help' : 'Connecting...'}
-                  </p>
-                </div>
-                {chatLoading && (
-                  <div className="flex gap-1">
-                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/60" style={{ animationDelay: '0ms' }} />
-                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/60" style={{ animationDelay: '300ms' }} />
-                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/60" style={{ animationDelay: '600ms' }} />
-                  </div>
+              {/* Header — switches between AdvisorBot and Meeting */}
+              <div className="flex items-center gap-3 border-b border-border-subtle bg-gradient-to-r from-gray-800 to-gray-700 px-5 py-4">
+                {meetingActive || meetingEnded ? (
+                  <>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 backdrop-blur-sm">
+                      <span className="material-symbols-outlined text-[22px] text-white">groups</span>
+                    </div>
+                    <div className="flex-1">
+                      <h2 className="font-display text-lg font-bold text-white">Team Meet & Greet</h2>
+                      <p className="text-sm text-gray-400">
+                        {meetingEnded ? 'Meeting complete' : speakingAgent ? `${speakingAgent.name} is speaking...` : 'Live'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setAudioEnabled(!audioEnabled)}
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                      title={audioEnabled ? 'Mute audio' : 'Unmute audio'}
+                    >
+                      <span className="material-symbols-outlined text-[18px] text-white">
+                        {audioEnabled ? 'volume_up' : 'volume_off'}
+                      </span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 backdrop-blur-sm">
+                      <span className="material-symbols-outlined text-[22px] text-white">smart_toy</span>
+                    </div>
+                    <div className="flex-1">
+                      <h2 className="font-display text-lg font-bold text-white">AdvisorBot</h2>
+                      <p className="text-sm text-gray-400">
+                        {chatLoading ? 'Thinking...' : advisorReady ? 'Online — ready to help' : 'Connecting...'}
+                      </p>
+                    </div>
+                    {chatLoading && (
+                      <div className="flex gap-1">
+                        <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" style={{ animationDelay: '0ms' }} />
+                        <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" style={{ animationDelay: '300ms' }} />
+                        <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" style={{ animationDelay: '600ms' }} />
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
-              {/* Chat messages area */}
+              {/* Messages area */}
               <div className="flex-1 overflow-y-auto bg-gradient-to-b from-gray-50 to-white p-5">
-                {!advisorReady ? (
+                {meetingActive || meetingEnded ? (
+                  /* ── Meeting messages ── */
+                  <div className="space-y-5">
+                    {meetingMessages.map((msg) => (
+                      <div key={msg.id} className={`flex gap-3 ${msg.type === 'human' ? 'justify-end' : ''}`}>
+                        {msg.type === 'agent' && (
+                          <div
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-sm"
+                            style={{ backgroundColor: msg.agentIconColor ?? '#0F4D26' }}
+                          >
+                            <span className="material-symbols-outlined text-[18px] text-white">
+                              {msg.agentIcon ?? 'smart_toy'}
+                            </span>
+                          </div>
+                        )}
+                        <div className={`max-w-[78%] rounded-2xl px-4 py-3 text-base leading-relaxed whitespace-pre-wrap shadow-sm ${
+                          msg.type === 'human'
+                            ? 'bg-forest-green text-white rounded-br-md'
+                            : 'bg-white border border-gray-100 text-text-main rounded-bl-md'
+                        }`}>
+                          {msg.type === 'agent' && msg.agentName && (
+                            <p className="mb-1 text-sm font-semibold" style={{ color: msg.agentIconColor ?? '#0F4D26' }}>
+                              {msg.agentName}
+                            </p>
+                          )}
+                          {msg.content}
+                        </div>
+                        {msg.type === 'human' && (
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200">
+                            <span className="material-symbols-outlined text-[18px] text-gray-600">person</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {speakingAgent && (
+                      <div className="flex gap-3">
+                        <div
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-sm"
+                          style={{ backgroundColor: speakingAgent.iconColor }}
+                        >
+                          <span className="material-symbols-outlined text-[18px] text-white animate-pulse">
+                            {speakingAgent.icon}
+                          </span>
+                        </div>
+                        <div className="rounded-2xl rounded-bl-md bg-white border border-gray-100 px-4 py-3 shadow-sm">
+                          <p className="text-sm font-semibold" style={{ color: speakingAgent.iconColor }}>
+                            {speakingAgent.name}
+                          </p>
+                          <div className="mt-1 flex gap-0.5">
+                            <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '0ms' }} />
+                            <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '150ms' }} />
+                            <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '300ms' }} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={meetingEndRef} />
+                  </div>
+                ) : !advisorReady ? (
+                  /* ── AdvisorBot loading ── */
                   <div className="flex h-full items-center justify-center">
                     <div className="text-center">
                       <div className="mb-4 flex justify-center">
@@ -671,6 +856,7 @@ export function OnboardingPage() {
                     </div>
                   </div>
                 ) : (
+                  /* ── AdvisorBot 1:1 chat messages ── */
                   <div className="space-y-5">
                     {messages.map((msg, i) => (
                       <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
@@ -715,40 +901,122 @@ export function OnboardingPage() {
                 )}
               </div>
 
-              {/* Chat input area */}
+              {/* Input area */}
               <div className="border-t border-border-subtle bg-white px-4 py-3">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && chatInput.trim() && !chatLoading) {
-                        sendAdvisorMessage(chatInput.trim())
+                {meetingEnded ? (
+                  /* Meeting ended → Go to Dashboard */
+                  <button
+                    onClick={async () => {
+                      if (activeTeam) {
+                        await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
+                      }
+                      navigate('/dashboard', { replace: true })
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">dashboard</span>
+                    Go to My Dashboard
+                    <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
+                  </button>
+                ) : meetingActive ? (
+                  /* During meeting → human can type */
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={meetingInput}
+                      onChange={(e) => setMeetingInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && meetingInput.trim()) {
+                          sendMeetingMsg(meetingInput.trim())
+                        }
+                      }}
+                      placeholder="Say something to the team..."
+                      className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:bg-white focus:outline-none focus:ring-1 focus:ring-forest-green transition-colors"
+                    />
+                    <button
+                      onClick={() => meetingInput.trim() && sendMeetingMsg(meetingInput.trim())}
+                      disabled={!meetingInput.trim()}
+                      className="rounded-xl bg-forest-green px-5 py-3 text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-40"
+                    >
+                      <span className="material-symbols-outlined text-[20px]">send</span>
+                    </button>
+                  </div>
+                ) : agentsDeployed && !meetingId ? (
+                  /* Agents deployed but meeting didn't start (error fallback) */
+                  <button
+                    onClick={async () => {
+                      if (activeTeam) {
+                        await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
+                      }
+                      navigate('/dashboard', { replace: true })
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">dashboard</span>
+                    Go to My Dashboard
+                    <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
+                  </button>
+                ) : !chatLoading && messages.some((m) => m.role === 'agent') && !deploying ? (
+                  /* Deploy button */
+                  <button
+                    onClick={async () => {
+                      setDeploying(true)
+                      await sendAdvisorMessage('Yes, deploy all of the recommended agents for me now.')
+                      setDeploying(false)
+                      setAgentsDeployed(true)
+                      // Start meet-and-greet after agents are deployed
+                      if (activeTeam) {
+                        try {
+                          const { meetingId: mid } = await engine.startMeetAndGreet(activeTeam.id)
+                          setMeetingId(mid)
+                          setMeetingActive(true)
+                        } catch (err) {
+                          console.error('[onboarding] Failed to start meet-and-greet:', err)
+                        }
                       }
                     }}
-                    placeholder="Ask AdvisorBot anything..."
-                    disabled={!advisorReady || chatLoading}
-                    className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:bg-white focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50 transition-colors"
-                  />
-                  <button
-                    onClick={() => chatInput.trim() && sendAdvisorMessage(chatInput.trim())}
-                    disabled={!advisorReady || chatLoading || !chatInput.trim()}
-                    className="rounded-xl bg-forest-green px-5 py-3 text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-40"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
                   >
-                    <span className="material-symbols-outlined text-[20px]">send</span>
+                    <span className="material-symbols-outlined text-[20px]">rocket_launch</span>
+                    Deploy Agents Now
                   </button>
-                </div>
+                ) : (
+                  /* AdvisorBot text input */
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && chatInput.trim() && !chatLoading) {
+                          sendAdvisorMessage(chatInput.trim())
+                        }
+                      }}
+                      placeholder="Ask AdvisorBot anything..."
+                      disabled={!advisorReady || chatLoading}
+                      className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:bg-white focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50 transition-colors"
+                    />
+                    <button
+                      onClick={() => chatInput.trim() && sendAdvisorMessage(chatInput.trim())}
+                      disabled={!advisorReady || chatLoading || !chatInput.trim()}
+                      className="rounded-xl bg-forest-green px-5 py-3 text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-40"
+                    >
+                      <span className="material-symbols-outlined text-[20px]">send</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Finish button */}
-            <button
-              onClick={() => setStep(4)}
-              className="mt-4 w-full rounded-xl border border-border-subtle bg-white px-4 py-3 text-base font-medium text-text-secondary shadow-sm hover:bg-light-surface-alt transition-colors"
-            >
-              Finish Setup
-            </button>
+            {/* Skip link — only when not in meeting */}
+            {!agentsDeployed && !meetingActive && !meetingEnded && (
+              <button
+                onClick={() => setStep(4)}
+                className="mt-3 text-sm text-text-muted hover:text-text-secondary transition-colors"
+              >
+                Skip — I'll set up agents later
+              </button>
+            )}
           </div>
         )}
 

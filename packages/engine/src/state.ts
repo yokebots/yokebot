@@ -354,6 +354,19 @@ const SQLITE_DDL = `
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Team meetings (real-time collab sessions)
+  CREATE TABLE IF NOT EXISTS team_meetings (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL REFERENCES chat_channels(id) ON DELETE CASCADE,
+    type TEXT NOT NULL DEFAULT 'meet_and_greet',
+    title TEXT NOT NULL DEFAULT 'Meet & Greet',
+    status TEXT NOT NULL DEFAULT 'pending',
+    started_at TEXT,
+    ended_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -380,6 +393,8 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_kpi_goals_team ON kpi_goals(team_id, status);
   CREATE INDEX IF NOT EXISTS idx_team_creds_team ON team_credentials(team_id);
   CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_servers(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_meetings_team ON team_meetings(team_id);
+  CREATE INDEX IF NOT EXISTS idx_meetings_status ON team_meetings(status);
 `
 
 const POSTGRES_DDL = `
@@ -726,6 +741,19 @@ const POSTGRES_DDL = `
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- Team meetings (real-time collab sessions)
+  CREATE TABLE IF NOT EXISTS team_meetings (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL REFERENCES chat_channels(id) ON DELETE CASCADE,
+    type TEXT NOT NULL DEFAULT 'meet_and_greet',
+    title TEXT NOT NULL DEFAULT 'Meet & Greet',
+    status TEXT NOT NULL DEFAULT 'pending',
+    started_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- Migrations: Add columns to tables that may pre-date multi-tenancy
   ALTER TABLE agents ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
   ALTER TABLE agents ADD COLUMN IF NOT EXISTS template_id TEXT;
@@ -774,6 +802,8 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
   CREATE INDEX IF NOT EXISTS idx_team_creds_team ON team_credentials(team_id);
   CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_servers(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_meetings_team ON team_meetings(team_id);
+  CREATE INDEX IF NOT EXISTS idx_meetings_status ON team_meetings(status);
 
   -- =====================================================================
   -- Row Level Security (RLS)
@@ -815,6 +845,7 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS team_credentials ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS agent_mcp_servers ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS team_profiles ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS team_meetings ENABLE ROW LEVEL SECURITY;
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses

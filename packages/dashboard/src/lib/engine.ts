@@ -100,13 +100,14 @@ export interface ChatChannel {
 }
 
 export interface ChatAttachment {
-  type: 'image' | 'video' | '3d'
+  type: 'image' | 'video' | '3d' | 'audio'
   url: string
   thumbnailUrl?: string
   filename: string
   mimeType: string
   width?: number
   height?: number
+  duration?: number  // milliseconds (for audio/video)
 }
 
 export interface ChatMessage {
@@ -787,3 +788,107 @@ export const getConfig = () => request<PlatformConfig>('/api/config')
 // ===== Ollama =====
 
 export const detectOllama = () => request<OllamaStatus>('/api/ollama')
+
+// ===== Meetings (hosted-only — real-time meet-and-greet) =====
+
+export type MeetingEventType =
+  | 'meeting_started'
+  | 'agent_speaking'
+  | 'agent_message'
+  | 'human_message'
+  | 'meeting_ended'
+  | 'error'
+
+export interface MeetingEvent {
+  type: MeetingEventType
+  meetingId: string
+  timestamp: string
+  data: {
+    agentId?: string
+    agentName?: string
+    agentIcon?: string
+    agentIconColor?: string
+    content?: string
+    audioBase64?: string
+    audioDurationMs?: number
+    messageId?: number
+    senderType?: 'agent' | 'human'
+    phase?: string
+  }
+}
+
+export const startMeetAndGreet = (teamId: string) =>
+  request<{ meetingId: string }>(`/api/teams/${teamId}/meetings/meet-and-greet`, {
+    method: 'POST',
+  })
+
+export const sendMeetingMessage = (teamId: string, meetingId: string, content: string) =>
+  request<{ queued: boolean }>(`/api/teams/${teamId}/meetings/${meetingId}/message`, {
+    method: 'POST', body: JSON.stringify({ content }),
+  })
+
+/**
+ * Connect to a meeting's SSE stream.
+ * Uses fetch + ReadableStream (not EventSource) to support custom auth headers.
+ * Returns a cleanup function to abort the connection.
+ */
+export function connectMeetingStream(
+  teamId: string,
+  meetingId: string,
+  onEvent: (event: MeetingEvent) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  const controller = new AbortController()
+
+  ;(async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const headers: Record<string, string> = {}
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`
+      }
+      if (_activeTeamId) {
+        headers['X-Team-Id'] = _activeTeamId
+      }
+
+      const res = await fetch(
+        `${ENGINE_URL}/api/teams/${teamId}/meetings/${meetingId}/stream`,
+        { headers, signal: controller.signal },
+      )
+
+      if (!res.ok || !res.body) {
+        throw new Error(`SSE connection failed: ${res.status}`)
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // Parse SSE frames
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? '' // keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const event = JSON.parse(line.slice(6)) as MeetingEvent
+              onEvent(event)
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        onError?.(err as Error)
+      }
+    }
+  })()
+
+  return () => controller.abort()
+}

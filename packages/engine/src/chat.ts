@@ -10,13 +10,14 @@ export type SenderType = 'human' | 'agent' | 'system'
 
 export interface ChatChannel { id: string; name: string; type: ChannelType; createdAt: string }
 export interface ChatAttachment {
-  type: 'image' | 'video' | '3d'
+  type: 'image' | 'video' | '3d' | 'audio'
   url: string
   thumbnailUrl?: string
   filename: string
   mimeType: string
   width?: number
   height?: number
+  duration?: number  // milliseconds (for audio/video)
 }
 
 export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; attachments: ChatAttachment[]; taskId: string | null; createdAt: string }

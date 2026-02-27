@@ -20,6 +20,9 @@ dist-ssr
 # YokeBot data
 .yokebot/
 
+# Proprietary cloud/hosted features (not open source)
+packages/engine/src/cloud/
+
 # Vercel
 .vercel/
 

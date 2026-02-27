@@ -330,7 +330,7 @@ export function HomePage() {
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['3 agent team members', '30-min heartbeat interval', 'Part-Time', '50,000 universal credits/mo'].map((f) => (
+                  {['3 Agent Team Members', '30-Min Heartbeat Interval', 'Part-Time Availability', '50,000 Universal Credits/Mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
@@ -357,7 +357,7 @@ export function HomePage() {
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['9 agent team members', '15-min heartbeat interval', 'Full-Time', '150,000 universal credits/mo'].map((f) => (
+                  {['9 Agent Team Members', '15-Min Heartbeat Interval', 'Full-Time Availability', '150,000 Universal Credits/Mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
@@ -383,7 +383,7 @@ export function HomePage() {
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['30 agent team members', '5-min heartbeat interval', '24/7 Always On', '500,000 universal credits/mo'].map((f) => (
+                  {['30 Agent Team Members', '5-Min Heartbeat Interval', '24/7 Always Available', '500,000 Universal Credits/Mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}

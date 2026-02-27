@@ -1189,6 +1189,121 @@ ${truncated}`,
     res.status(201).json({ agentId: agent.id, alreadyExists: false })
   })
 
+  // ===== Meetings (hosted-only — real-time meet-and-greet) =====
+
+  app.post('/api/teams/:id/meetings/meet-and-greet', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
+    }
+    if (!requireRole(req, res, 'admin')) return
+
+    try {
+      const { startMeetAndGreet } = await import('./cloud/orchestrator.ts')
+      const teamId = req.user!.activeTeamId!
+
+      // Find all deployed agents for this team
+      const agents = await listAgents(db, teamId)
+      if (agents.length === 0) {
+        return res.status(400).json({ error: 'No agents deployed on this team' })
+      }
+
+      // Find AdvisorBot
+      const advisor = agents.find(a => a.templateId === 'advisor-bot')
+      if (!advisor) {
+        return res.status(400).json({ error: 'AdvisorBot not found — deploy AdvisorBot first' })
+      }
+
+      // Get company name from team_profiles
+      const profile = await db.queryOne<Record<string, unknown>>(
+        'SELECT company_name FROM team_profiles WHERE team_id = $1', [teamId],
+      )
+
+      const { meetingId } = await startMeetAndGreet(db, {
+        teamId,
+        type: 'meet_and_greet',
+        title: 'Meet & Greet',
+        agentIds: agents.map(a => a.id),
+        advisorAgentId: advisor.id,
+        companyName: (profile?.company_name as string) ?? undefined,
+      })
+
+      res.json({ meetingId })
+    } catch (err) {
+      console.error('[meetings] Failed to start meet-and-greet:', err)
+      res.status(500).json({ error: 'Failed to start meeting' })
+    }
+  })
+
+  app.get('/api/teams/:id/meetings/:meetingId/stream', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
+    }
+
+    try {
+      const { addSseClient, getMeeting } = await import('./cloud/orchestrator.ts')
+
+      // Verify meeting exists and belongs to this team
+      const meeting = getMeeting(req.params.meetingId)
+      if (!meeting || meeting.config.teamId !== req.params.id) {
+        return res.status(404).json({ error: 'Meeting not found' })
+      }
+
+      // Set up SSE headers
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      })
+      res.flushHeaders()
+
+      addSseClient(req.params.meetingId, res)
+
+      // Keepalive ping every 15s to prevent proxy timeout
+      const keepalive = setInterval(() => {
+        try { res.write(':ping\n\n') } catch { clearInterval(keepalive) }
+      }, 15_000)
+
+      req.on('close', () => clearInterval(keepalive))
+    } catch (err) {
+      console.error('[meetings] SSE stream error:', err)
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to connect to meeting stream' })
+      }
+    }
+  })
+
+  app.post('/api/teams/:id/meetings/:meetingId/message', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
+    }
+
+    const { content } = req.body as { content?: string }
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      return res.status(400).json({ error: 'Message content is required' })
+    }
+
+    try {
+      const { injectHumanMessage, getMeeting } = await import('./cloud/orchestrator.ts')
+
+      // Verify meeting belongs to this team
+      const meeting = getMeeting(req.params.meetingId)
+      if (!meeting || meeting.config.teamId !== req.params.id) {
+        return res.status(404).json({ error: 'Meeting not found' })
+      }
+
+      const queued = injectHumanMessage(req.params.meetingId, content.trim())
+      if (!queued) {
+        return res.status(400).json({ error: 'Meeting is not active' })
+      }
+
+      res.json({ queued: true })
+    } catch (err) {
+      console.error('[meetings] Message injection error:', err)
+      res.status(500).json({ error: 'Failed to send message' })
+    }
+  })
+
   // ===== Config (public — returns platform mode info) =====
 
   app.get('/api/config', (_req, res) => {
