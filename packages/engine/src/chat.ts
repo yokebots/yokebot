@@ -9,7 +9,17 @@ export type ChannelType = 'dm' | 'group' | 'task_thread'
 export type SenderType = 'human' | 'agent' | 'system'
 
 export interface ChatChannel { id: string; name: string; type: ChannelType; createdAt: string }
-export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; taskId: string | null; createdAt: string }
+export interface ChatAttachment {
+  type: 'image' | 'video' | '3d'
+  url: string
+  thumbnailUrl?: string
+  filename: string
+  mimeType: string
+  width?: number
+  height?: number
+}
+
+export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; attachments: ChatAttachment[]; taskId: string | null; createdAt: string }
 
 // ---- Channels ----
 
@@ -54,10 +64,11 @@ export async function getTaskThread(db: Db, taskId: string, teamId = ''): Promis
 
 // ---- Messages ----
 
-export async function sendMessage(db: Db, channelId: string, senderType: SenderType, senderId: string, content: string, taskId?: string, teamId = ''): Promise<ChatMessage> {
+export async function sendMessage(db: Db, channelId: string, senderType: SenderType, senderId: string, content: string, taskId?: string, teamId = '', attachments?: ChatAttachment[]): Promise<ChatMessage> {
+  const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null
   const insertedId = await db.insert(
-    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id) VALUES ($1, $2, $3, $4, $5, $6)',
-    [teamId, channelId, senderType, senderId, content, taskId ?? null],
+    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id, attachments) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [teamId, channelId, senderType, senderId, content, taskId ?? null, attachmentsJson],
     'id',
   )
   return (await getMessage(db, Number(insertedId)))!
@@ -87,9 +98,15 @@ export async function getChannelMessages(db: Db, channelId: string, limit = 50, 
 }
 
 function rowToMessage(row: Record<string, unknown>): ChatMessage {
+  let attachments: ChatAttachment[] = []
+  if (row.attachments) {
+    try {
+      attachments = JSON.parse(row.attachments as string) as ChatAttachment[]
+    } catch { /* ignore parse errors */ }
+  }
   return {
     id: row.id as number, channelId: row.channel_id as string, senderType: row.sender_type as SenderType,
-    senderId: row.sender_id as string, content: row.content as string, taskId: row.task_id as string | null,
-    createdAt: row.created_at as string,
+    senderId: row.sender_id as string, content: row.content as string, attachments,
+    taskId: row.task_id as string | null, createdAt: row.created_at as string,
   }
 }

@@ -99,8 +99,8 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
 
   // For proactive agents: prompt the agent to review its state
   if (agent.proactive) {
-    // Resolve provider ID → real endpoint + API key
-    const modelConfig = await resolveModelConfig(db, agent.modelEndpoint, agent.modelName)
+    // Resolve logical model ID → real endpoint + API key
+    const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
 
     const systemPrompt = agent.systemPrompt ?? `You are ${agent.name}, a proactive AI agent.`
     const proactivePrompt = [

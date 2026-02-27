@@ -37,6 +37,7 @@ const SQLITE_DDL = `
     department TEXT,
     icon_name TEXT,
     icon_color TEXT,
+    model_id TEXT,
     model_endpoint TEXT,
     model_name TEXT,
     system_prompt TEXT,
@@ -88,6 +89,7 @@ const SQLITE_DDL = `
     sender_type TEXT NOT NULL,
     sender_id TEXT NOT NULL,
     content TEXT NOT NULL,
+    attachments TEXT,
     task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -250,6 +252,7 @@ const POSTGRES_DDL = `
     department TEXT,
     icon_name TEXT,
     icon_color TEXT,
+    model_id TEXT,
     model_endpoint TEXT,
     model_name TEXT,
     system_prompt TEXT,
@@ -301,6 +304,7 @@ const POSTGRES_DDL = `
     sender_type TEXT NOT NULL,
     sender_id TEXT NOT NULL,
     content TEXT NOT NULL,
+    attachments TEXT,
     task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );

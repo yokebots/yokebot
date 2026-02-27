@@ -116,6 +116,7 @@ async function main() {
       name: body.name,
       department: body.department,
       systemPrompt: body.systemPrompt,
+      modelId: body.modelId,
       modelConfig: {
         endpoint: body.modelEndpoint ?? 'ollama',
         model: body.modelName ?? 'llama3.2',
@@ -182,7 +183,7 @@ async function main() {
     const systemPrompt = agent.systemPrompt ?? `You are ${agent.name}, an AI agent. Be helpful and concise.`
 
     try {
-      const modelConfig = await resolveModelConfig(db, agent.modelEndpoint, agent.modelName)
+      const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
       const result = await runReactLoop(
         db,
         agent.id,

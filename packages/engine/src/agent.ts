@@ -12,6 +12,7 @@ export interface AgentConfig {
   iconName?: string
   iconColor?: string
   systemPrompt?: string
+  modelId?: string
   modelConfig: ModelConfig
   proactive?: boolean
   heartbeatSeconds?: number
@@ -29,6 +30,7 @@ export interface Agent {
   department: string | null
   iconName: string | null
   iconColor: string | null
+  modelId: string
   modelEndpoint: string
   modelName: string
   systemPrompt: string | null
@@ -48,14 +50,14 @@ export async function createAgent(db: Db, teamId: string, config: AgentConfig): 
 
   await db.run(
     `INSERT INTO agents (id, team_id, name, department, icon_name, icon_color,
-      model_endpoint, model_name, system_prompt, proactive,
+      model_id, model_endpoint, model_name, system_prompt, proactive,
       heartbeat_seconds, active_hours_start, active_hours_end,
       created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
     [
       id, teamId, config.name, config.department ?? null, config.iconName ?? null, config.iconColor ?? null,
-      config.modelConfig.endpoint, config.modelConfig.model, config.systemPrompt ?? null,
-      config.proactive ? 1 : 0, config.heartbeatSeconds ?? 3600,
+      config.modelId ?? null, config.modelConfig.endpoint, config.modelConfig.model,
+      config.systemPrompt ?? null, config.proactive ? 1 : 0, config.heartbeatSeconds ?? 3600,
       config.activeHoursStart ?? 9, config.activeHoursEnd ?? 17, now, now,
     ],
   )
@@ -81,7 +83,7 @@ export async function listAgents(db: Db, teamId?: string): Promise<Agent[]> {
 export async function updateAgent(
   db: Db,
   id: string,
-  updates: Partial<Pick<AgentConfig, 'name' | 'department' | 'systemPrompt' | 'proactive' | 'heartbeatSeconds'>> & { modelEndpoint?: string; modelName?: string },
+  updates: Partial<Pick<AgentConfig, 'name' | 'department' | 'systemPrompt' | 'proactive' | 'heartbeatSeconds'>> & { modelId?: string; modelEndpoint?: string; modelName?: string },
 ): Promise<Agent | null> {
   const fields: string[] = []
   const values: unknown[] = []
@@ -92,6 +94,7 @@ export async function updateAgent(
   if (updates.systemPrompt !== undefined) { fields.push(`system_prompt = $${paramIdx++}`); values.push(updates.systemPrompt) }
   if (updates.proactive !== undefined) { fields.push(`proactive = $${paramIdx++}`); values.push(updates.proactive ? 1 : 0) }
   if (updates.heartbeatSeconds !== undefined) { fields.push(`heartbeat_seconds = $${paramIdx++}`); values.push(updates.heartbeatSeconds) }
+  if (updates.modelId !== undefined) { fields.push(`model_id = $${paramIdx++}`); values.push(updates.modelId) }
   if (updates.modelEndpoint !== undefined) { fields.push(`model_endpoint = $${paramIdx++}`); values.push(updates.modelEndpoint) }
   if (updates.modelName !== undefined) { fields.push(`model_name = $${paramIdx++}`); values.push(updates.modelName) }
 
@@ -140,6 +143,7 @@ function rowToAgent(row: Record<string, unknown>): Agent {
     department: row.department as string | null,
     iconName: row.icon_name as string | null,
     iconColor: row.icon_color as string | null,
+    modelId: (row.model_id as string) ?? '',
     modelEndpoint: row.model_endpoint as string,
     modelName: row.model_name as string,
     systemPrompt: row.system_prompt as string | null,

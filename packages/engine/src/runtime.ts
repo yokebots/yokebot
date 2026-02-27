@@ -18,6 +18,10 @@ import { createApproval } from './approval.ts'
 import { listSorTables, listSorRows, updateSorRow, getSorTableByName } from './sor.ts'
 import { getAgentSkills, getSkillTools } from './skills.ts'
 import { logActivity } from './activity.ts'
+import { falGenerate } from './fal.ts'
+import { getLogicalModel } from './model.ts'
+import { downloadAndSave, guessMimeType, type MediaAttachment } from './media.ts'
+import type { ChatAttachment } from './chat.ts'
 
 export interface RuntimeConfig {
   maxIterations: number  // safety limit to prevent infinite loops
@@ -118,6 +122,22 @@ function getBuiltinTools(): ToolDef[] {
       rowId: { type: 'string', description: 'The row ID to update' },
       data: { type: 'object', description: 'Key-value pairs to update' },
     }, ['tableName', 'rowId', 'data']),
+
+    // Media generation
+    toolDef('generate_image', 'Generate an image using AI. Returns the URL of the generated image.', {
+      prompt: { type: 'string', description: 'Text description of the image to generate' },
+      modelId: { type: 'string', description: 'Model to use. Default: "nano-banana-pro"' },
+    }, ['prompt']),
+
+    toolDef('generate_video', 'Generate a video using AI. Returns the URL of the generated video.', {
+      prompt: { type: 'string', description: 'Text description of the video to generate' },
+      modelId: { type: 'string', description: 'Model to use: "kling-3.0" or "seedance-2.0". Default: "kling-3.0"' },
+    }, ['prompt']),
+
+    toolDef('generate_3d', 'Generate a 3D model from an image. Returns the URL of the .glb file.', {
+      imageUrl: { type: 'string', description: 'URL of the input image to convert to 3D' },
+      modelId: { type: 'string', description: 'Model to use. Default: "hunyuan-3d"' },
+    }, ['imageUrl']),
 
   ]
 }
@@ -226,6 +246,90 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const row = await updateSorRow(ctx.db, args.rowId as string, args.data as Record<string, unknown>)
       if (!row) return `Row not found: ${args.rowId as string}`
       return `Row updated: ${JSON.stringify(row.data)}`
+    }
+
+    // ---- Media Generation ----
+    case 'generate_image': {
+      const modelId = (args.modelId as string) || 'nano-banana-pro'
+      const logical = getLogicalModel(modelId)
+      if (!logical || logical.type !== 'image') return `Unknown image model: ${modelId}`
+      const falModelId = logical.backends[0]?.providerModelId
+      if (!falModelId) return `No backend configured for model: ${modelId}`
+      try {
+        const result = await falGenerate(ctx.db, falModelId, { prompt: args.prompt as string })
+        const image = result.images?.[0]
+        if (!image) return 'Image generation completed but no image was returned.'
+
+        // Download to workspace and post as chat attachment
+        const ext = image.content_type?.split('/')?.[1] ?? 'png'
+        const slug = (args.prompt as string).slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_')
+        const filename = `${slug}.${ext}`
+        const workspacePath = await downloadAndSave(ctx.workspaceConfig, ctx.teamId, 'images', image.url, filename)
+        const attachment: ChatAttachment = {
+          type: 'image', url: workspacePath, filename,
+          mimeType: guessMimeType(filename), width: image.width, height: image.height,
+        }
+        const dmChannel = await getDmChannel(ctx.db, ctx.agentId, ctx.teamId)
+        await sendMessage(ctx.db, dmChannel.id, 'agent', ctx.agentId, `Generated image: ${(args.prompt as string).slice(0, 80)}`, undefined, ctx.teamId, [attachment])
+        await logActivity(ctx.db, 'media_generated', ctx.agentId, `Generated image: ${(args.prompt as string).slice(0, 80)}`, undefined, ctx.teamId)
+        return JSON.stringify({ type: 'image', url: workspacePath, width: image.width, height: image.height })
+      } catch (err) {
+        return `Image generation failed: ${(err as Error).message}`
+      }
+    }
+
+    case 'generate_video': {
+      const modelId = (args.modelId as string) || 'kling-3.0'
+      const logical = getLogicalModel(modelId)
+      if (!logical || logical.type !== 'video') return `Unknown video model: ${modelId}`
+      const falModelId = logical.backends[0]?.providerModelId
+      if (!falModelId) return `No backend configured for model: ${modelId}`
+      try {
+        const result = await falGenerate(ctx.db, falModelId, { prompt: args.prompt as string })
+        const video = result.video
+        if (!video) return 'Video generation completed but no video was returned.'
+
+        const ext = video.content_type?.split('/')?.[1] ?? 'mp4'
+        const slug = (args.prompt as string).slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_')
+        const filename = `${slug}.${ext}`
+        const workspacePath = await downloadAndSave(ctx.workspaceConfig, ctx.teamId, 'video', video.url, filename)
+        const attachment: ChatAttachment = {
+          type: 'video', url: workspacePath, filename,
+          mimeType: guessMimeType(filename),
+        }
+        const dmChannel = await getDmChannel(ctx.db, ctx.agentId, ctx.teamId)
+        await sendMessage(ctx.db, dmChannel.id, 'agent', ctx.agentId, `Generated video: ${(args.prompt as string).slice(0, 80)}`, undefined, ctx.teamId, [attachment])
+        await logActivity(ctx.db, 'media_generated', ctx.agentId, `Generated video: ${(args.prompt as string).slice(0, 80)}`, undefined, ctx.teamId)
+        return JSON.stringify({ type: 'video', url: workspacePath })
+      } catch (err) {
+        return `Video generation failed: ${(err as Error).message}`
+      }
+    }
+
+    case 'generate_3d': {
+      const modelId = (args.modelId as string) || 'hunyuan-3d'
+      const logical = getLogicalModel(modelId)
+      if (!logical || logical.type !== '3d') return `Unknown 3D model: ${modelId}`
+      const falModelId = logical.backends[0]?.providerModelId
+      if (!falModelId) return `No backend configured for model: ${modelId}`
+      try {
+        const result = await falGenerate(ctx.db, falModelId, { image_url: args.imageUrl as string })
+        const mesh = result.model_mesh
+        if (!mesh) return '3D generation completed but no model was returned.'
+
+        const filename = mesh.file_name ?? 'model.glb'
+        const workspacePath = await downloadAndSave(ctx.workspaceConfig, ctx.teamId, '3d', mesh.url, filename)
+        const attachment: ChatAttachment = {
+          type: '3d', url: workspacePath, filename,
+          mimeType: guessMimeType(filename),
+        }
+        const dmChannel = await getDmChannel(ctx.db, ctx.agentId, ctx.teamId)
+        await sendMessage(ctx.db, dmChannel.id, 'agent', ctx.agentId, `Generated 3D model`, undefined, ctx.teamId, [attachment])
+        await logActivity(ctx.db, 'media_generated', ctx.agentId, `Generated 3D model from image`, undefined, ctx.teamId)
+        return JSON.stringify({ type: '3d', url: workspacePath, filename })
+      } catch (err) {
+        return `3D generation failed: ${(err as Error).message}`
+      }
     }
 
     default: {

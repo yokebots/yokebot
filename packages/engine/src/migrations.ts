@@ -75,6 +75,69 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 2,
+    name: 'add_model_id_to_agents',
+    async up(db: Db) {
+      // Add model_id column for logical model IDs
+      if (db.driver === 'postgres') {
+        await db.run('ALTER TABLE agents ADD COLUMN IF NOT EXISTS model_id TEXT')
+      } else {
+        const cols = await db.query<{ name: string }>('PRAGMA table_info(agents)')
+        if (!cols.some((c) => c.name === 'model_id')) {
+          await db.run('ALTER TABLE agents ADD COLUMN model_id TEXT')
+        }
+      }
+
+      // Backfill: map known (endpoint, model_name) pairs to logical model IDs
+      const backfillMap: Array<{ endpoint: string; modelName: string; logicalId: string }> = [
+        // DeepInfra models
+        { endpoint: 'deepinfra', modelName: 'MiniMaxAI/MiniMax-M2.5', logicalId: 'minimax-m2.5' },
+        { endpoint: 'deepinfra', modelName: 'Qwen/Qwen3.5-397B-A17B', logicalId: 'qwen-3.5' },
+        { endpoint: 'deepinfra', modelName: 'moonshotai/Kimi-K2.5', logicalId: 'kimi-k2.5' },
+        { endpoint: 'deepinfra', modelName: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', logicalId: 'llama-4-maverick' },
+        { endpoint: 'deepinfra', modelName: 'meta-llama/Llama-4-Scout-17B-16E-Instruct', logicalId: 'llama-4-scout' },
+        { endpoint: 'deepinfra', modelName: 'meta-llama/Meta-Llama-3.1-70B-Instruct', logicalId: 'llama-4-maverick' },
+        { endpoint: 'deepinfra', modelName: 'meta-llama/Meta-Llama-3.1-8B-Instruct', logicalId: 'llama-4-scout' },
+        { endpoint: 'deepinfra', modelName: 'deepseek-ai/DeepSeek-R1', logicalId: 'deepseek-r1' },
+        { endpoint: 'deepinfra', modelName: 'deepseek-ai/DeepSeek-V3', logicalId: 'deepseek-v3' },
+        { endpoint: 'deepinfra', modelName: 'Qwen/Qwen2.5-72B-Instruct', logicalId: 'qwen-3.5' },
+        // Together models → map to closest logical model
+        { endpoint: 'together', modelName: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', logicalId: 'llama-4-maverick' },
+        { endpoint: 'together', modelName: 'deepseek-ai/DeepSeek-R1', logicalId: 'deepseek-r1' },
+        { endpoint: 'together', modelName: 'deepseek-ai/DeepSeek-V3', logicalId: 'deepseek-v3' },
+        // OpenAI models → no longer in catalog, map to closest frontier
+        { endpoint: 'openai', modelName: 'gpt-4o', logicalId: 'minimax-m2.5' },
+        { endpoint: 'openai', modelName: 'gpt-4o-mini', logicalId: 'llama-4-scout' },
+      ]
+
+      for (const mapping of backfillMap) {
+        await db.run(
+          'UPDATE agents SET model_id = $1 WHERE model_endpoint = $2 AND model_name = $3 AND (model_id IS NULL OR model_id = \'\')',
+          [mapping.logicalId, mapping.endpoint, mapping.modelName],
+        )
+      }
+
+      // Default any remaining agents to llama-4-maverick
+      await db.run(
+        "UPDATE agents SET model_id = 'llama-4-maverick' WHERE model_id IS NULL OR model_id = ''",
+      )
+    },
+  },
+  {
+    version: 3,
+    name: 'add_attachments_to_chat_messages',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run('ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS attachments TEXT')
+      } else {
+        const cols = await db.query<{ name: string }>('PRAGMA table_info(chat_messages)')
+        if (!cols.some((c) => c.name === 'attachments')) {
+          await db.run('ALTER TABLE chat_messages ADD COLUMN attachments TEXT')
+        }
+      }
+    },
+  },
 ]
 
 /**

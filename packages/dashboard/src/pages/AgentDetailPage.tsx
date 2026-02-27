@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { EngineAgent, ChatMessage, AvailableProvider, AgentSkill } from '@/lib/engine'
+import type { EngineAgent, ChatMessage, LogicalModel, AgentSkill } from '@/lib/engine'
 
 export function AgentDetailPage() {
   const { agentId } = useParams()
@@ -11,9 +11,8 @@ export function AgentDetailPage() {
   const [channelId, setChannelId] = useState('')
   const [newMessage, setNewMessage] = useState('')
   const [editPrompt, setEditPrompt] = useState('')
-  const [editProvider, setEditProvider] = useState('')
-  const [editModel, setEditModel] = useState('')
-  const [providers, setProviders] = useState<AvailableProvider[]>([])
+  const [editModelId, setEditModelId] = useState('')
+  const [models, setModels] = useState<LogicalModel[]>([])
   const [agentSkills, setAgentSkills] = useState<AgentSkill[]>([])
   const [availableSkills, setAvailableSkills] = useState<Array<{ metadata: { name: string; description: string; tags: string[]; source: string }; filePath: string }>>([])
   const [installingSkill, setInstallingSkill] = useState(false)
@@ -21,7 +20,7 @@ export function AgentDetailPage() {
   const loadData = async () => {
     if (!agentId) return
     try {
-      const [a, p, skills, allSkills] = await Promise.all([
+      const [a, m, skills, allSkills] = await Promise.all([
         engine.getAgent(agentId),
         engine.getAvailableModels(),
         engine.getAgentSkills(agentId),
@@ -29,9 +28,8 @@ export function AgentDetailPage() {
       ])
       setAgent(a)
       setEditPrompt(a.systemPrompt ?? '')
-      setEditProvider(a.modelEndpoint)
-      setEditModel(a.modelName)
-      setProviders(p)
+      setEditModelId(a.modelId || '')
+      setModels(m)
       setAgentSkills(skills)
       setAvailableSkills(allSkills)
       const ch = await engine.getDmChannel(agentId)
@@ -62,27 +60,25 @@ export function AgentDetailPage() {
     loadData()
   }
 
-  const handleProviderChange = (providerId: string) => {
-    setEditProvider(providerId)
-    const prov = providers.find((p) => p.providerId === providerId)
-    if (prov && prov.models.length > 0) {
-      setEditModel(prov.models[0].id)
-    }
-  }
-
   const saveConfig = async () => {
     if (!agentId) return
     await engine.updateAgent(agentId, {
       systemPrompt: editPrompt,
-      modelEndpoint: editProvider,
-      modelName: editModel,
+      modelId: editModelId,
     })
     loadData()
   }
 
-  const currentProvider = providers.find((p) => p.providerId === editProvider)
-  const currentModels = currentProvider?.models ?? []
-  const providerLabel = currentProvider?.providerName ?? editProvider
+  const currentModelLabel = models.find((m) => m.id === editModelId)?.name ?? agent?.modelId ?? agent?.modelName ?? 'Unknown'
+
+  const categoryLabels: Record<string, string> = {
+    frontier: 'Frontier', reasoning: 'Reasoning', efficient: 'Efficient',
+    image: 'Image Generation', video: 'Video Generation', '3d': '3D Generation', local: 'Local (Ollama)',
+  }
+  const categoryOrder = ['frontier', 'reasoning', 'efficient', 'image', 'video', '3d', 'local']
+  const groupedCategories = categoryOrder
+    .map((cat) => ({ category: cat, label: categoryLabels[cat] ?? cat, models: models.filter((m) => m.category === cat) }))
+    .filter((g) => g.models.length > 0)
 
   if (!agent) {
     return <div className="flex items-center justify-center py-24"><p className="text-text-muted">Loading agent...</p></div>
@@ -106,7 +102,7 @@ export function AgentDetailPage() {
           <div>
             <h1 className="font-display text-2xl font-bold text-text-main">{agent.name}</h1>
             <p className="text-sm text-text-muted">
-              {agent.department ?? 'General'} &middot; {providerLabel} &middot; {agent.modelName}
+              {agent.department ?? 'General'} &middot; {currentModelLabel}
             </p>
           </div>
           <span className={`ml-2 rounded-full px-3 py-1 text-xs font-bold ${
@@ -155,41 +151,30 @@ export function AgentDetailPage() {
           {tab === 'config' && (
             <div className="space-y-4">
               <div className="rounded-lg border border-border-subtle bg-white p-4">
-                <h3 className="mb-3 text-sm font-bold text-text-main">Model Configuration</h3>
-                <div className="space-y-3">
-                  <div>
-                    <label className="mb-1 block text-xs text-text-muted">Provider</label>
-                    <select
-                      value={editProvider}
-                      onChange={(e) => handleProviderChange(e.target.value)}
-                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
-                    >
-                      {providers.map((p) => (
-                        <option key={p.providerId} value={p.providerId} disabled={!p.enabled}>
-                          {p.providerName}{!p.enabled ? ' (not configured)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs text-text-muted">Model</label>
-                    <select
-                      value={editModel}
-                      onChange={(e) => setEditModel(e.target.value)}
-                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm font-mono focus:border-forest-green focus:outline-none"
-                    >
-                      {currentModels.map((m) => (
+                <h3 className="mb-3 text-sm font-bold text-text-main">Model</h3>
+                <select
+                  value={editModelId}
+                  onChange={(e) => setEditModelId(e.target.value)}
+                  className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+                >
+                  {groupedCategories.map((group) => (
+                    <optgroup key={group.category} label={group.label}>
+                      {group.models.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.name}{m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}k ctx)` : ''}
                         </option>
                       ))}
-                      {/* If current model isn't in the list, show it anyway */}
-                      {!currentModels.find((m) => m.id === editModel) && (
-                        <option value={editModel}>{editModel}</option>
-                      )}
-                    </select>
-                  </div>
-                </div>
+                    </optgroup>
+                  ))}
+                  {/* If current model isn't in the list, show it anyway */}
+                  {editModelId && !models.find((m) => m.id === editModelId) && (
+                    <option value={editModelId}>{editModelId}</option>
+                  )}
+                </select>
+                {(() => {
+                  const selected = models.find((m) => m.id === editModelId)
+                  return selected ? <p className="mt-1 text-xs text-text-muted">{selected.description}</p> : null
+                })()}
               </div>
 
               <div className="rounded-lg border border-border-subtle bg-white p-4">

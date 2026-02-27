@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { ChatChannel, ChatMessage, EngineAgent } from '@/lib/engine'
+import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent } from '@/lib/engine'
+
+const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 
 export function ChatPage() {
   const { channelId: paramChannelId } = useParams()
@@ -214,6 +216,16 @@ export function ChatPage() {
                   </p>
                 )}
                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+
+                {/* Inline media attachments */}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {msg.attachments.map((att, idx) => (
+                      <MediaPreview key={idx} attachment={att} />
+                    ))}
+                  </div>
+                )}
+
                 <p className="mt-1 text-[10px] text-text-muted">{new Date(msg.createdAt).toLocaleTimeString()}</p>
               </div>
             </div>
@@ -245,4 +257,49 @@ export function ChatPage() {
       </div>
     </div>
   )
+}
+
+function MediaPreview({ attachment }: { attachment: ChatAttachment }) {
+  const fileUrl = `${ENGINE_URL}/api/workspace/file?path=${encodeURIComponent(attachment.url)}`
+
+  if (attachment.type === 'image') {
+    return (
+      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="block">
+        <img
+          src={fileUrl}
+          alt={attachment.filename}
+          className="max-h-64 max-w-full rounded-lg border border-border-subtle cursor-pointer hover:opacity-90 transition-opacity"
+        />
+        <p className="mt-1 text-[10px] text-text-muted">{attachment.filename}</p>
+      </a>
+    )
+  }
+
+  if (attachment.type === 'video') {
+    return (
+      <div>
+        <video
+          src={fileUrl}
+          controls
+          className="max-h-64 max-w-full rounded-lg border border-border-subtle"
+          poster={attachment.thumbnailUrl ? `${ENGINE_URL}/api/workspace/file?path=${encodeURIComponent(attachment.thumbnailUrl)}` : undefined}
+        />
+        <p className="mt-1 text-[10px] text-text-muted">{attachment.filename}</p>
+      </div>
+    )
+  }
+
+  if (attachment.type === '3d') {
+    return (
+      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-lg border border-border-subtle bg-light-surface-alt p-3 hover:bg-light-surface transition-colors">
+        <span className="material-symbols-outlined text-2xl text-forest-green">view_in_ar</span>
+        <div>
+          <p className="text-sm font-medium text-text-main">{attachment.filename}</p>
+          <p className="text-[10px] text-text-muted">3D Model — Click to download</p>
+        </div>
+      </a>
+    )
+  }
+
+  return null
 }

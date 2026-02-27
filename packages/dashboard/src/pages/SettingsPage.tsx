@@ -71,8 +71,7 @@ export function SettingsPage() {
     switch (id) {
       case 'ollama': return 'terminal'
       case 'deepinfra': return 'cloud'
-      case 'together': return 'group'
-      case 'openai': return 'auto_awesome'
+      case 'fal': return 'image'
       default: return 'smart_toy'
     }
   }

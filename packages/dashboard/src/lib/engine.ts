@@ -52,6 +52,7 @@ export interface EngineAgent {
   department: string | null
   iconName: string | null
   iconColor: string | null
+  modelId: string
   modelEndpoint: string
   modelName: string
   systemPrompt: string | null
@@ -94,12 +95,23 @@ export interface ChatChannel {
   createdAt: string
 }
 
+export interface ChatAttachment {
+  type: 'image' | 'video' | '3d'
+  url: string
+  thumbnailUrl?: string
+  filename: string
+  mimeType: string
+  width?: number
+  height?: number
+}
+
 export interface ChatMessage {
   id: number
   channelId: string
   senderType: 'human' | 'agent' | 'system'
   senderId: string
   content: string
+  attachments: ChatAttachment[]
   taskId: string | null
   createdAt: string
 }
@@ -107,6 +119,16 @@ export interface ChatMessage {
 export interface OllamaStatus {
   connected: boolean
   models: Array<{ name: string; size: number; modified_at: string }>
+}
+
+export interface LogicalModel {
+  id: string
+  name: string
+  description: string
+  type: 'chat' | 'image' | 'video' | '3d'
+  category: 'frontier' | 'efficient' | 'reasoning' | 'image' | 'video' | '3d' | 'local'
+  contextWindow?: number
+  backends: Array<{ providerId: string; providerModelId: string; priority: number }>
 }
 
 // ===== Health =====
@@ -123,6 +145,7 @@ export const createAgent = (data: {
   name: string
   department?: string
   systemPrompt?: string
+  modelId?: string
   modelEndpoint?: string
   modelName?: string
   proactive?: boolean
@@ -290,7 +313,7 @@ export interface ProviderConfig {
   hasKey: boolean
 }
 
-export const getAvailableModels = () => request<AvailableProvider[]>('/api/models')
+export const getAvailableModels = () => request<LogicalModel[]>('/api/models')
 
 export const listProviders = () => request<ProviderConfig[]>('/api/models/providers')
 
