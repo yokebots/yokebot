@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router'
 import { AuthProvider, useAuth } from '@/lib/auth'
-import { TeamProvider } from '@/lib/team-context'
+import { TeamProvider, useTeam } from '@/lib/team-context'
 import { DashboardLayout } from '@/layouts/DashboardLayout'
 import { HomePage } from '@/pages/HomePage'
 import { DashboardPage } from '@/pages/DashboardPage'
@@ -23,8 +23,10 @@ import { ProjectsPage } from '@/pages/ProjectsPage'
 import { GoalsPage } from '@/pages/GoalsPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LoginPage } from '@/pages/LoginPage'
+import { OnboardingPage } from '@/pages/OnboardingPage'
 import { ToastProvider } from '@/components/ToastNotifications'
-import type { ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
+import * as engine from '@/lib/engine'
 
 const LoadingScreen = () => (
   <div className="flex h-screen items-center justify-center bg-light-bg">
@@ -44,6 +46,29 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return <TeamProvider>{children}</TeamProvider>
 }
 
+function OnboardingGuard({ children }: { children: ReactNode }) {
+  const { activeTeam, loading: teamLoading } = useTeam()
+  const [checking, setChecking] = useState(true)
+  const [needsOnboarding, setNeedsOnboarding] = useState(false)
+
+  useEffect(() => {
+    if (!activeTeam || teamLoading) return
+    engine.getTeamProfile(activeTeam.id)
+      .then((profile) => {
+        setNeedsOnboarding(!profile.onboardedAt)
+        setChecking(false)
+      })
+      .catch(() => {
+        // Fail open — don't block users if profile endpoint fails
+        setChecking(false)
+      })
+  }, [activeTeam, teamLoading])
+
+  if (teamLoading || checking) return <LoadingScreen />
+  if (needsOnboarding) return <Navigate to="/onboarding" replace />
+  return <>{children}</>
+}
+
 function RootRoute() {
   const { user, loading } = useAuth()
   if (loading) return <LoadingScreen />
@@ -57,11 +82,14 @@ function AppRoutes() {
       <Route index element={<RootRoute />} />
       <Route path="login" element={<LoginPage />} />
       <Route path="auth/callback" element={<AuthCallbackPage />} />
+      <Route path="onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
 
       <Route
         element={
           <ProtectedRoute>
-            <DashboardLayout />
+            <OnboardingGuard>
+              <DashboardLayout />
+            </OnboardingGuard>
           </ProtectedRoute>
         }
       >

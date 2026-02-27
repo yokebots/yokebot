@@ -60,6 +60,7 @@ export interface EngineAgent {
   heartbeatSeconds: number
   activeHoursStart: number
   activeHoursEnd: number
+  templateId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -724,6 +725,38 @@ export const removeMcpServer = (agentId: string, serverName: string) =>
 
 export const testMcpServer = (agentId: string, serverName: string) =>
   request<McpTestResult>(`/api/agents/${agentId}/mcp-servers/${serverName}/test`, { method: 'POST' })
+
+// ===== Team Profile (onboarding) =====
+
+export interface TeamProfile {
+  teamId: string
+  companyName: string | null
+  industry: string | null
+  companySize: string | null
+  primaryGoal: string | null
+  onboardedAt: string | null
+}
+
+export const getTeamProfile = (teamId: string) =>
+  request<TeamProfile>(`/api/teams/${teamId}/profile`)
+
+export const updateTeamProfile = (teamId: string, data: Partial<TeamProfile>) =>
+  request<{ success: boolean }>(`/api/teams/${teamId}/profile`, {
+    method: 'PUT', body: JSON.stringify(data),
+  })
+
+export const setupAdvisor = (teamId: string) =>
+  request<{ agentId: string; alreadyExists: boolean }>(`/api/teams/${teamId}/setup-advisor`, {
+    method: 'POST',
+  })
+
+// ===== Config =====
+
+export interface PlatformConfig {
+  hostedMode: boolean
+}
+
+export const getConfig = () => request<PlatformConfig>('/api/config')
 
 // ===== Ollama =====
 

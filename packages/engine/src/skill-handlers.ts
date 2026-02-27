@@ -725,6 +725,7 @@ registerHandler('eventbrite_manage', async (args, creds) => {
 
 // ============================================================
 // AdvisorBot Tools — Meta-tools that manage the YokeBot platform
+// HOSTED ONLY: These tools are gated to hosted mode.
 // ============================================================
 
 import { listTemplates, getTemplate } from './templates.ts'
@@ -733,11 +734,14 @@ import { loadSkillsFromDir, installSkill, getAgentSkills } from './skills.ts'
 import { resolveModelConfig, getAvailableModels } from './model.ts'
 import { listCredentials } from './credentials.ts'
 
+const ADVISOR_HOSTED_GUARD = 'This feature requires YokeBot Cloud. AdvisorBot and its tools are not available in self-hosted mode.'
+
 // ---- List Available Templates ----
 registerHandler('list_templates', async (_args, _creds, ctx) => {
+  if (process.env.YOKEBOT_HOSTED_MODE !== 'true') return ADVISOR_HOSTED_GUARD
   const templates = listTemplates()
   const agents = await listAgents(ctx.db, ctx.teamId)
-  const deployedTemplateIds = new Set(agents.map((a) => (a as Record<string, unknown>).templateId).filter(Boolean))
+  const deployedTemplateIds = new Set(agents.map((a) => a.templateId).filter(Boolean))
 
   const summary = templates.map((t) => {
     const deployed = deployedTemplateIds.has(t.id) ? ' [DEPLOYED]' : ''
@@ -749,6 +753,7 @@ registerHandler('list_templates', async (_args, _creds, ctx) => {
 
 // ---- Recommend Agents ----
 registerHandler('recommend_agents', async (args, _creds, ctx) => {
+  if (process.env.YOKEBOT_HOSTED_MODE !== 'true') return ADVISOR_HOSTED_GUARD
   const goal = args.goal as string
   const templates = listTemplates()
   const agents = await listAgents(ctx.db, ctx.teamId)
@@ -766,6 +771,7 @@ registerHandler('recommend_agents', async (args, _creds, ctx) => {
 
 // ---- Deploy Agent from Template ----
 registerHandler('deploy_agent', async (args, _creds, ctx) => {
+  if (process.env.YOKEBOT_HOSTED_MODE !== 'true') return ADVISOR_HOSTED_GUARD
   const templateId = args.templateId as string
   const customName = args.name as string | undefined
   const template = getTemplate(templateId)
@@ -815,6 +821,7 @@ registerHandler('deploy_agent', async (args, _creds, ctx) => {
 
 // ---- List My Agents ----
 registerHandler('list_my_agents', async (_args, _creds, ctx) => {
+  if (process.env.YOKEBOT_HOSTED_MODE !== 'true') return ADVISOR_HOSTED_GUARD
   const agents = await listAgents(ctx.db, ctx.teamId)
   if (agents.length === 0) return 'No agents deployed yet. Use recommend_agents to get suggestions or deploy_agent to set one up.'
 
@@ -828,6 +835,7 @@ registerHandler('list_my_agents', async (_args, _creds, ctx) => {
 
 // ---- Install Skill on Agent ----
 registerHandler('install_agent_skill', async (args, _creds, ctx) => {
+  if (process.env.YOKEBOT_HOSTED_MODE !== 'true') return ADVISOR_HOSTED_GUARD
   const agentId = args.agentId as string
   const skillName = args.skillName as string
 
@@ -846,6 +854,7 @@ registerHandler('install_agent_skill', async (args, _creds, ctx) => {
 
 // ---- Check Integrations Status ----
 registerHandler('check_integrations', async (_args, _creds, ctx) => {
+  if (process.env.YOKEBOT_HOSTED_MODE !== 'true') return ADVISOR_HOSTED_GUARD
   const creds = await listCredentials(ctx.db, ctx.teamId)
   const connected = creds.filter((c) => c.hasValue)
   const missing = creds.filter((c) => !c.hasValue)

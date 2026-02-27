@@ -33,7 +33,7 @@ import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, 
 import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema } from './validation.ts'
 import { listCredentials, setCredential, deleteCredential } from './credentials.ts'
 import { listServices } from './services.ts'
-import { listTemplates } from './templates.ts'
+import { listTemplates, getTemplate } from './templates.ts'
 import { listMcpServers, addMcpServer, removeMcpServer, connectMcpServer } from './mcp-client.ts'
 
 const PORT = Number(process.env.PORT ?? process.env.YOKEBOT_PORT ?? 3001)
@@ -157,19 +157,20 @@ async function main() {
     const templateId = (req.body as Record<string, unknown>).templateId as string | undefined
     let isTemplFree = false
     if (templateId) {
-      const { getTemplate } = await import('./templates.ts')
       const tmpl = getTemplate(templateId)
       if (tmpl?.isFree) isTemplFree = true
+
+      // Block hosted-only templates in self-hosted mode
+      if (tmpl?.hostedOnly && process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+        return res.status(403).json({ error: 'This agent is only available on YokeBot Cloud.' })
+      }
     }
 
     // Enforce agent count limit in hosted mode (free templates exempt)
     if (req.subscription && !isTemplFree) {
       const existing = await listAgents(db, teamId)
       // Count only non-free agents
-      const paidAgentCount = existing.filter((a) => {
-        const row = a as unknown as Record<string, unknown>
-        return row.templateId !== 'advisor-bot'
-      }).length
+      const paidAgentCount = existing.filter((a) => a.templateId !== 'advisor-bot').length
       if (paidAgentCount >= req.subscription.maxAgents) {
         return res.status(403).json({
           error: `Your ${req.subscription.tier} plan allows ${req.subscription.maxAgents} agent(s). Upgrade to add more.`,
@@ -268,6 +269,24 @@ async function main() {
 
     // Store user message in DM channel
     const dmChannel = await getDmChannel(db, agent.id, teamId)
+
+    // AdvisorBot daily usage limit (50 messages/day per team)
+    if (agent.templateId === 'advisor-bot') {
+      const todayStart = new Date()
+      todayStart.setHours(0, 0, 0, 0)
+      const countResult = await db.queryOne<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM chat_messages WHERE channel_id = $1 AND created_at > $2`,
+        [dmChannel.id, todayStart.toISOString()],
+      )
+      if (countResult && countResult.cnt >= 50) {
+        return res.json({
+          response: "You've reached AdvisorBot's daily limit of 50 messages. Your other agents are still available, and AdvisorBot resets tomorrow!",
+          iterations: 0,
+          toolCalls: [],
+        })
+      }
+    }
+
     await sendMessage(db, dmChannel.id, 'human', 'user', body.message, undefined, teamId)
 
     const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
@@ -822,6 +841,40 @@ async function main() {
     if (req.user?.id) {
       await addMember(db, team.id, req.user.id, req.user.email, 'admin')
     }
+
+    // Claim orphaned data for pre-teams users (team_id = '' or NULL)
+    const orphanTables = ['agents', 'tasks', 'chat_channels', 'chat_messages', 'approvals', 'sor_tables', 'activity_log']
+    for (const table of orphanTables) {
+      await db.run(`UPDATE ${table} SET team_id = $1 WHERE team_id = '' OR team_id IS NULL`, [team.id])
+    }
+
+    // Auto-deploy AdvisorBot in hosted mode
+    if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
+      try {
+        const advisorTemplate = getTemplate('advisor-bot')
+        if (advisorTemplate) {
+          const modelConfig = await resolveModelConfig(db, advisorTemplate.recommendedModel)
+          if (modelConfig) {
+            const advisorAgent = await createAgent(db, team.id, {
+              name: advisorTemplate.name,
+              department: advisorTemplate.department,
+              iconName: advisorTemplate.icon,
+              iconColor: advisorTemplate.iconColor,
+              systemPrompt: advisorTemplate.systemPrompt,
+              modelId: advisorTemplate.recommendedModel,
+              modelConfig,
+              heartbeatSeconds: 3600,
+              templateId: 'advisor-bot',
+            })
+            await installSkill(db, advisorAgent.id, 'advisor-tools')
+            await logActivity(db, 'agent_created', advisorAgent.id, `AdvisorBot auto-deployed for new team`, undefined, team.id)
+          }
+        }
+      } catch (err) {
+        console.error('[engine] Failed to auto-deploy AdvisorBot:', (err as Error).message)
+      }
+    }
+
     await logActivity(db, 'team_created', null, `Team "${name}" created`)
     res.status(201).json(team)
   })
@@ -890,6 +943,117 @@ async function main() {
     if (!isRemovingSelf && caller.role !== 'admin') return res.status(403).json({ error: 'Only admins can remove other members' })
     await removeMember(db, req.params.id, req.params.userId)
     res.status(204).end()
+  })
+
+  // ===== Team Profile (onboarding context) =====
+
+  app.get('/api/teams/:id/profile', async (req, res) => {
+    const team = await getTeam(db, req.params.id)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
+
+    // Self-hosted users are always "onboarded" (no guided flow)
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.json({ teamId: req.params.id, companyName: null, industry: null, companySize: null, primaryGoal: null, onboardedAt: 'self-hosted' })
+    }
+
+    const profile = await db.queryOne<Record<string, unknown>>(
+      'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
+    )
+    if (!profile) {
+      return res.json({ teamId: req.params.id, companyName: null, industry: null, companySize: null, primaryGoal: null, onboardedAt: null })
+    }
+    res.json({
+      teamId: profile.team_id,
+      companyName: profile.company_name,
+      industry: profile.industry,
+      companySize: profile.company_size,
+      primaryGoal: profile.primary_goal,
+      onboardedAt: profile.onboarded_at,
+    })
+  })
+
+  app.put('/api/teams/:id/profile', async (req, res) => {
+    const team = await getTeam(db, req.params.id)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
+
+    const { companyName, industry, companySize, primaryGoal, onboardedAt } = req.body as Record<string, string | null>
+
+    const existing = await db.queryOne<Record<string, unknown>>(
+      'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
+    )
+
+    if (existing) {
+      await db.run(
+        `UPDATE team_profiles SET
+          company_name = COALESCE($1, company_name),
+          industry = COALESCE($2, industry),
+          company_size = COALESCE($3, company_size),
+          primary_goal = COALESCE($4, primary_goal),
+          onboarded_at = COALESCE($5, onboarded_at),
+          updated_at = ${db.now()}
+        WHERE team_id = $6`,
+        [companyName, industry, companySize, primaryGoal, onboardedAt, req.params.id],
+      )
+    } else {
+      await db.run(
+        `INSERT INTO team_profiles (team_id, company_name, industry, company_size, primary_goal, onboarded_at)
+        VALUES ($1, $2, $3, $4, $5, $6)`,
+        [req.params.id, companyName ?? null, industry ?? null, companySize ?? null, primaryGoal ?? null, onboardedAt ?? null],
+      )
+    }
+    res.json({ success: true })
+  })
+
+  // ===== Setup AdvisorBot (idempotent, hosted only) =====
+
+  app.post('/api/teams/:id/setup-advisor', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'AdvisorBot is only available on YokeBot Cloud.' })
+    }
+    const team = await getTeam(db, req.params.id)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
+
+    // Check if AdvisorBot already deployed
+    const agents = await listAgents(db, req.params.id)
+    const existing = agents.find((a) => a.templateId === 'advisor-bot')
+    if (existing) return res.json({ agentId: existing.id, alreadyExists: true })
+
+    const template = getTemplate('advisor-bot')
+    if (!template) return res.status(500).json({ error: 'AdvisorBot template not found' })
+
+    const modelConfig = await resolveModelConfig(db, template.recommendedModel)
+    if (!modelConfig) return res.status(500).json({ error: 'Could not resolve AdvisorBot model' })
+
+    const agent = await createAgent(db, req.params.id, {
+      name: template.name,
+      department: template.department,
+      iconName: template.icon,
+      iconColor: template.iconColor,
+      systemPrompt: template.systemPrompt,
+      modelId: template.recommendedModel,
+      modelConfig,
+      heartbeatSeconds: 3600,
+      templateId: 'advisor-bot',
+    })
+    await installSkill(db, agent.id, 'advisor-tools')
+    await logActivity(db, 'agent_created', agent.id, `AdvisorBot deployed via setup`, undefined, req.params.id)
+
+    res.status(201).json({ agentId: agent.id, alreadyExists: false })
+  })
+
+  // ===== Config (public — returns platform mode info) =====
+
+  app.get('/api/config', (_req, res) => {
+    res.json({ hostedMode: process.env.YOKEBOT_HOSTED_MODE === 'true' })
   })
 
   // ===== Notifications (cross-team, uses user_id) =====

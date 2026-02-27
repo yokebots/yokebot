@@ -39,6 +39,7 @@ export interface Agent {
   heartbeatSeconds: number
   activeHoursStart: number
   activeHoursEnd: number
+  templateId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -152,6 +153,7 @@ function rowToAgent(row: Record<string, unknown>): Agent {
     heartbeatSeconds: row.heartbeat_seconds as number,
     activeHoursStart: row.active_hours_start as number,
     activeHoursEnd: row.active_hours_end as number,
+    templateId: (row.template_id as string) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   }

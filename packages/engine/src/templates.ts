@@ -20,6 +20,7 @@ export interface AgentTemplate {
   commonTasks: string[]
   isFree?: boolean
   isSpecial?: boolean
+  hostedOnly?: boolean
 }
 
 export const TEMPLATES: AgentTemplate[] = [
@@ -32,7 +33,7 @@ export const TEMPLATES: AgentTemplate[] = [
     description: 'Researches leads, enriches contact data, and drafts personalized cold outreach sequences.',
     icon: 'person_search',
     iconColor: '#2563eb',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'deepseek-v3.2',
     systemPrompt: `You are ProspectorBot, a lead research and outreach specialist for the sales team.
 
 Your primary responsibilities:
@@ -64,7 +65,7 @@ Always use the think tool before taking action. Prioritize quality over quantity
     description: 'Manages pipeline strategy, drafts proposals, and tracks deal progress through stages.',
     icon: 'handshake',
     iconColor: '#16a34a',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'deepseek-v3.2',
     systemPrompt: `You are CloserBot, a deal strategy and proposal manager for the sales team.
 
 Your primary responsibilities:
@@ -96,7 +97,7 @@ Your tone is confident, consultative, and solution-oriented. You're a trusted ad
     description: 'Manages new customer onboarding with welcome sequences, setup guides, and adoption tracking.',
     icon: 'waving_hand',
     iconColor: '#f59e0b',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gpt-4o-mini',
     systemPrompt: `You are OnboarderBot, a customer onboarding specialist focused on ensuring new customers get value quickly.
 
 Your primary responsibilities:
@@ -129,7 +130,7 @@ Your tone is enthusiastic, helpful, and patient. You're the friendly guide who m
     description: 'Writes SEO-optimized blog posts, articles, case studies, and long-form content.',
     icon: 'edit_note',
     iconColor: '#7c3aed',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'llama-4-maverick',
     systemPrompt: `You are ContentBot, a content strategist and writer for the marketing team.
 
 Your primary responsibilities:
@@ -163,7 +164,7 @@ Your tone adapts to the brand voice but defaults to professional, clear, and eng
     description: 'Creates platform-specific social posts, tracks engagement trends, and manages publishing cadence.',
     icon: 'share',
     iconColor: '#ec4899',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gpt-4o-mini',
     systemPrompt: `You are SocialBot, the social media manager for the marketing team.
 
 Your primary responsibilities:
@@ -196,7 +197,7 @@ Your tone varies by platform but you're always authentic and engaging. Avoid cor
     description: 'Writes ad copy variations, analyzes ROAS, manages budgets, and creates A/B test plans.',
     icon: 'ads_click',
     iconColor: '#ea580c',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'deepseek-v3.2',
     systemPrompt: `You are AdBot, a paid advertising specialist for the marketing team.
 
 Your primary responsibilities:
@@ -230,7 +231,7 @@ Your tone is direct, benefit-focused, and action-oriented. You think in terms of
     description: 'Monitors Google/Yelp reviews, drafts professional responses, and tracks sentiment trends.',
     icon: 'star_half',
     iconColor: '#eab308',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gpt-4o-mini',
     systemPrompt: `You are ReputationBot, a review and reputation manager.
 
 Your primary responsibilities:
@@ -262,7 +263,7 @@ Your tone is warm, empathetic, and solution-oriented. You represent the brand's 
     description: 'Tracks keyword rankings, performs technical audits, analyzes backlinks, and optimizes content for search.',
     icon: 'trending_up',
     iconColor: '#059669',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'deepseek-v3.2',
     systemPrompt: `You are SEOBot, an SEO and search specialist for the marketing team.
 
 Your primary responsibilities:
@@ -298,7 +299,7 @@ Your approach is data-driven and methodical. You prioritize high-impact, low-eff
     description: 'Creates email campaigns, drip sequences, manages list segmentation, and optimizes open rates.',
     icon: 'campaign',
     iconColor: '#6366f1',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'llama-4-maverick',
     systemPrompt: `You are EmailBot, an email marketing specialist for the marketing team.
 
 Your primary responsibilities:
@@ -333,7 +334,7 @@ Your tone is conversational and brand-aligned. Every email should feel like it w
     description: 'Creates video scripts, design briefs, creative concepts, and repurposes content across formats.',
     icon: 'palette',
     iconColor: '#d946ef',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'llama-4-maverick',
     systemPrompt: `You are CreativeBot, the creative director for the team.
 
 Your primary responsibilities:
@@ -368,7 +369,7 @@ Your tone is imaginative, bold, and detail-oriented. You think visually even whe
     description: 'Tracks deadlines, coordinates meetings, sends reminders, and manages scheduling conflicts.',
     icon: 'calendar_month',
     iconColor: '#0891b2',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gemma-3-27b',
     systemPrompt: `You are SchedulerBot, a calendar and deadline management specialist.
 
 Your primary responsibilities:
@@ -400,7 +401,7 @@ Your tone is organized, proactive, and helpful. You're the team's time managemen
     description: 'Plans projects end-to-end with milestones, stakeholder updates, and blocker resolution.',
     icon: 'assignment',
     iconColor: '#4f46e5',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'minimax-m2.5',
     systemPrompt: `You are ProjectBot, a full-service project manager for the team.
 
 Your primary responsibilities:
@@ -435,7 +436,7 @@ Your tone is structured, clear, and action-oriented. You keep projects on track 
     description: 'Creates budget reports, analyzes cash flow, generates financial summaries and forecasts.',
     icon: 'account_balance',
     iconColor: '#15803d',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'deepseek-v3.2',
     systemPrompt: `You are FinanceBot, a financial analyst for the team.
 
 Your primary responsibilities:
@@ -468,7 +469,7 @@ Your tone is precise, data-driven, and objective. You present the numbers clearl
     description: 'Categorizes transactions, tracks invoices, reconciles accounts, and logs expenses.',
     icon: 'receipt_long',
     iconColor: '#65a30d',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gemma-3-27b',
     systemPrompt: `You are BookkeeperBot, a bookkeeping and transaction management specialist.
 
 Your primary responsibilities:
@@ -502,7 +503,7 @@ Your tone is methodical, reliable, and thorough. You're the backbone of financia
     description: 'Writes job descriptions, screens resumes, drafts outreach messages, and tracks candidate pipelines.',
     icon: 'group_add',
     iconColor: '#0d9488',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'llama-4-maverick',
     systemPrompt: `You are RecruiterBot, a talent acquisition specialist.
 
 Your primary responsibilities:
@@ -535,7 +536,7 @@ Your tone is warm, professional, and excited about connecting great people with 
     description: 'Triages support tickets, drafts responses, maintains FAQ/knowledge base, and tracks resolution metrics.',
     icon: 'support_agent',
     iconColor: '#06b6d4',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gpt-4o-mini',
     systemPrompt: `You are SupportBot, a customer support specialist.
 
 Your primary responsibilities:
@@ -570,7 +571,7 @@ Your tone is empathetic, patient, and solution-focused. You treat every customer
     description: 'Reviews contracts, drafts NDAs, monitors policy updates, and ensures compliance.',
     icon: 'gavel',
     iconColor: '#7c2d12',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'kimi-k2.5',
     systemPrompt: `You are LegalBot, a legal and compliance specialist.
 
 IMPORTANT DISCLAIMER: You provide legal analysis and draft documents for review, but you are NOT a licensed attorney. All outputs should be reviewed by qualified legal counsel before execution.
@@ -607,7 +608,7 @@ Your tone is precise, cautious, and thorough. You help the team understand legal
     description: 'Reviews code, writes documentation, triages bugs, and drafts architecture proposals.',
     icon: 'code',
     iconColor: '#1e40af',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'devstral-2',
     systemPrompt: `You are DevBot, a developer relations and code review specialist.
 
 Your primary responsibilities:
@@ -640,7 +641,7 @@ Your tone is technical but approachable. You give constructive feedback that hel
     description: 'Builds dashboard reports, tracks KPIs, identifies trends, and detects anomalies in data.',
     icon: 'monitoring',
     iconColor: '#9333ea',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'deepseek-v3.2',
     systemPrompt: `You are AnalyticsBot, a data and analytics specialist.
 
 Your primary responsibilities:
@@ -675,7 +676,7 @@ Your tone is data-driven, insightful, and clear. You translate numbers into narr
     description: 'Manages product listings, tracks orders, monitors inventory, and optimizes pricing.',
     icon: 'storefront',
     iconColor: '#c2410c',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are CommerceBot, an e-commerce operations manager.
 
 Your primary responsibilities:
@@ -709,7 +710,7 @@ Your tone is commercial, detail-oriented, and customer-focused. You think like a
     description: 'Drafts press releases, manages media outreach, handles crisis comms, and builds brand messaging.',
     icon: 'record_voice_over',
     iconColor: '#0369a1',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'llama-4-maverick',
     systemPrompt: `You are PRBot, a public relations specialist for the communications team.
 
 Your primary responsibilities:
@@ -779,7 +780,7 @@ Your tone is efficient, reliable, and detail-obsessed. You're the unsung hero wh
     description: 'Handles outbound calls, appointment booking, lead qualification, and phone follow-ups.',
     icon: 'call',
     iconColor: '#4338ca',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gpt-4o-mini',
     systemPrompt: `You are PhoneBot, a voice and call specialist for the sales team.
 
 Your primary responsibilities:
@@ -814,7 +815,7 @@ Your tone is confident, conversational, and respectful of people's time. You hel
     description: 'Identifies churn risk, creates win-back campaigns, monitors NPS/CSAT, and spots upsell signals.',
     icon: 'loyalty',
     iconColor: '#dc2626',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'deepseek-v3.2',
     systemPrompt: `You are RetentionBot, a customer retention specialist.
 
 Your primary responsibilities:
@@ -847,7 +848,7 @@ Your tone is caring, proactive, and value-focused. You don't wait for customers 
     description: 'Optimizes funnels, analyzes A/B tests, tracks conversion rates, and designs growth experiments.',
     icon: 'rocket_launch',
     iconColor: '#ea580c',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'deepseek-v3.2',
     systemPrompt: `You are GrowthBot, a growth and conversion optimization specialist.
 
 Your primary responsibilities:
@@ -882,7 +883,7 @@ Your tone is experimental, data-driven, and action-oriented. You're always runni
     description: 'Manages Discord/forum communities, moderates content, onboards new members, and promotes events.',
     icon: 'groups',
     iconColor: '#7c3aed',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gpt-4o-mini',
     systemPrompt: `You are CommunityBot, the community manager.
 
 Your primary responsibilities:
@@ -915,7 +916,7 @@ Your tone is friendly, inclusive, and energetic. You're the heart of the communi
     description: 'Plans events, manages attendee communications, coordinates speakers, and handles post-event follow-up.',
     icon: 'event',
     iconColor: '#b45309',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are EventBot, an event planning and coordination specialist.
 
 Your primary responsibilities:
@@ -952,7 +953,7 @@ Your tone is organized, enthusiastic, and detail-oriented. You make events run s
     description: 'Monitors competitors, tracks market trends, delivers industry news alerts, and creates SWOT analyses.',
     icon: 'radar',
     iconColor: '#1e3a5f',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'glm-5',
     systemPrompt: `You are IntelBot, a competitive intelligence analyst.
 
 Your primary responsibilities:
@@ -1021,7 +1022,7 @@ Your tone is academic yet accessible. You're thorough without being overwhelming
     description: 'Handles internal help desk requests, software provisioning, troubleshooting, and IT documentation.',
     icon: 'computer',
     iconColor: '#475569',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are ITBot, an internal IT support specialist.
 
 Your primary responsibilities:
@@ -1054,7 +1055,7 @@ Your tone is helpful, patient, and clear. You explain technical concepts in simp
     description: 'Scans for vulnerabilities, audits dependencies, checks compliance, and generates security reports.',
     icon: 'security',
     iconColor: '#b91c1c',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'devstral-small',
     systemPrompt: `You are SecurityBot, a security and compliance auditor.
 
 Your primary responsibilities:
@@ -1089,7 +1090,7 @@ Your tone is thorough, urgent when needed, and precise. Security issues get seve
     description: 'Creates design briefs, enforces brand guidelines, provides creative direction, and organizes assets.',
     icon: 'brush',
     iconColor: '#be185d',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'llama-4-maverick',
     systemPrompt: `You are DesignBot, a design director and brand guardian.
 
 Your primary responsibilities:
@@ -1124,7 +1125,7 @@ Your tone is creative, detail-oriented, and consistent. You're the brand guardia
     description: 'Translates content, adapts messaging for local markets, and manages terminology consistency.',
     icon: 'translate',
     iconColor: '#0284c7',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'kimi-k2.5',
     systemPrompt: `You are LocalizeBot, a localization and translation specialist.
 
 Your primary responsibilities:
@@ -1159,7 +1160,7 @@ Your tone is culturally aware, precise, and adaptable. You help the brand speak 
     description: 'Researches vendors, compares prices, drafts purchase orders, and manages supplier communications.',
     icon: 'local_shipping',
     iconColor: '#854d0e',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are ProcurementBot, a procurement and vendor management specialist.
 
 Your primary responsibilities:
@@ -1194,7 +1195,7 @@ Your tone is professional, thorough, and commercially minded. You help the team 
     description: 'Creates training materials, employee guides, quizzes, assessments, and onboarding documentation.',
     icon: 'school',
     iconColor: '#0e7490',
-    recommendedModel: 'deepseek-v3',
+    recommendedModel: 'llama-4-maverick',
     systemPrompt: `You are TrainerBot, a training and enablement specialist.
 
 Your primary responsibilities:
@@ -1230,7 +1231,7 @@ Your tone is educational, encouraging, and clear. You make complex topics access
     description: 'Manages affiliate programs, partner outreach, co-marketing coordination, and referral tracking.',
     icon: 'diversity_3',
     iconColor: '#4f46e5',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gpt-4o-mini',
     systemPrompt: `You are PartnerBot, a partnership and affiliate management specialist.
 
 Your primary responsibilities:
@@ -1265,7 +1266,7 @@ Your tone is collaborative, enthusiastic, and professionally warm. You build rel
     description: 'Creates podcast show notes, researches guests, plans episodes, summarizes transcripts, and suggests clips.',
     icon: 'podcasts',
     iconColor: '#9333ea',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are MediaBot, a podcast and media production specialist.
 
 Your primary responsibilities:
@@ -1299,7 +1300,7 @@ Your tone is creative, organized, and audience-aware. You help turn great conver
     description: 'Creates surveys, distributes them, analyzes responses, and generates actionable insight reports.',
     icon: 'poll',
     iconColor: '#0891b2',
-    recommendedModel: 'minimax-m2.5',
+    recommendedModel: 'gemma-3-27b',
     systemPrompt: `You are SurveyBot, a survey design and feedback analysis specialist.
 
 Your primary responsibilities:
@@ -1337,6 +1338,7 @@ Your tone is analytical, objective, and insight-driven. You turn raw feedback in
     iconColor: '#f59e0b',
     recommendedModel: 'minimax-m2.5',
     isFree: true,
+    hostedOnly: true,
     systemPrompt: `You are AdvisorBot, the built-in strategic advisor and workforce planner for YokeBot.
 
 You don't just give advice — you can actually build the user's agent team for them. You have tools to survey the user's goals, check their current setup, recommend the right agents, and deploy them on the spot.
@@ -1425,9 +1427,11 @@ Your tone is professional, efficient, and action-oriented. Every interaction sho
   },
 ]
 
-/** Get all templates. */
-export function listTemplates(): AgentTemplate[] {
-  return TEMPLATES
+/** Get all templates. Filters out hostedOnly templates when not in hosted mode. */
+export function listTemplates(options?: { includeHostedOnly?: boolean }): AgentTemplate[] {
+  const includeHosted = options?.includeHostedOnly ?? (process.env.YOKEBOT_HOSTED_MODE === 'true')
+  if (includeHosted) return TEMPLATES
+  return TEMPLATES.filter((t) => !t.hostedOnly)
 }
 
 /** Get a single template by ID. */

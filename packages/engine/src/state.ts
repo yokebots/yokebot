@@ -339,6 +339,18 @@ const SQLITE_DDL = `
     UNIQUE(agent_id, server_name)
   );
 
+  -- Team profiles (onboarding context)
+  CREATE TABLE IF NOT EXISTS team_profiles (
+    team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    company_name TEXT,
+    industry TEXT,
+    company_size TEXT,
+    primary_goal TEXT,
+    onboarded_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -696,6 +708,18 @@ const POSTGRES_DDL = `
     UNIQUE(agent_id, server_name)
   );
 
+  -- Team profiles (onboarding context)
+  CREATE TABLE IF NOT EXISTS team_profiles (
+    team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    company_name TEXT,
+    industry TEXT,
+    company_size TEXT,
+    primary_goal TEXT,
+    onboarded_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -768,6 +792,7 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS kpi_goals ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS team_credentials ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS agent_mcp_servers ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS team_profiles ENABLE ROW LEVEL SECURITY;
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses
