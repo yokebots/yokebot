@@ -18,6 +18,7 @@ export interface AgentConfig {
   heartbeatSeconds?: number
   activeHoursStart?: number
   activeHoursEnd?: number
+  templateId?: string
 }
 
 export type AgentStatus = 'running' | 'paused' | 'stopped' | 'error'
@@ -51,14 +52,14 @@ export async function createAgent(db: Db, teamId: string, config: AgentConfig): 
   await db.run(
     `INSERT INTO agents (id, team_id, name, department, icon_name, icon_color,
       model_id, model_endpoint, model_name, system_prompt, proactive,
-      heartbeat_seconds, active_hours_start, active_hours_end,
+      heartbeat_seconds, active_hours_start, active_hours_end, template_id,
       created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [
       id, teamId, config.name, config.department ?? null, config.iconName ?? null, config.iconColor ?? null,
       config.modelId ?? null, config.modelConfig.endpoint, config.modelConfig.model,
       config.systemPrompt ?? null, config.proactive ? 1 : 0, config.heartbeatSeconds ?? 3600,
-      config.activeHoursStart ?? 9, config.activeHoursEnd ?? 17, now, now,
+      config.activeHoursStart ?? 9, config.activeHoursEnd ?? 17, config.templateId ?? null, now, now,
     ],
   )
 

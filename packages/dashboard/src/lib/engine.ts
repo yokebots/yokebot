@@ -633,6 +633,98 @@ export const createCreditPackCheckout = (priceId: string) =>
 export const createBillingPortal = () =>
   request<{ url: string }>('/api/billing/portal', { method: 'POST' })
 
+// ===== Credentials (BYOK) =====
+
+export interface CredentialInfo {
+  serviceId: string
+  credentialType: string
+  hasValue: boolean
+  updatedAt: string
+}
+
+export const listCredentials = () => request<CredentialInfo[]>('/api/credentials')
+
+export const setCredential = (serviceId: string, value: string, credentialType?: string) =>
+  request<{ serviceId: string; hasValue: boolean }>('/api/credentials', {
+    method: 'PUT', body: JSON.stringify({ serviceId, value, credentialType }),
+  })
+
+export const deleteCredential = (serviceId: string) =>
+  request<void>(`/api/credentials/${serviceId}`, { method: 'DELETE' })
+
+// ===== Services (integration catalog) =====
+
+export interface ServiceInfo {
+  id: string
+  name: string
+  description: string
+  category: string
+  credentialType: string
+  setupUrl: string
+  setupInstructions: string
+  icon: string
+  connected: boolean
+  updatedAt: string | null
+}
+
+export const listServices = () => request<ServiceInfo[]>('/api/services')
+
+// ===== Templates =====
+
+export interface AgentTemplate {
+  id: string
+  name: string
+  title: string
+  department: string
+  description: string
+  icon: string
+  iconColor: string
+  recommendedModel: string
+  systemPrompt: string
+  defaultSkills: string[]
+  personalityTraits: string[]
+  commonTasks: string[]
+  isFree?: boolean
+  isSpecial?: boolean
+}
+
+export const listTemplates = () => request<AgentTemplate[]>('/api/templates')
+
+// ===== MCP Servers =====
+
+export interface McpServerConfig {
+  id?: string
+  agentId: string
+  serverName: string
+  transportType: 'stdio' | 'http'
+  command?: string
+  args?: string
+  url?: string
+  envVars?: string
+}
+
+export interface McpTestResult {
+  status: 'connected' | 'error'
+  toolCount?: number
+  tools?: string[]
+  error?: string
+}
+
+export const listMcpServers = (agentId: string) =>
+  request<McpServerConfig[]>(`/api/agents/${agentId}/mcp-servers`)
+
+export const addMcpServer = (agentId: string, config: Omit<McpServerConfig, 'id' | 'agentId'>) =>
+  request<McpServerConfig>(`/api/agents/${agentId}/mcp-servers`, {
+    method: 'POST',
+    body: JSON.stringify(config),
+  })
+
+export const removeMcpServer = (agentId: string, serverName: string) =>
+  request<void>(`/api/agents/${agentId}/mcp-servers/${serverName}`, { method: 'DELETE' })
+
+export const testMcpServer = (agentId: string, serverName: string) =>
+  request<McpTestResult>(`/api/agents/${agentId}/mcp-servers/${serverName}/test`, { method: 'POST' })
+
 // ===== Ollama =====
 
 export const detectOllama = () => request<OllamaStatus>('/api/ollama')

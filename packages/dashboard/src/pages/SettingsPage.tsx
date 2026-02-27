@@ -146,10 +146,10 @@ export function SettingsPage() {
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 border-b border-border-subtle">
-        {([{ id: 'providers', label: 'Model Providers' }, { id: 'notifications', label: 'Notifications' }, { id: 'billing', label: 'Billing' }] as const).map((t) => (
+        {([{ id: 'providers', label: 'Model Providers' }, { id: 'integrations', label: 'Integrations' }, { id: 'notifications', label: 'Notifications' }, { id: 'billing', label: 'Billing' }] as const).map((t) => (
           <button
             key={t.id}
-            onClick={() => t.id === 'billing' ? navigate('/settings/billing') : setTab(t.id as 'providers' | 'notifications')}
+            onClick={() => t.id === 'billing' ? navigate('/settings/billing') : t.id === 'integrations' ? navigate('/settings/integrations') : setTab(t.id as 'providers' | 'notifications')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors ${
               tab === t.id
                 ? 'border-b-2 border-forest-green text-forest-green'

@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import * as engine from '@/lib/engine'
-import type { LogicalModel, ModelCreditCost } from '@/lib/engine'
+import type { LogicalModel, ModelCreditCost, AgentTemplate } from '@/lib/engine'
 
 interface Props {
   onClose: () => void
   onCreated: () => void
   defaultName?: string
   defaultPrompt?: string
+  template?: AgentTemplate
 }
 
 function StarRating({ stars, label }: { stars: number; label: string }) {
@@ -27,10 +28,10 @@ function StarRating({ stars, label }: { stars: number; label: string }) {
   )
 }
 
-export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPrompt }: Props) {
-  const [name, setName] = useState(defaultName ?? '')
-  const [department, setDepartment] = useState('')
-  const [systemPrompt, setSystemPrompt] = useState(defaultPrompt ?? '')
+export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPrompt, template }: Props) {
+  const [name, setName] = useState(template?.name ?? defaultName ?? '')
+  const [department, setDepartment] = useState(template?.department ?? '')
+  const [systemPrompt, setSystemPrompt] = useState(template?.systemPrompt ?? defaultPrompt ?? '')
   const [models, setModels] = useState<LogicalModel[]>([])
   const [modelCatalog, setModelCatalog] = useState<ModelCreditCost[]>([])
   const [selectedModelId, setSelectedModelId] = useState('')
@@ -45,8 +46,10 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
     ]).then(([m, catalog]) => {
       setModels(m)
       setModelCatalog(catalog)
+      // Prefer template's recommended model, else first cloud chat model
+      const recommended = template ? m.find((model) => model.id === template.recommendedModel) : null
       const firstChat = m.find((model) => model.type === 'chat' && model.category !== 'local')
-      const defaultModel = firstChat ?? m[0]
+      const defaultModel = recommended ?? firstChat ?? m[0]
       if (defaultModel) setSelectedModelId(defaultModel.id)
     }).catch(() => {})
   }, [])
@@ -65,13 +68,22 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
     setError('')
 
     try {
-      await engine.createAgent({
+      const agent = await engine.createAgent({
         name: name.trim(),
         department: department.trim() || undefined,
         systemPrompt: systemPrompt.trim() || undefined,
         modelId: selectedModelId,
         heartbeatSeconds: heartbeat,
-      })
+        ...(template ? { templateId: template.id } : {}),
+      } as Parameters<typeof engine.createAgent>[0])
+
+      // Auto-install template's default skills
+      if (template?.defaultSkills?.length) {
+        await Promise.allSettled(
+          template.defaultSkills.map((skill) => engine.installAgentSkill(agent.id, skill)),
+        )
+      }
+
       onCreated()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agent')
@@ -87,11 +99,36 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-6 flex items-center justify-between">
-          <h2 className="font-display text-xl font-bold text-text-main">Onboard Agent</h2>
+          <h2 className="font-display text-xl font-bold text-text-main">
+            {template ? `Deploy ${template.name}` : 'Onboard Agent'}
+          </h2>
           <button onClick={onClose} className="text-text-muted hover:text-text-main">
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
+
+        {template && (
+          <div className="mb-4 rounded-lg border border-forest-green/20 bg-forest-green/5 p-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: template.iconColor }}>
+                <span className="material-symbols-outlined text-lg">{template.icon}</span>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-text-main">{template.title}</p>
+                <p className="text-xs text-text-muted">{template.description}</p>
+              </div>
+            </div>
+            {template.defaultSkills.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {template.defaultSkills.map((skill) => (
+                  <span key={skill} className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-forest-green border border-forest-green/20">
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {models.length === 0 ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">

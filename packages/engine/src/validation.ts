@@ -129,6 +129,14 @@ export const InstallSkillSchema = z.object({
   skillName: z.string().min(1).max(100),
 })
 
+// ---- Credentials ----
+
+export const SetCredentialSchema = z.object({
+  serviceId: z.string().min(1).max(100).regex(/^[a-z0-9_-]+$/, 'serviceId must be lowercase alphanumeric with hyphens/underscores'),
+  value: z.string().min(1).max(2000),
+  credentialType: z.string().max(50).optional(),
+})
+
 // ---- Teams ----
 
 export const CreateTeamSchema = z.object({

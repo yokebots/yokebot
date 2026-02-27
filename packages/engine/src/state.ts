@@ -45,6 +45,7 @@ const SQLITE_DDL = `
     heartbeat_seconds INTEGER NOT NULL DEFAULT 3600,
     active_hours_start INTEGER DEFAULT 9,
     active_hours_end INTEGER DEFAULT 17,
+    template_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -313,6 +314,31 @@ const SQLITE_DDL = `
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Team credentials (BYOK API keys, encrypted)
+  CREATE TABLE IF NOT EXISTS team_credentials (
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    service_id TEXT NOT NULL,
+    credential_type TEXT NOT NULL DEFAULT 'api_key',
+    encrypted_value TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (team_id, service_id)
+  );
+
+  -- MCP servers configured per agent (self-hosted)
+  CREATE TABLE IF NOT EXISTS agent_mcp_servers (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    server_name TEXT NOT NULL,
+    transport_type TEXT NOT NULL DEFAULT 'stdio',
+    command TEXT,
+    args TEXT,
+    url TEXT,
+    env_vars TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(agent_id, server_name)
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -337,6 +363,8 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_goals_team ON goals(team_id, status);
   CREATE INDEX IF NOT EXISTS idx_goal_tasks_task ON goal_tasks(task_id);
   CREATE INDEX IF NOT EXISTS idx_kpi_goals_team ON kpi_goals(team_id, status);
+  CREATE INDEX IF NOT EXISTS idx_team_creds_team ON team_credentials(team_id);
+  CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_servers(agent_id);
 `
 
 const POSTGRES_DDL = `
@@ -374,6 +402,7 @@ const POSTGRES_DDL = `
     heartbeat_seconds INTEGER NOT NULL DEFAULT 3600,
     active_hours_start INTEGER DEFAULT 9,
     active_hours_end INTEGER DEFAULT 17,
+    template_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -642,6 +671,31 @@ const POSTGRES_DDL = `
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- Team credentials (BYOK API keys, encrypted)
+  CREATE TABLE IF NOT EXISTS team_credentials (
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    service_id TEXT NOT NULL,
+    credential_type TEXT NOT NULL DEFAULT 'api_key',
+    encrypted_value TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (team_id, service_id)
+  );
+
+  -- MCP servers configured per agent (self-hosted)
+  CREATE TABLE IF NOT EXISTS agent_mcp_servers (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    server_name TEXT NOT NULL,
+    transport_type TEXT NOT NULL DEFAULT 'stdio',
+    command TEXT,
+    args TEXT,
+    url TEXT,
+    env_vars TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(agent_id, server_name)
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -672,6 +726,8 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_sor_permissions_table ON sor_permissions(table_id);
   CREATE INDEX IF NOT EXISTS idx_task_deps_depends ON task_deps(depends_on);
   CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
+  CREATE INDEX IF NOT EXISTS idx_team_creds_team ON team_credentials(team_id);
+  CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_servers(agent_id);
 
   -- =====================================================================
   -- Row Level Security (RLS)
@@ -710,6 +766,8 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS model_credit_costs ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS skill_credit_costs ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS kpi_goals ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS team_credentials ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS agent_mcp_servers ENABLE ROW LEVEL SECURITY;
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses

@@ -1,47 +1,36 @@
 ---
 name: Google Sheets
-description: Read and write data to Google Sheets for reporting and data management
+description: Read, write, and manage Google Sheets spreadsheets
 tags: [Tools]
 source: yokebot
 version: 1.0.0
 author: YokeBot
+requiredCredentials: [google]
 ---
 
 ## Instructions
 
-Use `sheets_read` to fetch data from a Google Sheets spreadsheet and `sheets_write` to update cells. Useful for generating reports, syncing CRM data, or managing inventory.
+Use the `google_sheets` tool to read data from and write data to Google Sheets. Query specific ranges, append rows, create new sheets, and update cell values.
 
-Specify the spreadsheet by its ID (from the URL) and the range in A1 notation (e.g. "Sheet1!A1:D10").
-
-Requires Google Sheets API credentials to be configured.
+Reference cells using A1 notation. Preserve existing data when writing to shared sheets.
 
 ## Tools
 
 ```tools
 [
   {
-    "name": "sheets_read",
-    "description": "Read data from a Google Sheets spreadsheet.",
+    "name": "google_sheets",
+    "description": "Read and write data in Google Sheets.",
     "parameters": {
       "type": "object",
       "properties": {
-        "spreadsheetId": { "type": "string", "description": "The spreadsheet ID from the URL" },
-        "range": { "type": "string", "description": "The A1 notation range, e.g. Sheet1!A1:D10" }
+        "action": { "type": "string", "description": "Action: 'read', 'write', 'append', 'create'" },
+        "spreadsheetId": { "type": "string", "description": "Google Sheets spreadsheet ID" },
+        "range": { "type": "string", "description": "Cell range in A1 notation (e.g., 'Sheet1!A1:D10')" },
+        "values": { "type": "string", "description": "JSON array of row arrays for write/append (e.g., '[[\"Name\",\"Email\"],[\"John\",\"john@co.com\"]]')" },
+        "title": { "type": "string", "description": "Spreadsheet title (for create action)" }
       },
-      "required": ["spreadsheetId", "range"]
-    }
-  },
-  {
-    "name": "sheets_write",
-    "description": "Write data to a Google Sheets spreadsheet.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "spreadsheetId": { "type": "string", "description": "The spreadsheet ID from the URL" },
-        "range": { "type": "string", "description": "The A1 notation range to write to" },
-        "values": { "type": "array", "description": "2D array of values to write", "items": { "type": "array", "items": { "type": "string" } } }
-      },
-      "required": ["spreadsheetId", "range", "values"]
+      "required": ["action"]
     }
   }
 ]

@@ -6,20 +6,26 @@ interface AuthContextType {
   user: User | null
   session: Session | null
   loading: boolean
-  signInWithGoogle: () => void
+  signInWithGoogle: () => Promise<void>
   signInWithGitHub: () => Promise<void>
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-/** Generate a random nonce and store it in sessionStorage for CSRF protection. */
-function generateNonce(): string {
+/** Generate a random nonce, store the raw value, and return the SHA-256 hash for Google. */
+async function generateNonce(): Promise<{ raw: string; hashed: string }> {
   const array = new Uint8Array(32)
   crypto.getRandomValues(array)
-  const nonce = Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('')
-  sessionStorage.setItem('google_oauth_nonce', nonce)
-  return nonce
+  const raw = Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('')
+  sessionStorage.setItem('google_oauth_nonce', raw)
+
+  // Google receives the hashed nonce in the JWT; Supabase hashes the raw nonce to compare
+  const encoder = new TextEncoder()
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(raw))
+  const hashed = Array.from(new Uint8Array(hashBuffer), (b) => b.toString(16).padStart(2, '0')).join('')
+
+  return { raw, hashed }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -48,14 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Redirects straight to Google's consent screen, then the callback
    * page feeds the id_token back into Supabase via signInWithIdToken().
    */
-  const signInWithGoogle = () => {
+  const signInWithGoogle = async () => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
     if (!clientId) {
       console.error('VITE_GOOGLE_CLIENT_ID not configured')
       return
     }
 
-    const nonce = generateNonce()
+    const { hashed } = await generateNonce()
     const redirectUri = `${window.location.origin}/auth/callback`
 
     const params = new URLSearchParams({
@@ -63,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       redirect_uri: redirectUri,
       response_type: 'id_token',
       scope: 'openid email profile',
-      nonce,
+      nonce: hashed,
       prompt: 'select_account',
     })
 

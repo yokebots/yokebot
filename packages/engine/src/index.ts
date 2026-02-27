@@ -30,7 +30,11 @@ import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
 import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
 import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
-import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, AddMemberSchema, UpdateRoleSchema } from './validation.ts'
+import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema } from './validation.ts'
+import { listCredentials, setCredential, deleteCredential } from './credentials.ts'
+import { listServices } from './services.ts'
+import { listTemplates } from './templates.ts'
+import { listMcpServers, addMcpServer, removeMcpServer, connectMcpServer } from './mcp-client.ts'
 
 const PORT = Number(process.env.PORT ?? process.env.YOKEBOT_PORT ?? 3001)
 const DATA_DIR = process.env.YOKEBOT_DATA_DIR ?? join(homedir(), '.yokebot')
@@ -149,10 +153,24 @@ async function main() {
     const teamId = req.user!.activeTeamId!
     const body = validate(CreateAgentSchema, req.body)
 
-    // Enforce agent count limit in hosted mode
-    if (req.subscription) {
+    // Check if template is free (exempt from agent limits)
+    const templateId = (req.body as Record<string, unknown>).templateId as string | undefined
+    let isTemplFree = false
+    if (templateId) {
+      const { getTemplate } = await import('./templates.ts')
+      const tmpl = getTemplate(templateId)
+      if (tmpl?.isFree) isTemplFree = true
+    }
+
+    // Enforce agent count limit in hosted mode (free templates exempt)
+    if (req.subscription && !isTemplFree) {
       const existing = await listAgents(db, teamId)
-      if (existing.length >= req.subscription.maxAgents) {
+      // Count only non-free agents
+      const paidAgentCount = existing.filter((a) => {
+        const row = a as unknown as Record<string, unknown>
+        return row.templateId !== 'advisor-bot'
+      }).length
+      if (paidAgentCount >= req.subscription.maxAgents) {
         return res.status(403).json({
           error: `Your ${req.subscription.tier} plan allows ${req.subscription.maxAgents} agent(s). Upgrade to add more.`,
           code: 'AGENT_LIMIT_REACHED',
@@ -171,6 +189,7 @@ async function main() {
       },
       proactive: body.proactive,
       heartbeatSeconds: body.heartbeatSeconds,
+      templateId,
     })
 
     await logActivity(db, 'agent_created', agent.id, `Agent "${agent.name}" created`, undefined, teamId)
@@ -574,6 +593,216 @@ async function main() {
     if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
     await uninstallSkill(db, req.params.id, req.params.skillName)
     res.status(204).end()
+  })
+
+  // ===== MCP Servers (self-hosted only) =====
+  // SECURITY: MCP is fully blocked in hosted mode. Self-hosted only.
+  // All routes require admin role. Server names and commands are validated.
+
+  const MCP_BLOCKED = process.env.YOKEBOT_HOSTED_MODE === 'true'
+  const MAX_MCP_SERVERS_PER_AGENT = 10
+  const MCP_SERVER_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_-]{0,49}$/
+  // Block shell metacharacters and dangerous commands in stdio commands
+  const MCP_COMMAND_BLOCKLIST = /[;&|`$(){}!<>\\]|rm\s|sudo|chmod|chown|kill|shutdown|reboot|mkfs|dd\s|curl.*\|.*sh|wget.*\|.*sh/i
+
+  app.get('/api/agents/:id/mcp-servers', async (req, res) => {
+    if (MCP_BLOCKED) return res.status(403).json({ error: 'MCP servers are not available in hosted mode' })
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
+    const servers = await listMcpServers(db, req.params.id)
+    // Strip env vars from response (may contain secrets)
+    res.json(servers.map((s) => ({ ...s, envVars: s.envVars ? '[configured]' : undefined })))
+  })
+
+  app.post('/api/agents/:id/mcp-servers', async (req, res) => {
+    if (MCP_BLOCKED) return res.status(403).json({ error: 'MCP servers are not available in hosted mode' })
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
+
+    const { serverName, transportType, command, args, url, envVars } = req.body as Record<string, string>
+
+    // Validate required fields
+    if (!serverName || !transportType) return res.status(400).json({ error: 'serverName and transportType are required' })
+
+    // Validate server name format (alphanumeric + hyphens/underscores, max 50 chars)
+    if (!MCP_SERVER_NAME_REGEX.test(serverName)) {
+      return res.status(400).json({ error: 'Invalid server name. Use letters, numbers, hyphens, and underscores (max 50 chars).' })
+    }
+
+    // Validate transport type
+    if (transportType !== 'stdio' && transportType !== 'http') {
+      return res.status(400).json({ error: 'transportType must be "stdio" or "http"' })
+    }
+
+    // Validate stdio-specific fields
+    if (transportType === 'stdio') {
+      if (!command || typeof command !== 'string' || command.trim().length === 0) {
+        return res.status(400).json({ error: 'command is required for stdio transport' })
+      }
+      // Block shell metacharacters and dangerous commands
+      if (MCP_COMMAND_BLOCKLIST.test(command)) {
+        return res.status(400).json({ error: 'Command contains blocked characters or patterns. Use simple executable names (e.g., "npx", "node").' })
+      }
+      // Validate args is valid JSON array if provided
+      if (args) {
+        try {
+          const parsed = JSON.parse(args)
+          if (!Array.isArray(parsed)) return res.status(400).json({ error: 'args must be a JSON array of strings' })
+          // Block shell metacharacters in individual args
+          for (const arg of parsed) {
+            if (typeof arg !== 'string') return res.status(400).json({ error: 'Each arg must be a string' })
+            if (MCP_COMMAND_BLOCKLIST.test(arg)) return res.status(400).json({ error: 'Args contain blocked characters' })
+          }
+        } catch {
+          return res.status(400).json({ error: 'args must be valid JSON' })
+        }
+      }
+    }
+
+    // Validate HTTP-specific fields
+    if (transportType === 'http') {
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ error: 'url is required for http transport' })
+      }
+      // Validate URL format and block localhost/internal networks in hosted mode
+      try {
+        const parsed = new URL(url)
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          return res.status(400).json({ error: 'URL must use http or https protocol' })
+        }
+      } catch {
+        return res.status(400).json({ error: 'Invalid URL format' })
+      }
+    }
+
+    // Validate env vars JSON if provided
+    if (envVars) {
+      try {
+        const parsed = JSON.parse(envVars)
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) return res.status(400).json({ error: 'envVars must be a JSON object' })
+        // Block PATH and other dangerous env vars
+        const blockedEnvVars = ['PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH']
+        for (const key of Object.keys(parsed)) {
+          if (blockedEnvVars.includes(key.toUpperCase())) {
+            return res.status(400).json({ error: `Environment variable "${key}" is not allowed` })
+          }
+        }
+      } catch {
+        return res.status(400).json({ error: 'envVars must be valid JSON' })
+      }
+    }
+
+    // Enforce max servers per agent
+    const existing = await listMcpServers(db, req.params.id)
+    if (existing.length >= MAX_MCP_SERVERS_PER_AGENT) {
+      return res.status(400).json({ error: `Maximum ${MAX_MCP_SERVERS_PER_AGENT} MCP servers per agent` })
+    }
+
+    const config = await addMcpServer(db, {
+      agentId: req.params.id, serverName, transportType: transportType as 'stdio' | 'http',
+      command, args, url, envVars,
+    })
+    await logActivity(db, 'mcp_server_added', req.params.id, `MCP server "${serverName}" added (${transportType})`, undefined, teamId)
+    res.status(201).json({ ...config, envVars: config.envVars ? '[configured]' : undefined })
+  })
+
+  app.delete('/api/agents/:id/mcp-servers/:name', async (req, res) => {
+    if (MCP_BLOCKED) return res.status(403).json({ error: 'MCP servers are not available in hosted mode' })
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
+    // Validate server name param
+    if (!MCP_SERVER_NAME_REGEX.test(req.params.name)) return res.status(400).json({ error: 'Invalid server name' })
+    await removeMcpServer(db, req.params.id, req.params.name)
+    await logActivity(db, 'mcp_server_removed', req.params.id, `MCP server "${req.params.name}" removed`, undefined, teamId)
+    res.status(204).end()
+  })
+
+  app.post('/api/agents/:id/mcp-servers/:name/test', async (req, res) => {
+    if (MCP_BLOCKED) return res.status(403).json({ error: 'MCP servers are not available in hosted mode' })
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
+    if (!MCP_SERVER_NAME_REGEX.test(req.params.name)) return res.status(400).json({ error: 'Invalid server name' })
+    const servers = await listMcpServers(db, req.params.id)
+    const server = servers.find((s) => s.serverName === req.params.name)
+    if (!server) return res.status(404).json({ error: 'MCP server not found' })
+    try {
+      const tools = await connectMcpServer(server)
+      res.json({ status: 'connected', toolCount: tools.length, tools: tools.map((t) => t.function.name) })
+    } catch (err) {
+      // Don't leak internal error details
+      const message = (err as Error).message
+      const safeMessage = message.includes('ENOENT') ? 'Command not found. Make sure the MCP server is installed.'
+        : message.includes('timed out') ? 'Connection timed out.'
+        : message.includes('ECONNREFUSED') ? 'Connection refused. Check the server URL.'
+        : 'Failed to connect to MCP server.'
+      res.status(400).json({ status: 'error', error: safeMessage })
+    }
+  })
+
+  // ===== Credentials (BYOK) =====
+  // SECURITY: Only admins can write/delete. Values are encrypted at rest.
+  // List endpoint returns hasValue booleans only, never actual values.
+  // serviceId is validated against the known service registry.
+
+  app.get('/api/credentials', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    // Returns only { serviceId, credentialType, hasValue, updatedAt } — never the actual encrypted values
+    const creds = await listCredentials(db, teamId)
+    res.json(creds)
+  })
+
+  app.put('/api/credentials', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    const { serviceId, value, credentialType } = validate(SetCredentialSchema, req.body)
+
+    // Validate serviceId exists in the service registry
+    const { getService } = await import('./services.ts')
+    if (!getService(serviceId)) {
+      return res.status(400).json({ error: `Unknown service: "${serviceId}". Check /api/services for available services.` })
+    }
+
+    // Credential values are encrypted before storage (AES-256-GCM when YOKEBOT_ENCRYPTION_KEY is set)
+    await setCredential(db, teamId, serviceId, value, credentialType)
+    await logActivity(db, 'credential_updated', null, `Credential updated for service "${serviceId}"`, undefined, teamId)
+    // Never return the value back
+    res.json({ serviceId, hasValue: true })
+  })
+
+  app.delete('/api/credentials/:serviceId', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    // Validate serviceId format (same regex as SetCredentialSchema)
+    if (!/^[a-z][a-z0-9-]{0,49}$/.test(req.params.serviceId)) {
+      return res.status(400).json({ error: 'Invalid service ID format' })
+    }
+    const deleted = await deleteCredential(db, teamId, req.params.serviceId)
+    if (!deleted) return res.status(404).json({ error: 'Credential not found' })
+    await logActivity(db, 'credential_deleted', null, `Credential removed for service "${req.params.serviceId}"`, undefined, teamId)
+    res.status(204).end()
+  })
+
+  // ===== Services (available integrations) =====
+
+  app.get('/api/services', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const services = listServices()
+    const creds = await listCredentials(db, teamId)
+    const credMap = new Map(creds.map((c) => [c.serviceId, c]))
+    res.json(services.map((s) => ({
+      ...s,
+      connected: credMap.has(s.id),
+      updatedAt: credMap.get(s.id)?.updatedAt ?? null,
+    })))
+  })
+
+  // ===== Templates =====
+
+  app.get('/api/templates', (_req, res) => {
+    res.json(listTemplates())
   })
 
   // ===== Teams =====

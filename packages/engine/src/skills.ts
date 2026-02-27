@@ -18,6 +18,7 @@ export interface SkillMetadata {
   source: string
   version?: string
   author?: string
+  requiredCredentials?: string[]
 }
 
 export interface Skill {
@@ -54,6 +55,7 @@ export function parseSkillFile(content: string, filePath: string): Skill | null 
       source: (metadata.source as string) ?? 'unknown',
       version: metadata.version as string | undefined,
       author: metadata.author as string | undefined,
+      requiredCredentials: (metadata.requiredCredentials as string[]) ?? undefined,
     },
     instructions,
     filePath,
@@ -91,6 +93,8 @@ const RESERVED_TOOL_NAMES = new Set([
   'request_approval',
   'query_source_of_record', 'update_source_of_record',
   'generate_image', 'generate_video', 'generate_3d',
+  'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type',
+  'browser_select_option', 'browser_press_key', 'browser_evaluate', 'browser_close',
 ])
 
 export function parseToolSchemas(instructions: string): ToolDef[] {

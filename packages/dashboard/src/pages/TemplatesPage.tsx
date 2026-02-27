@@ -1,118 +1,60 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import * as engine from '@/lib/engine'
+import type { AgentTemplate } from '@/lib/engine'
 import { CreateAgentModal } from '@/components/CreateAgentModal'
 
-interface Template {
-  name: string
-  description: string
-  icon: string
-  iconBg: string
-  iconColor: string
-  category: string
-  tags: string[]
-}
-
-const TEMPLATES: Template[] = [
-  {
-    name: 'Sales Outreach Bot',
-    description: 'Automates cold outreach sequences and intelligent follow-ups based on recipient engagement.',
-    icon: 'campaign',
-    iconBg: 'bg-green-100',
-    iconColor: 'text-green-700',
-    category: 'Sales',
-    tags: ['Email', 'CRM', 'Scheduling'],
-  },
-  {
-    name: 'Customer Support Agent',
-    description: 'First-line response for common Zendesk inquiries, triage, and knowledge base routing.',
-    icon: 'support_agent',
-    iconBg: 'bg-blue-100',
-    iconColor: 'text-blue-700',
-    category: 'Support',
-    tags: ['Zendesk', 'Chat', 'NLP'],
-  },
-  {
-    name: 'Data Analyst',
-    description: 'Summarizes weekly CSV reports into actionable insights and visual dashboards.',
-    icon: 'bar_chart',
-    iconBg: 'bg-purple-100',
-    iconColor: 'text-purple-700',
-    category: 'Operations',
-    tags: ['Python', 'Excel', 'Reporting'],
-  },
-  {
-    name: 'HR Onboarding Buddy',
-    description: 'Guides new hires through paperwork, account setup, and initial training modules.',
-    icon: 'badge',
-    iconBg: 'bg-amber-100',
-    iconColor: 'text-amber-700',
-    category: 'HR',
-    tags: ['Workday', 'Slack', 'Docs'],
-  },
-  {
-    name: 'Social Media Manager',
-    description: 'Drafts, schedules, and monitors posts across LinkedIn, Twitter, and Instagram.',
-    icon: 'share',
-    iconBg: 'bg-pink-100',
-    iconColor: 'text-pink-700',
-    category: 'Marketing',
-    tags: ['LinkedIn', 'Generative AI', 'Scheduling'],
-  },
-  {
-    name: 'Meeting Assistant',
-    description: 'Joins calls, transcribes discussion, and automatically generates action items.',
-    icon: 'groups',
-    iconBg: 'bg-teal-100',
-    iconColor: 'text-teal-700',
-    category: 'Operations',
-    tags: ['Zoom', 'Jira', 'Notion'],
-  },
-  {
-    name: 'Lead Qualifier',
-    description: 'Scores and qualifies inbound leads based on custom criteria and CRM data.',
-    icon: 'filter_alt',
-    iconBg: 'bg-orange-100',
-    iconColor: 'text-orange-700',
-    category: 'Sales',
-    tags: ['CRM', 'Scoring', 'Email'],
-  },
-  {
-    name: 'Content Writer',
-    description: 'Generates blog posts, newsletters, and marketing copy from briefs and outlines.',
-    icon: 'edit_note',
-    iconBg: 'bg-indigo-100',
-    iconColor: 'text-indigo-700',
-    category: 'Marketing',
-    tags: ['SEO', 'Blog', 'Copy'],
-  },
-]
-
-const categories = ['All', 'Sales', 'Support', 'Marketing', 'HR', 'Operations']
-
 export function TemplatesPage() {
+  const [templates, setTemplates] = useState<AgentTemplate[]>([])
+  const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('All')
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
+  const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplate | null>(null)
 
-  const filtered = TEMPLATES.filter((t) => {
-    if (filter !== 'All' && t.category !== filter) return false
-    if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false
+  useEffect(() => {
+    engine.listTemplates()
+      .then(setTemplates)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Dynamic category list from templates
+  const departments = ['All', ...Array.from(new Set(templates.map((t) => t.department))).sort()]
+
+  const filtered = templates.filter((t) => {
+    if (filter !== 'All' && t.department !== filter) return false
+    if (search) {
+      const q = search.toLowerCase()
+      return t.name.toLowerCase().includes(q) ||
+        t.title.toLowerCase().includes(q) ||
+        t.description.toLowerCase().includes(q)
+    }
     return true
   })
 
-  const deploy = (template: Template) => {
+  const deploy = (template: AgentTemplate) => {
     setSelectedTemplate(template)
     setShowCreate(true)
   }
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-forest-green border-t-transparent" />
+      </div>
+    )
+  }
+
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-text-main">Agent Templates</h1>
-          <p className="text-sm text-text-muted">Select a pre-configured agent to fast-track your automation workflows.</p>
+          <p className="text-sm text-text-muted">
+            {templates.length} pre-configured agents ready to deploy. Choose a template and customize it for your team.
+          </p>
         </div>
-        <div className="relative max-w-xs">
+        <div className="relative max-w-xs w-full">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-text-muted">search</span>
           <input
             type="text"
@@ -125,18 +67,18 @@ export function TemplatesPage() {
       </div>
 
       {/* Category Filters */}
-      <div className="mb-6 flex gap-1">
-        {categories.map((cat) => (
+      <div className="mb-6 flex flex-wrap gap-1">
+        {departments.map((dept) => (
           <button
-            key={cat}
-            onClick={() => setFilter(cat)}
+            key={dept}
+            onClick={() => setFilter(dept)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
-              filter === cat
+              filter === dept
                 ? 'bg-forest-green text-white'
                 : 'bg-light-surface-alt text-text-secondary hover:bg-gray-200'
             }`}
           >
-            {cat}
+            {dept}
           </button>
         ))}
       </div>
@@ -144,23 +86,54 @@ export function TemplatesPage() {
       {/* Template Grid */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {filtered.map((template) => (
-          <div key={template.name} className="rounded-xl border border-border-subtle bg-white p-5 shadow-card">
+          <div key={template.id} className="rounded-xl border border-border-subtle bg-white p-5 shadow-card">
             <div className="mb-3 flex items-start gap-3">
-              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${template.iconBg} ${template.iconColor}`}>
+              <div
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm"
+                style={{ backgroundColor: template.iconColor }}
+              >
                 <span className="material-symbols-outlined">{template.icon}</span>
               </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-text-main">{template.name}</h3>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-text-main">{template.name}</h3>
+                  {template.isFree && (
+                    <span className="rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-bold text-green-700">Free</span>
+                  )}
+                  {template.isSpecial && (
+                    <span className="rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700">Reasoning</span>
+                  )}
+                </div>
+                <p className="text-[11px] font-medium text-text-secondary">{template.title}</p>
                 <p className="mt-1 text-xs text-text-muted line-clamp-2">{template.description}</p>
               </div>
             </div>
 
-            <div className="mb-4 flex flex-wrap gap-1.5">
-              {template.tags.map((tag) => (
-                <span key={tag} className="rounded-full bg-light-surface-alt px-2.5 py-0.5 text-[10px] font-medium text-text-muted">
-                  {tag}
+            {/* Personality traits */}
+            <div className="mb-2 flex flex-wrap gap-1">
+              {template.personalityTraits.map((trait) => (
+                <span key={trait} className="rounded-full bg-light-surface-alt px-2 py-0.5 text-[10px] font-medium text-text-muted">
+                  {trait}
                 </span>
               ))}
+            </div>
+
+            {/* Skills count + model */}
+            <div className="mb-3 flex items-center gap-3 text-[10px] text-text-muted">
+              {template.defaultSkills.length > 0 && (
+                <span className="flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[12px]">extension</span>
+                  {template.defaultSkills.length} skills
+                </span>
+              )}
+              <span className="flex items-center gap-1">
+                <span className="material-symbols-outlined text-[12px]">smart_toy</span>
+                {template.recommendedModel}
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="material-symbols-outlined text-[12px]">folder</span>
+                {template.department}
+              </span>
             </div>
 
             <button
@@ -173,16 +146,22 @@ export function TemplatesPage() {
         ))}
       </div>
 
+      {filtered.length === 0 && (
+        <div className="rounded-lg border border-border-subtle bg-white p-8 text-center">
+          <span className="material-symbols-outlined mb-2 text-4xl text-text-muted">search_off</span>
+          <p className="text-sm text-text-muted">No templates match your search.</p>
+        </div>
+      )}
+
       <div className="mt-6 text-center text-sm text-text-muted">
-        Showing {filtered.length} of {TEMPLATES.length} templates
+        Showing {filtered.length} of {templates.length} templates
       </div>
 
-      {showCreate && (
+      {showCreate && selectedTemplate && (
         <CreateAgentModal
           onClose={() => { setShowCreate(false); setSelectedTemplate(null) }}
           onCreated={() => { setShowCreate(false); setSelectedTemplate(null) }}
-          defaultName={selectedTemplate?.name}
-          defaultPrompt={selectedTemplate ? `You are a ${selectedTemplate.name}. ${selectedTemplate.description}` : undefined}
+          template={selectedTemplate}
         />
       )}
     </div>

@@ -17,6 +17,9 @@ import { getDmChannel, sendMessage } from './chat.ts'
 import { createApproval } from './approval.ts'
 import { listSorTables, listSorRows, updateSorRow, getSorTableByName, checkSorPermission } from './sor.ts'
 import { getAgentSkills, getSkillTools } from './skills.ts'
+import { executeSkillHandler } from './skill-handlers.ts'
+import { executeBrowserTool, isBrowserTool } from './browser.ts'
+import { loadMcpTools, callMcpTool, isMcpTool } from './mcp-client.ts'
 import { logActivity } from './activity.ts'
 import { falGenerate } from './fal.ts'
 import { getLogicalModel } from './model.ts'
@@ -385,58 +388,30 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         }
       }
 
-      // Try skill tool handlers (web_search, slack_send_message, etc.)
-      const skillResult = await executeSkillToolCall(toolCall, args)
+      // Try browser tools first (browser_navigate, browser_snapshot, etc.)
+      if (isBrowserTool(toolCall.function.name)) {
+        const browserResult = await executeBrowserTool(ctx.agentId, toolCall.function.name, args)
+        if (browserResult !== null) return browserResult
+      }
+
+      // Try MCP tools (server_name__tool_name pattern)
+      if (isMcpTool(toolCall.function.name)) {
+        const mcpResult = await callMcpTool(ctx.agentId, toolCall.function.name, args)
+        if (mcpResult !== null) return mcpResult
+      }
+
+      // Try skill handler registry (credentials-aware)
+      const skillResult = await executeSkillHandler(toolCall.function.name, args, {
+        db: ctx.db,
+        agentId: ctx.agentId,
+        teamId: ctx.teamId,
+      })
       if (skillResult !== null) return skillResult
-      return `Skill tool '${toolCall.function.name}' is installed but its handler requires external configuration.`
+      return `Skill tool '${toolCall.function.name}' is installed but no handler is registered for it.`
     }
   }
 }
 
-/**
- * Execute a skill tool call that has a built-in handler (e.g. web_search with Brave API).
- * Returns null if no handler is available, meaning the default message should be used.
- */
-async function executeSkillToolCall(toolCall: ToolCall, args: Record<string, unknown>): Promise<string | null> {
-  if (toolCall.function.name === 'web_search') {
-    const apiKey = process.env.BRAVE_API_KEY
-    if (!apiKey) return 'Web search requires BRAVE_API_KEY to be configured. Ask an admin to set it up.'
-    const query = encodeURIComponent(args.query as string)
-    const count = Math.min((args.count as number) ?? 5, 20)
-    try {
-      const res = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${query}&count=${count}`, {
-        headers: { 'Accept': 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': apiKey },
-      })
-      if (!res.ok) return `Search failed: ${res.status} ${res.statusText}`
-      const data = await res.json() as { web?: { results?: Array<{ title: string; url: string; description: string }> } }
-      const results = data.web?.results ?? []
-      if (results.length === 0) return 'No results found.'
-      return results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.description}`).join('\n\n')
-    } catch (err) {
-      return `Search error: ${err instanceof Error ? err.message : 'Unknown error'}`
-    }
-  }
-
-  if (toolCall.function.name === 'slack_send_message') {
-    const webhookUrl = process.env.SLACK_WEBHOOK_URL
-    if (!webhookUrl) return 'Slack notifications require SLACK_WEBHOOK_URL to be configured.'
-    try {
-      const payload: Record<string, unknown> = { text: args.text as string }
-      if (args.username) payload.username = args.username
-      const res = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) return `Slack error: ${res.status} ${res.statusText}`
-      return 'Message sent to Slack successfully.'
-    } catch (err) {
-      return `Slack error: ${err instanceof Error ? err.message : 'Unknown error'}`
-    }
-  }
-
-  return null // No built-in handler for this skill tool
-}
 
 export interface RunResult {
   response: string | null
@@ -518,10 +493,11 @@ export async function runReactLoop(
     })),
   ]
 
-  // Merge builtin tools with installed skill tools
+  // Merge builtin tools with installed skill tools + MCP tools
   const installedSkills = (await getAgentSkills(db, agentId)).map((s) => s.skillName)
   const skillTools = getSkillTools(skillsDir, installedSkills)
-  const tools = [...getBuiltinTools(), ...skillTools]
+  const mcpTools = await loadMcpTools(db, agentId)
+  const tools = [...getBuiltinTools(), ...skillTools, ...mcpTools]
   const toolCtx: ToolContext = { db, agentId, teamId, workspaceConfig, skillsDir }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
