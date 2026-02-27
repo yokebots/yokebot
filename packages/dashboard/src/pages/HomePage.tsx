@@ -279,10 +279,10 @@ export function HomePage() {
                   <h3 className="mb-3 font-display text-2xl font-bold text-text-muted">YokeBot Open Source</h3>
                   <p className="mb-2 text-sm font-medium text-text-muted">Free forever</p>
                   <p className="mb-8 flex-grow text-gray-500">Self-host on your own hardware. Full privacy, full control, bring your own API keys. Contribute to the core engine powering the future of work.</p>
-                  <button className="flex w-full items-center justify-center gap-2 rounded-lg border border-transparent bg-gray-200 py-3.5 font-bold text-gray-600 transition-all hover:scale-105 hover:bg-gray-300">
+                  <a href="https://github.com/yokebots/yokebot" target="_blank" rel="noopener noreferrer" className="flex w-full items-center justify-center gap-2 rounded-lg border border-transparent bg-gray-200 py-3.5 font-bold text-gray-600 transition-all hover:scale-105 hover:bg-gray-300">
                     View on GitHub
                     <span className="material-symbols-outlined text-sm">open_in_new</span>
-                  </button>
+                  </a>
                 </div>
               </div>
             </div>

@@ -1396,6 +1396,89 @@ ${truncated}`,
     }
   })
 
+  // Voice message (push-to-talk STT → inject as human message)
+  app.post('/api/teams/:id/meetings/:meetingId/voice', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
+    }
+
+    try {
+      const cloudPath4 = './cloud/orchestrator.ts'
+      const { injectHumanMessage, getMeeting } = await import(/* @vite-ignore */ cloudPath4)
+
+      const meeting = getMeeting(req.params.meetingId)
+      if (!meeting || meeting.config.teamId !== req.params.id) {
+        return res.status(404).json({ error: 'Meeting not found' })
+      }
+
+      // Read raw audio from request body
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(Buffer.from(chunk))
+      const audioBuffer = Buffer.concat(chunks)
+      if (audioBuffer.length === 0) {
+        return res.status(400).json({ error: 'No audio data received' })
+      }
+
+      // Transcribe via DeepInfra Voxtral
+      const apiKey = process.env.DEEPINFRA_API_KEY
+      if (!apiKey) {
+        return res.status(500).json({ error: 'STT provider not configured' })
+      }
+
+      const formData = new FormData()
+      formData.append('file', new Blob([audioBuffer], { type: 'audio/webm' }), 'voice.webm')
+      formData.append('model', 'mistralai/Voxtral-Mini-4B-Realtime-2602')
+      formData.append('response_format', 'json')
+
+      const sttRes = await fetch('https://api.deepinfra.com/v1/openai/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        body: formData,
+      })
+
+      if (!sttRes.ok) {
+        const errText = await sttRes.text()
+        console.error('[meetings] STT error:', sttRes.status, errText)
+        return res.status(502).json({ error: 'Transcription failed' })
+      }
+
+      const sttData = await sttRes.json() as { text?: string }
+      const text = sttData.text?.trim()
+      if (!text) {
+        return res.json({ text: '', queued: false })
+      }
+
+      const queued = injectHumanMessage(req.params.meetingId, text)
+      res.json({ text, queued })
+    } catch (err) {
+      console.error('[meetings] Voice transcription error:', err)
+      res.status(500).json({ error: 'Failed to process voice message' })
+    }
+  })
+
+  // Raise hand (human wants to interrupt agent queue)
+  app.post('/api/teams/:id/meetings/:meetingId/raise-hand', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
+    }
+
+    try {
+      const cloudPath5 = './cloud/orchestrator.ts'
+      const { raiseHand, getMeeting } = await import(/* @vite-ignore */ cloudPath5)
+
+      const meeting = getMeeting(req.params.meetingId)
+      if (!meeting || meeting.config.teamId !== req.params.id) {
+        return res.status(404).json({ error: 'Meeting not found' })
+      }
+
+      const ok = raiseHand(req.params.meetingId)
+      res.json({ raised: ok })
+    } catch (err) {
+      console.error('[meetings] Raise hand error:', err)
+      res.status(500).json({ error: 'Failed to raise hand' })
+    }
+  })
+
   // ===== Config (public — returns platform mode info) =====
 
   app.get('/api/config', (_req, res) => {

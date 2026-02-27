@@ -149,6 +149,10 @@ export function OnboardingPage() {
   const [audioEnabled, setAudioEnabled] = useState(true)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const meetingEndRef = useRef<HTMLDivElement>(null)
+  const [recording, setRecording] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   // Step 4 state
   const [deployedAgents, setDeployedAgents] = useState<engine.EngineAgent[]>([])
@@ -389,6 +393,11 @@ export function OnboardingPage() {
             }])
             break
 
+          case 'human_raised_hand':
+            // Pause agent audio when hand is raised
+            if (audioRef.current) audioRef.current.pause()
+            break
+
           case 'meeting_ended':
             setMeetingEnded(true)
             setMeetingActive(false)
@@ -416,6 +425,63 @@ export function OnboardingPage() {
       await engine.sendMeetingMessage(activeTeam.id, meetingId, content.trim())
     } catch (err) {
       console.error('[meeting] Failed to send message:', err)
+    }
+  }, [meetingId, activeTeam])
+
+  // Start push-to-talk recording
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm',
+      })
+      audioChunksRef.current = []
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release mic
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        if (blob.size === 0 || !meetingId || !activeTeam) return
+        setTranscribing(true)
+        try {
+          const result = await engine.sendMeetingVoice(activeTeam.id, meetingId, blob)
+          if (!result.text) {
+            console.warn('[meeting] STT returned empty text')
+          }
+        } catch (err) {
+          console.error('[meeting] Voice send failed:', err)
+        } finally {
+          setTranscribing(false)
+        }
+      }
+      mediaRecorderRef.current = mediaRecorder
+      mediaRecorder.start()
+      setRecording(true)
+    } catch (err) {
+      console.error('[meeting] Mic access denied:', err)
+    }
+  }, [meetingId, activeTeam])
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+    setRecording(false)
+  }, [])
+
+  // Raise hand — pause audio + tell orchestrator
+  const handleRaiseHand = useCallback(async () => {
+    if (!meetingId || !activeTeam) return
+    if (audioRef.current) audioRef.current.pause()
+    try {
+      await engine.raiseMeetingHand(activeTeam.id, meetingId)
+    } catch (err) {
+      console.error('[meeting] Raise hand failed:', err)
     }
   }, [meetingId, activeTeam])
 
@@ -916,27 +982,87 @@ export function OnboardingPage() {
                     <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
                   </button>
                 ) : meetingActive ? (
-                  /* During meeting → human can type */
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={meetingInput}
-                      onChange={(e) => setMeetingInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && meetingInput.trim()) {
-                          sendMeetingMsg(meetingInput.trim())
-                        }
-                      }}
-                      placeholder="Say something to the team..."
-                      className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:bg-white focus:outline-none focus:ring-1 focus:ring-forest-green transition-colors"
-                    />
-                    <button
-                      onClick={() => meetingInput.trim() && sendMeetingMsg(meetingInput.trim())}
-                      disabled={!meetingInput.trim()}
-                      className="rounded-xl bg-forest-green px-5 py-3 text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-40"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">send</span>
-                    </button>
+                  /* During meeting → mic (push-to-talk) + raise hand + text fallback */
+                  <div className="space-y-3">
+                    {/* Primary row: Raise Hand + Mic + Audio Toggle */}
+                    <div className="flex items-center justify-center gap-4">
+                      {/* Raise hand */}
+                      <button
+                        onClick={handleRaiseHand}
+                        title="Raise hand to speak"
+                        className="flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white text-text-secondary shadow-sm hover:bg-amber-50 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[22px]">front_hand</span>
+                      </button>
+
+                      {/* Mic — push-to-talk */}
+                      <button
+                        onMouseDown={startRecording}
+                        onMouseUp={stopRecording}
+                        onMouseLeave={() => recording && stopRecording()}
+                        onTouchStart={(e) => { e.preventDefault(); startRecording() }}
+                        onTouchEnd={(e) => { e.preventDefault(); stopRecording() }}
+                        disabled={transcribing}
+                        className={`flex h-16 w-16 items-center justify-center rounded-full shadow-md transition-all ${
+                          recording
+                            ? 'bg-red-500 text-white scale-110 animate-pulse'
+                            : transcribing
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-forest-green text-white hover:bg-forest-green-hover'
+                        }`}
+                        title={recording ? 'Release to send' : transcribing ? 'Transcribing...' : 'Hold to speak'}
+                      >
+                        <span className="material-symbols-outlined text-[28px]">
+                          {recording ? 'mic' : transcribing ? 'hourglass_top' : 'mic'}
+                        </span>
+                      </button>
+
+                      {/* Audio toggle */}
+                      <button
+                        onClick={() => {
+                          setAudioEnabled((prev) => !prev)
+                          if (audioEnabled && audioRef.current) audioRef.current.pause()
+                        }}
+                        title={audioEnabled ? 'Mute agent voices' : 'Unmute agent voices'}
+                        className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-sm transition-colors ${
+                          audioEnabled
+                            ? 'border-gray-200 bg-white text-text-secondary hover:bg-gray-50'
+                            : 'border-red-200 bg-red-50 text-red-500'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[22px]">
+                          {audioEnabled ? 'volume_up' : 'volume_off'}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Status label */}
+                    <p className="text-center text-sm text-text-muted">
+                      {recording ? 'Listening... release to send' : transcribing ? 'Transcribing your message...' : 'Hold mic to speak'}
+                    </p>
+
+                    {/* Text fallback */}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={meetingInput}
+                        onChange={(e) => setMeetingInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && meetingInput.trim()) {
+                            sendMeetingMsg(meetingInput.trim())
+                          }
+                        }}
+                        placeholder="Or type a message..."
+                        className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:bg-white focus:outline-none focus:ring-1 focus:ring-forest-green transition-colors"
+                      />
+                      <button
+                        onClick={() => meetingInput.trim() && sendMeetingMsg(meetingInput.trim())}
+                        disabled={!meetingInput.trim()}
+                        className="rounded-xl bg-forest-green px-4 py-2.5 text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-40"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">send</span>
+                      </button>
+                    </div>
                   </div>
                 ) : agentsDeployed && !meetingId ? (
                   /* Agents deployed but meeting didn't start (error fallback) */

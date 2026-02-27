@@ -796,6 +796,7 @@ export type MeetingEventType =
   | 'agent_speaking'
   | 'agent_message'
   | 'human_message'
+  | 'human_raised_hand'
   | 'meeting_ended'
   | 'error'
 
@@ -825,6 +826,37 @@ export const startMeetAndGreet = (teamId: string) =>
 export const sendMeetingMessage = (teamId: string, meetingId: string, content: string) =>
   request<{ queued: boolean }>(`/api/teams/${teamId}/meetings/${meetingId}/message`, {
     method: 'POST', body: JSON.stringify({ content }),
+  })
+
+export async function sendMeetingVoice(
+  teamId: string,
+  meetingId: string,
+  audioBlob: Blob,
+): Promise<{ text: string; queued: boolean }> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const headers: Record<string, string> = {}
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`
+  }
+  if (_activeTeamId) {
+    headers['X-Team-Id'] = _activeTeamId
+  }
+  headers['Content-Type'] = 'audio/webm'
+
+  const res = await fetch(
+    `${ENGINE_URL}/api/teams/${teamId}/meetings/${meetingId}/voice`,
+    { method: 'POST', headers, body: audioBlob },
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error ?? `Voice transcription failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export const raiseMeetingHand = (teamId: string, meetingId: string) =>
+  request<{ raised: boolean }>(`/api/teams/${teamId}/meetings/${meetingId}/raise-hand`, {
+    method: 'POST',
   })
 
 /**
