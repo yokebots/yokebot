@@ -281,8 +281,8 @@ async function main() {
       const todayStart = new Date()
       todayStart.setHours(0, 0, 0, 0)
       const countResult = await db.queryOne<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM chat_messages WHERE channel_id = $1 AND created_at > $2`,
-        [dmChannel.id, todayStart.toISOString()],
+        `SELECT COUNT(*) as cnt FROM chat_messages WHERE channel_id = $1 AND team_id = $2 AND created_at > $3`,
+        [dmChannel.id, teamId, todayStart.toISOString()],
       )
       if (countResult && countResult.cnt >= 50) {
         return res.json({
@@ -423,7 +423,7 @@ async function main() {
     const channel = await getChannel(db, req.params.channelId)
     if (!channel) { res.status(404).json({ error: 'Channel not found' }); return }
     if (channel.type !== 'group') { res.status(400).json({ error: 'Cannot delete DM or task thread channels' }); return }
-    await db.run('DELETE FROM chat_messages WHERE channel_id = $1', [req.params.channelId])
+    await db.run('DELETE FROM chat_messages WHERE channel_id = $1 AND team_id = $2', [req.params.channelId, teamId])
     await db.run('DELETE FROM chat_channels WHERE id = $1 AND team_id = $2', [req.params.channelId, teamId])
     res.json({ deleted: true })
   })
