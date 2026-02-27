@@ -17,6 +17,9 @@ import { TemplatesPage } from '@/pages/TemplatesPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { BillingPage } from '@/pages/BillingPage'
 import { TeamPage } from '@/pages/TeamPage'
+import { ActivityPage } from '@/pages/ActivityPage'
+import { ProjectsPage } from '@/pages/ProjectsPage'
+import { GoalsPage } from '@/pages/GoalsPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { ToastProvider } from '@/components/ToastNotifications'
@@ -62,8 +65,10 @@ function AppRoutes() {
         }
       >
         <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="mission-control" element={<MissionControlPage />} />
-        <Route path="mission-control/:taskId" element={<TaskDetailPage />} />
+        <Route path="tasks" element={<MissionControlPage />} />
+        <Route path="tasks/:taskId" element={<TaskDetailPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="goals" element={<GoalsPage />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:channelId" element={<ChatPage />} />
         <Route path="agents" element={<AgentsPage />} />
@@ -73,6 +78,7 @@ function AppRoutes() {
         <Route path="knowledge-base" element={<KnowledgeBasePage />} />
         <Route path="skills" element={<SkillsPage />} />
         <Route path="templates" element={<TemplatesPage />} />
+        <Route path="activity" element={<ActivityPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/billing" element={<BillingPage />} />
         <Route path="team" element={<TeamPage />} />

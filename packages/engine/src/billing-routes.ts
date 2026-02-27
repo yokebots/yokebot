@@ -17,14 +17,15 @@ import {
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
 // Tier config — maps tier name to subscription limits
+// fastestHeartbeat = fastest allowed check-in interval (in seconds)
 const TIER_CONFIG: Record<string, {
-  maxAgents: number; minHeartbeat: number
+  maxAgents: number; fastestHeartbeat: number
   hoursStart: number; hoursEnd: number
   monthlyCredits: number; includedCredits: number
 }> = {
-  team:       { maxAgents: 2,  minHeartbeat: 1800, hoursStart: 6,  hoursEnd: 22, monthlyCredits: 50000,  includedCredits: 50000 },
-  business:   { maxAgents: 5,  minHeartbeat: 900,  hoursStart: 0,  hoursEnd: 24, monthlyCredits: 150000, includedCredits: 150000 },
-  enterprise: { maxAgents: 15, minHeartbeat: 300,  hoursStart: 0,  hoursEnd: 24, monthlyCredits: 500000, includedCredits: 500000 },
+  team:       { maxAgents: 2,  fastestHeartbeat: 1800, hoursStart: 6,  hoursEnd: 22, monthlyCredits: 50000,  includedCredits: 50000 },
+  business:   { maxAgents: 5,  fastestHeartbeat: 900,  hoursStart: 0,  hoursEnd: 24, monthlyCredits: 150000, includedCredits: 150000 },
+  enterprise: { maxAgents: 15, fastestHeartbeat: 300,  hoursStart: 0,  hoursEnd: 24, monthlyCredits: 500000, includedCredits: 500000 },
 }
 
 // Map Stripe Price IDs → tier names
@@ -110,7 +111,8 @@ export function registerBillingRoutes(app: Express, db: Db): void {
       await upsertSubscription(db, teamId, { stripeCustomerId: result.customerId })
       res.json({ url: result.url })
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message })
+      console.error('[billing] Subscription checkout error:', err)
+      res.status(500).json({ error: 'Failed to create checkout session' })
     }
   })
 
@@ -135,7 +137,8 @@ export function registerBillingRoutes(app: Express, db: Db): void {
       )
       res.json({ url: result.url })
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message })
+      console.error('[billing] Credit pack checkout error:', err)
+      res.status(500).json({ error: 'Failed to create checkout session' })
     }
   })
 
@@ -156,7 +159,8 @@ export function registerBillingRoutes(app: Express, db: Db): void {
       const result = await ee.createPortalSession(sub.stripeCustomerId, `${dashboardUrl}/settings/billing`)
       res.json({ url: result.url })
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message })
+      console.error('[billing] Portal session error:', err)
+      res.status(500).json({ error: 'Failed to create billing portal session' })
     }
   })
 
@@ -196,7 +200,7 @@ export function registerBillingRoutes(app: Express, db: Db): void {
               tier: tierName as SubscriptionTier,
               status: status === 'active' ? 'active' : status === 'past_due' ? 'past_due' : 'inactive',
               maxAgents: tierConfig.maxAgents,
-              minHeartbeatSeconds: tierConfig.minHeartbeat,
+              minHeartbeatSeconds: tierConfig.fastestHeartbeat,
               activeHoursStart: tierConfig.hoursStart,
               activeHoursEnd: tierConfig.hoursEnd,
               monthlyCredits: tierConfig.monthlyCredits,
@@ -263,7 +267,7 @@ export function registerBillingRoutes(app: Express, db: Db): void {
       res.json({ received: true })
     } catch (err) {
       console.error('[billing] Webhook error:', err)
-      res.status(400).json({ error: (err as Error).message })
+      res.status(400).json({ error: 'Webhook processing failed' })
     }
   })
 }

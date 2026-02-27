@@ -197,6 +197,87 @@ export async function setPreference(
   return { userId, teamId, inAppEnabled: inApp, emailEnabled: email, muted }
 }
 
+// ---- Alert Category Preferences ----
+
+export interface AlertPreference {
+  userId: string
+  teamId: string
+  category: string
+  inApp: boolean
+  email: boolean
+  slack: boolean
+  telegram: boolean
+}
+
+export async function listAlertPreferences(db: Db, userId: string, teamId: string): Promise<AlertPreference[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    'SELECT * FROM alert_preferences WHERE user_id = $1 AND team_id = $2',
+    [userId, teamId],
+  )
+  return rows.map(rowToAlertPref)
+}
+
+export async function setAlertPreference(
+  db: Db,
+  userId: string,
+  teamId: string,
+  category: string,
+  updates: { inApp?: boolean; email?: boolean; slack?: boolean; telegram?: boolean },
+): Promise<AlertPreference> {
+  // Get existing or use defaults
+  const existing = await db.queryOne<Record<string, unknown>>(
+    'SELECT * FROM alert_preferences WHERE user_id = $1 AND team_id = $2 AND category = $3',
+    [userId, teamId, category],
+  )
+  const inApp = updates.inApp ?? (existing ? (existing.in_app as number) === 1 : true)
+  const email = updates.email ?? (existing ? (existing.email as number) === 1 : false)
+  const slack = updates.slack ?? (existing ? (existing.slack as number) === 1 : false)
+  const telegram = updates.telegram ?? (existing ? (existing.telegram as number) === 1 : false)
+
+  if (db.driver === 'postgres') {
+    await db.run(
+      `INSERT INTO alert_preferences (user_id, team_id, category, in_app, email, slack, telegram)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id, team_id, category) DO UPDATE SET in_app = $4, email = $5, slack = $6, telegram = $7`,
+      [userId, teamId, category, inApp ? 1 : 0, email ? 1 : 0, slack ? 1 : 0, telegram ? 1 : 0],
+    )
+  } else {
+    await db.run(
+      `INSERT OR REPLACE INTO alert_preferences (user_id, team_id, category, in_app, email, slack, telegram)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [userId, teamId, category, inApp ? 1 : 0, email ? 1 : 0, slack ? 1 : 0, telegram ? 1 : 0],
+    )
+  }
+
+  return { userId, teamId, category, inApp, email, slack, telegram }
+}
+
+export async function setBulkAlertPreferences(
+  db: Db,
+  userId: string,
+  teamId: string,
+  prefs: Array<{ category: string; inApp: boolean; email: boolean; slack: boolean; telegram: boolean }>,
+): Promise<AlertPreference[]> {
+  const results: AlertPreference[] = []
+  for (const p of prefs) {
+    const result = await setAlertPreference(db, userId, teamId, p.category, p)
+    results.push(result)
+  }
+  return results
+}
+
+function rowToAlertPref(row: Record<string, unknown>): AlertPreference {
+  return {
+    userId: row.user_id as string,
+    teamId: row.team_id as string,
+    category: row.category as string,
+    inApp: (row.in_app as number) === 1,
+    email: (row.email as number) === 1,
+    slack: (row.slack as number) === 1,
+    telegram: (row.telegram as number) === 1,
+  }
+}
+
 // ---- Helpers ----
 
 function rowToNotification(row: Record<string, unknown>): Notification {

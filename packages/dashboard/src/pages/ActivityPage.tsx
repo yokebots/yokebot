@@ -76,8 +76,6 @@ export function ActivityPage() {
     return agents.find((a) => a.id === id)?.name ?? id.slice(0, 8)
   }
 
-  const eventTypes = [...new Set(entries.map((e) => e.eventType))]
-
   return (
     <div className="max-w-4xl">
       <div className="mb-6">

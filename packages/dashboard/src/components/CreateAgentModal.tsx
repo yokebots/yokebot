@@ -34,6 +34,7 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
   const [models, setModels] = useState<LogicalModel[]>([])
   const [modelCatalog, setModelCatalog] = useState<ModelCreditCost[]>([])
   const [selectedModelId, setSelectedModelId] = useState('')
+  const [heartbeat, setHeartbeat] = useState(1800) // Default 30 min for all tiers
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -69,6 +70,7 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
         department: department.trim() || undefined,
         systemPrompt: systemPrompt.trim() || undefined,
         modelId: selectedModelId,
+        heartbeatSeconds: heartbeat,
       })
       onCreated()
     } catch (err) {
@@ -238,6 +240,37 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
                     )}
                   </div>
                 </div>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-text-secondary">Check-in Frequency</label>
+              <select
+                value={heartbeat}
+                onChange={(e) => setHeartbeat(Number(e.target.value))}
+                className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+              >
+                <option value={3600}>Every 1 hour</option>
+                <option value={1800}>Every 30 min (recommended)</option>
+                <option value={900}>Every 15 min</option>
+                <option value={600}>Every 10 min</option>
+                <option value={300}>Every 5 min</option>
+              </select>
+              <p className="mt-1 text-[11px] text-text-muted">How often the agent checks in for new work. 30 min is ideal for most tasks.</p>
+              {heartbeat <= 600 && (
+                <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                  <div className="flex items-start gap-2">
+                    <span className="material-symbols-outlined text-amber-600 text-[16px] mt-0.5">local_fire_department</span>
+                    <p className="text-xs text-amber-700">
+                      <span className="font-bold">Heads up!</span> A {heartbeat / 60}-min check-in burns credits fast. Consider 30-min for most tasks — your agents will still respond quickly.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {selectedCost && (
+                <p className="mt-1 text-[11px] text-text-muted">
+                  Est. ~{Math.round((24 * 60 / (heartbeat / 60)) * selectedCost.creditsPerUse).toLocaleString()} credits/day at current settings
+                </p>
               )}
             </div>
 

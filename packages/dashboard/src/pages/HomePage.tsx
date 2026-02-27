@@ -40,7 +40,7 @@ const faqItems = [
   { q: 'What are credits?', a: 'Universal credits cover all usage on the platform: LLM heartbeats, media generation (images, video, 3D), and skill execution (web search, email, etc.). Your subscription includes monthly credits, and you can buy additional credit packs that never expire.' },
   { q: 'Can I self-host?', a: 'Yes! YokeBot is open-source (AGPLv3). You can self-host on your own hardware with your own API keys for free forever. The cloud version adds managed hosting, billing, and team features.' },
   { q: 'What models are available?', a: 'We offer 12+ models ranging from budget (Gemma 3 at 5 credits/heartbeat) to frontier (Qwen 3.5 at 75 credits/heartbeat), plus image, video, and 3D generation models. Each model has star ratings for Intelligence, Power, and Speed to help you choose.' },
-  { q: 'How do agents work?', a: 'Each agent runs on a heartbeat cycle. Every heartbeat (configurable from 5 min to 1 hour), the agent checks its tasks, goals, and messages, then takes autonomous action using its assigned tools and skills. You set the work shift hours and the agent operates within that window.' },
+  { q: 'How do agents work?', a: 'Each agent runs on a check-in cycle. Every check-in (configurable from 5 min to 1 hour), the agent reviews its tasks, goals, and messages, then takes autonomous action using its assigned tools and skills. You set their work schedule — part-time, full-time, or always-on — and they operate within that window, just like a real team member.' },
   { q: 'Is my data safe?', a: 'Absolutely. With the self-hosted option, no data ever leaves your servers. On the cloud version, all data is encrypted in transit and at rest, and we never train on your data.' },
   { q: 'Can I bring my own API keys?', a: 'Yes! BYOK (Bring Your Own Key) skills cost 0 credits — you pay your provider directly. Self-hosted users always use their own keys for everything.' },
 ]
@@ -300,64 +300,88 @@ export function HomePage() {
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
           <div className="mx-auto max-w-7xl">
             <div className="mb-16 text-center">
-              <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-5xl">Pricing that Scales</h2>
-              <p className="mx-auto max-w-xl text-text-muted">Start small and grow your workforce as your revenue grows. Universal credits cover all usage.</p>
+              <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-5xl">Build Your Team</h2>
+              <p className="mx-auto max-w-xl text-text-muted">Start with a couple of part-timers and scale to a full 24/7 workforce. Onboard new team members in minutes, not weeks.</p>
             </div>
             <div className="grid items-center gap-8 md:grid-cols-3">
               {/* Team */}
               <div className="pricing-card-hover group relative flex flex-col rounded-xl border border-border-subtle bg-white p-8 transition-all duration-300 hover:border-forest-green/30" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)' }}>
-                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Team</h3>
+                <h3 className="mb-1 font-display text-xl font-bold text-text-main">Team</h3>
+                <p className="mb-4 text-xs text-text-muted">Hire your first part-time team members</p>
                 <div className="mb-6 flex items-baseline gap-1">
                   <span className="text-4xl font-bold text-text-main">$29</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
-                <p className="mb-8 text-sm text-text-muted">Perfect for small teams getting started with AI agents.</p>
-                <ul className="mb-8 flex-1 space-y-4">
-                  {['2 Active Agents', '30min Heartbeat', '16hr Active (6am-10pm)', '50,000 Universal Credits/mo'].map((f) => (
+                <ul className="mb-4 flex-1 space-y-4">
+                  {['2 agent team members', '30-min heartbeat interval', 'Active hours: 6am – 10pm', '50,000 universal credits/mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
                     </li>
                   ))}
                 </ul>
-                <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Started</button>
+                <div className="group/tip relative mb-6 inline-flex items-center gap-1 cursor-help">
+                  <span className="material-symbols-outlined text-accent-gold text-[14px]">schedule</span>
+                  <span className="text-[12px] font-bold text-accent-gold-dim">Avg 64 work hrs/week</span>
+                  <span className="material-symbols-outlined text-[12px] text-text-muted">info</span>
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover/tip:block z-10 w-56 rounded-lg border border-border-subtle bg-white p-2 text-[11px] text-text-muted shadow-lg">
+                    Based on 2 agents working 16 hrs/day at 30-min heartbeats
+                  </div>
+                </div>
+                <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Start Onboarding</button>
               </div>
               {/* Business — popular */}
               <div className="pricing-card-hover relative z-10 flex scale-105 flex-col rounded-xl border border-accent-gold/50 bg-white p-8 shadow-2xl shadow-accent-gold/10" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03), 0 25px 50px -12px rgba(212, 160, 23, 0.15)' }}>
                 <div className="absolute right-0 top-0 rounded-bl-lg rounded-tr-lg bg-accent-gold px-3 py-1 text-xs font-bold text-white">POPULAR</div>
-                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Business</h3>
+                <h3 className="mb-1 font-display text-xl font-bold text-text-main">Business</h3>
+                <p className="mb-4 text-xs text-text-muted">A full-time team that never calls in sick</p>
                 <div className="mb-6 flex items-baseline gap-1">
                   <span className="text-4xl font-bold text-text-main">$59</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
-                <p className="mb-8 text-sm text-text-muted">For growing businesses ready to automate operations 24/7.</p>
-                <ul className="mb-8 flex-1 space-y-4">
-                  {['5 Active Agents', '15min Heartbeat', '24/7 Always On', '150,000 Universal Credits/mo'].map((f) => (
+                <ul className="mb-4 flex-1 space-y-4">
+                  {['5 agent team members', '15-min heartbeat interval', 'Always-on schedule (24/7)', '150,000 universal credits/mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
                     </li>
                   ))}
                 </ul>
-                <button onClick={goToLogin} className="primary-btn w-full rounded-lg bg-forest-green py-3 font-bold text-white shadow-lg shadow-forest-green/20 transition-colors hover:bg-forest-green-hover">Get Business</button>
+                <div className="group/tip relative mb-6 inline-flex items-center gap-1 cursor-help">
+                  <span className="material-symbols-outlined text-accent-gold text-[14px]">schedule</span>
+                  <span className="text-[12px] font-bold text-accent-gold-dim">Avg 840 work hrs/week</span>
+                  <span className="material-symbols-outlined text-[12px] text-text-muted">info</span>
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover/tip:block z-10 w-56 rounded-lg border border-border-subtle bg-white p-2 text-[11px] text-text-muted shadow-lg">
+                    Based on 5 agents working 24/7 at 15-min heartbeats
+                  </div>
+                </div>
+                <button onClick={goToLogin} className="primary-btn w-full rounded-lg bg-forest-green py-3 font-bold text-white shadow-lg shadow-forest-green/20 transition-colors hover:bg-forest-green-hover">Start Onboarding</button>
               </div>
               {/* Enterprise */}
               <div className="pricing-card-hover group relative flex flex-col rounded-xl border border-border-subtle bg-white p-8 transition-all duration-300 hover:border-forest-green/30" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)' }}>
-                <h3 className="mb-2 font-display text-xl font-bold text-text-main">Enterprise</h3>
+                <h3 className="mb-1 font-display text-xl font-bold text-text-main">Enterprise</h3>
+                <p className="mb-4 text-xs text-text-muted">An always-on workforce that never sleeps</p>
                 <div className="mb-6 flex items-baseline gap-1">
                   <span className="text-4xl font-bold text-text-main">$149</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
-                <p className="mb-8 text-sm text-text-muted">Full operational autonomy with maximum agent capacity.</p>
-                <ul className="mb-8 flex-1 space-y-4">
-                  {['15 Active Agents', '5min Heartbeat', '24/7 Always On', '500,000 Universal Credits/mo'].map((f) => (
+                <ul className="mb-4 flex-1 space-y-4">
+                  {['15 agent team members', '5-min heartbeat interval', 'Always-on schedule (24/7)', '500,000 universal credits/mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
                     </li>
                   ))}
                 </ul>
-                <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Get Enterprise</button>
+                <div className="group/tip relative mb-6 inline-flex items-center gap-1 cursor-help">
+                  <span className="material-symbols-outlined text-accent-gold text-[14px]">schedule</span>
+                  <span className="text-[12px] font-bold text-accent-gold-dim">Avg 2,520 work hrs/week</span>
+                  <span className="material-symbols-outlined text-[12px] text-text-muted">info</span>
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover/tip:block z-10 w-56 rounded-lg border border-border-subtle bg-white p-2 text-[11px] text-text-muted shadow-lg">
+                    Based on 15 agents working 24/7 at 5-min heartbeats
+                  </div>
+                </div>
+                <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Start Onboarding</button>
               </div>
             </div>
           </div>

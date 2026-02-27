@@ -36,35 +36,41 @@ const TXN_TYPE_LABELS: Record<string, { label: string; color: string }> = {
 const PLANS = [
   {
     tier: 'team', name: 'Team', price: '$29', period: '/mo',
+    subtitle: 'Hire your first part-time team members',
     features: [
-      '2 AI agents',
-      '30 min heartbeat',
-      '16hr active (6am-10pm)',
+      '2 agent team members',
+      '30-min heartbeat interval',
+      'Active hours: 6am – 10pm',
       '50,000 universal credits/mo',
     ],
-    creditExamples: '~100 agent-days on budget models',
+    workHours: 'Avg 64 work hrs/week',
+    workHoursTooltip: 'Based on 2 agents working 16 hrs/day at 30-min heartbeats',
     envKey: 'VITE_STRIPE_PRICE_TEAM',
   },
   {
     tier: 'business', name: 'Business', price: '$59', period: '/mo', popular: true,
+    subtitle: 'A full-time team that never calls in sick',
     features: [
-      '5 AI agents',
-      '15 min heartbeat',
-      '24/7 active window',
+      '5 agent team members',
+      '15-min heartbeat interval',
+      'Always-on schedule (24/7)',
       '150,000 universal credits/mo',
     ],
-    creditExamples: '~300 agent-days on budget models',
+    workHours: 'Avg 840 work hrs/week',
+    workHoursTooltip: 'Based on 5 agents working 24/7 at 15-min heartbeats',
     envKey: 'VITE_STRIPE_PRICE_BUSINESS',
   },
   {
     tier: 'enterprise', name: 'Enterprise', price: '$149', period: '/mo',
+    subtitle: 'An always-on workforce that never sleeps',
     features: [
-      '15 AI agents',
-      '5 min heartbeat',
-      '24/7 active window',
+      '15 agent team members',
+      '5-min heartbeat interval',
+      'Always-on schedule (24/7)',
       '500,000 universal credits/mo',
     ],
-    creditExamples: '~1,000 agent-days on budget models',
+    workHours: 'Avg 2,520 work hrs/week',
+    workHoursTooltip: 'Based on 15 agents working 24/7 at 5-min heartbeats',
     envKey: 'VITE_STRIPE_PRICE_ENTERPRISE',
   },
 ]
@@ -177,17 +183,17 @@ export function BillingPage() {
             <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border-subtle pt-4">
               <div className="text-center">
                 <p className="text-lg font-bold text-text-main">{sub!.maxAgents}</p>
-                <p className="text-[10px] text-text-muted uppercase">Agents</p>
+                <p className="text-[10px] text-text-muted uppercase">Team Members</p>
               </div>
               <div className="text-center">
                 <p className="text-lg font-bold text-text-main">{Math.round(sub!.minHeartbeatSeconds / 60)}m</p>
-                <p className="text-[10px] text-text-muted uppercase">Min Heartbeat</p>
+                <p className="text-[10px] text-text-muted uppercase">Check-in</p>
               </div>
               <div className="text-center">
                 <p className="text-lg font-bold text-text-main">
-                  {sub!.activeHoursStart === 0 && sub!.activeHoursEnd === 24 ? '24/7' : `${sub!.activeHoursEnd - sub!.activeHoursStart}hr`}
+                  {sub!.activeHoursStart === 0 && sub!.activeHoursEnd === 24 ? '24/7' : `${sub!.activeHoursEnd - sub!.activeHoursStart}hr/day`}
                 </p>
-                <p className="text-[10px] text-text-muted uppercase">Active Hours</p>
+                <p className="text-[10px] text-text-muted uppercase">Work Schedule</p>
               </div>
             </div>
           )}
@@ -238,7 +244,8 @@ export function BillingPage() {
                   </div>
                 )}
                 <h3 className="text-lg font-bold text-text-main">{plan.name}</h3>
-                <div className="mt-1 mb-4">
+                <p className="mt-0.5 text-xs text-text-muted">{plan.subtitle}</p>
+                <div className="mt-2 mb-4">
                   <span className="text-2xl font-bold text-text-main">{plan.price}</span>
                   <span className="text-sm text-text-muted">{plan.period}</span>
                 </div>
@@ -250,7 +257,14 @@ export function BillingPage() {
                     </li>
                   ))}
                 </ul>
-                <p className="mb-5 text-[11px] italic text-text-muted">{plan.creditExamples}</p>
+                <div className="mb-5 group relative inline-flex items-center gap-1 cursor-help">
+                  <span className="material-symbols-outlined text-accent-gold text-[14px]">schedule</span>
+                  <span className="text-[12px] font-bold text-accent-gold-dim">{plan.workHours}</span>
+                  <span className="material-symbols-outlined text-[12px] text-text-muted">info</span>
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block z-10 w-56 rounded-lg border border-border-subtle bg-white p-2 text-[11px] text-text-muted shadow-lg">
+                    {plan.workHoursTooltip}
+                  </div>
+                </div>
                 {isCurrent ? (
                   <div className="rounded-lg bg-forest-green/5 px-3 py-2 text-center text-sm font-medium text-forest-green">
                     Current Plan

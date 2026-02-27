@@ -82,6 +82,17 @@ export function loadSkill(skillsDir: string, skillName: string): Skill | null {
   return parseSkillFile(content, skillMdPath)
 }
 
+// Built-in tool names that skills cannot shadow
+const RESERVED_TOOL_NAMES = new Set([
+  'think', 'respond',
+  'read_workspace_file', 'write_workspace_file', 'list_workspace_files',
+  'create_task', 'update_task', 'list_tasks',
+  'send_chat_message',
+  'request_approval',
+  'query_source_of_record', 'update_source_of_record',
+  'generate_image', 'generate_video', 'generate_3d',
+])
+
 export function parseToolSchemas(instructions: string): ToolDef[] {
   const regex = /```tools\s*\n([\s\S]*?)```/g
   const tools: ToolDef[] = []
@@ -90,6 +101,16 @@ export function parseToolSchemas(instructions: string): ToolDef[] {
     try {
       const parsed = JSON.parse(match[1]) as Array<{ name: string; description: string; parameters: Record<string, unknown> }>
       for (const t of parsed) {
+        // Block skill tools that try to shadow built-in tools
+        if (RESERVED_TOOL_NAMES.has(t.name)) {
+          console.warn(`[skills] Blocked tool "${t.name}" — name conflicts with built-in tool`)
+          continue
+        }
+        // Block tool names with suspicious characters (only allow alphanumeric + underscore)
+        if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(t.name)) {
+          console.warn(`[skills] Blocked tool "${t.name}" — invalid characters in name`)
+          continue
+        }
         tools.push({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })
       }
     } catch { /* malformed tool block, skip */ }

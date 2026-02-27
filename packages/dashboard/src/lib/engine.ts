@@ -212,6 +212,15 @@ export const resolveApproval = (id: string, status: 'approved' | 'rejected') =>
 
 export const listChannels = () => request<ChatChannel[]>('/api/chat/channels')
 
+export const createGroupChannel = (name: string) =>
+  request<ChatChannel>('/api/chat/channels', {
+    method: 'POST',
+    body: JSON.stringify({ name, type: 'group' }),
+  })
+
+export const deleteChannel = (channelId: string) =>
+  request<void>(`/api/chat/channels/${channelId}`, { method: 'DELETE' })
+
 export const getDmChannel = (agentId: string) =>
   request<ChatChannel>(`/api/chat/dm/${agentId}`)
 
@@ -463,6 +472,99 @@ export const listNotificationPreferences = () =>
 export const updateNotificationPreference = (teamId: string, updates: { inAppEnabled?: boolean; emailEnabled?: boolean; muted?: boolean }) =>
   request<NotificationPreference>('/api/notifications/preferences', {
     method: 'PATCH', body: JSON.stringify({ teamId, ...updates }),
+  })
+
+// ===== Goals =====
+
+export interface Goal {
+  id: string
+  teamId: string
+  title: string
+  description: string
+  status: 'active' | 'completed' | 'paused' | 'canceled'
+  targetDate: string | null
+  progress: number
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+  taskCount?: number
+  completedTaskCount?: number
+  taskIds?: string[]
+}
+
+export const listGoals = (status?: string) => {
+  const qs = status ? `?status=${status}` : ''
+  return request<Goal[]>(`/api/goals${qs}`)
+}
+
+export const createGoal = (data: { title: string; description?: string; targetDate?: string }) =>
+  request<Goal>('/api/goals', { method: 'POST', body: JSON.stringify(data) })
+
+export const getGoal = (id: string) => request<Goal>(`/api/goals/${id}`)
+
+export const updateGoal = (id: string, updates: { title?: string; description?: string; status?: string; targetDate?: string | null }) =>
+  request<Goal>(`/api/goals/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+
+export const deleteGoal = (id: string) =>
+  request<{ deleted: boolean }>(`/api/goals/${id}`, { method: 'DELETE' })
+
+export const linkTaskToGoal = (goalId: string, taskId: string) =>
+  request<{ linked: boolean }>(`/api/goals/${goalId}/tasks`, { method: 'POST', body: JSON.stringify({ taskId }) })
+
+export const unlinkTaskFromGoal = (goalId: string, taskId: string) =>
+  request<{ unlinked: boolean }>(`/api/goals/${goalId}/tasks/${taskId}`, { method: 'DELETE' })
+
+// ===== KPI Goals (measurable milestones) =====
+
+export interface KpiGoal {
+  id: string
+  teamId: string
+  title: string
+  metricName: string
+  currentValue: number
+  targetValue: number
+  unit: string
+  deadline: string | null
+  status: 'active' | 'achieved' | 'missed' | 'paused'
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+export const listKpiGoals = (status?: string) => {
+  const qs = status ? `?status=${status}` : ''
+  return request<KpiGoal[]>(`/api/kpi-goals${qs}`)
+}
+
+export const createKpiGoal = (data: {
+  title: string; metricName: string; targetValue: number; unit?: string; currentValue?: number; deadline?: string
+}) => request<KpiGoal>('/api/kpi-goals', { method: 'POST', body: JSON.stringify(data) })
+
+export const getKpiGoal = (id: string) => request<KpiGoal>(`/api/kpi-goals/${id}`)
+
+export const updateKpiGoal = (id: string, updates: Record<string, unknown>) =>
+  request<KpiGoal>(`/api/kpi-goals/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+
+export const deleteKpiGoal = (id: string) =>
+  request<{ deleted: boolean }>(`/api/kpi-goals/${id}`, { method: 'DELETE' })
+
+// Per-category alert preferences
+export interface AlertPreference {
+  userId: string
+  teamId: string
+  category: string
+  inApp: boolean
+  email: boolean
+  slack: boolean
+  telegram: boolean
+}
+
+export const listAlertPreferences = () =>
+  request<AlertPreference[]>('/api/notifications/alerts')
+
+export const saveAlertPreferences = (alerts: Array<{ category: string; inApp: boolean; email: boolean; slack: boolean; telegram: boolean }>) =>
+  request<AlertPreference[]>('/api/notifications/alerts', {
+    method: 'PUT', body: JSON.stringify({ alerts }),
   })
 
 // ===== Billing =====

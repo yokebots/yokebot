@@ -6,14 +6,23 @@ import { z } from 'zod'
 
 // ---- Agents ----
 
+// modelEndpoint must be a known provider ID (e.g. "deepinfra", "ollama") — not an arbitrary URL.
+// This prevents SSRF attacks where someone points the agent at an attacker-controlled server.
+const safeModelEndpoint = z.string().max(200)
+  .refine((val) => !val.includes('://'), { message: 'modelEndpoint must be a provider ID, not a URL' })
+  .optional()
+
+// modelId: alphanumeric, hyphens, dots, slashes — no shell metacharacters
+const safeModelId = z.string().max(100).regex(/^[a-zA-Z0-9._\-/]+$/, 'Invalid model ID characters').optional()
+
 export const CreateAgentSchema = z.object({
   name: z.string().min(1).max(100),
   department: z.string().max(100).optional(),
   iconName: z.string().max(50).optional(),
-  iconColor: z.string().max(20).optional(),
+  iconColor: z.string().max(20).regex(/^[a-zA-Z0-9#_-]+$/, 'Invalid color format').optional(),
   systemPrompt: z.string().max(10000).optional(),
-  modelId: z.string().max(100).optional(),
-  modelEndpoint: z.string().max(200).optional(),
+  modelId: safeModelId,
+  modelEndpoint: safeModelEndpoint,
   modelName: z.string().max(200).optional(),
   proactive: z.boolean().optional(),
   heartbeatSeconds: z.number().int().min(60).max(86400).optional(),
@@ -25,8 +34,8 @@ export const UpdateAgentSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   department: z.string().max(100).optional(),
   systemPrompt: z.string().max(10000).optional(),
-  modelId: z.string().max(100).optional(),
-  modelEndpoint: z.string().max(200).optional(),
+  modelId: safeModelId,
+  modelEndpoint: safeModelEndpoint,
   modelName: z.string().max(200).optional(),
   proactive: z.boolean().optional(),
   heartbeatSeconds: z.number().int().min(60).max(86400).optional(),

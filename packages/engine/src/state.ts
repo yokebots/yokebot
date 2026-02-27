@@ -204,6 +204,39 @@ const SQLITE_DDL = `
     PRIMARY KEY (user_id, team_id)
   );
 
+  -- Per-category alert preferences
+  CREATE TABLE IF NOT EXISTS alert_preferences (
+    user_id TEXT NOT NULL,
+    team_id TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL,
+    in_app INTEGER NOT NULL DEFAULT 1,
+    email INTEGER NOT NULL DEFAULT 0,
+    slack INTEGER NOT NULL DEFAULT 0,
+    telegram INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, team_id, category)
+  );
+
+  -- Goals
+  CREATE TABLE IF NOT EXISTS goals (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    target_date TEXT,
+    progress INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Goal-task links (which tasks contribute to a goal)
+  CREATE TABLE IF NOT EXISTS goal_tasks (
+    goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    PRIMARY KEY (goal_id, task_id)
+  );
+
   -- Team subscriptions (billing)
   CREATE TABLE IF NOT EXISTS team_subscriptions (
     team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
@@ -264,6 +297,22 @@ const SQLITE_DDL = `
     credits_per_use INTEGER NOT NULL DEFAULT 0
   );
 
+  -- KPI Goals (measurable milestones)
+  CREATE TABLE IF NOT EXISTS kpi_goals (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    current_value REAL NOT NULL DEFAULT 0,
+    target_value REAL NOT NULL,
+    unit TEXT NOT NULL DEFAULT '',
+    deadline TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -285,6 +334,9 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_notifications_team ON notifications(team_id, user_id);
   CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_team_sub_stripe ON team_subscriptions(stripe_customer_id);
+  CREATE INDEX IF NOT EXISTS idx_goals_team ON goals(team_id, status);
+  CREATE INDEX IF NOT EXISTS idx_goal_tasks_task ON goal_tasks(task_id);
+  CREATE INDEX IF NOT EXISTS idx_kpi_goals_team ON kpi_goals(team_id, status);
 `
 
 const POSTGRES_DDL = `
@@ -481,6 +533,39 @@ const POSTGRES_DDL = `
     PRIMARY KEY (user_id, team_id)
   );
 
+  -- Per-category alert preferences
+  CREATE TABLE IF NOT EXISTS alert_preferences (
+    user_id TEXT NOT NULL,
+    team_id TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL,
+    in_app INTEGER NOT NULL DEFAULT 1,
+    email INTEGER NOT NULL DEFAULT 0,
+    slack INTEGER NOT NULL DEFAULT 0,
+    telegram INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, team_id, category)
+  );
+
+  -- Goals
+  CREATE TABLE IF NOT EXISTS goals (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    target_date TEXT,
+    progress INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Goal-task links (which tasks contribute to a goal)
+  CREATE TABLE IF NOT EXISTS goal_tasks (
+    goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    PRIMARY KEY (goal_id, task_id)
+  );
+
   -- Team subscriptions (billing)
   CREATE TABLE IF NOT EXISTS team_subscriptions (
     team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
@@ -541,6 +626,22 @@ const POSTGRES_DDL = `
     credits_per_use INTEGER NOT NULL DEFAULT 0
   );
 
+  -- KPI Goals (measurable milestones)
+  CREATE TABLE IF NOT EXISTS kpi_goals (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    current_value REAL NOT NULL DEFAULT 0,
+    target_value REAL NOT NULL,
+    unit TEXT NOT NULL DEFAULT '',
+    deadline TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -562,6 +663,57 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_notifications_team ON notifications(team_id, user_id);
   CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_team_sub_stripe ON team_subscriptions(stripe_customer_id);
+  CREATE INDEX IF NOT EXISTS idx_goals_team ON goals(team_id, status);
+  CREATE INDEX IF NOT EXISTS idx_goal_tasks_task ON goal_tasks(task_id);
+  CREATE INDEX IF NOT EXISTS idx_kpi_goals_team ON kpi_goals(team_id, status);
+  CREATE INDEX IF NOT EXISTS idx_approvals_agent ON approvals(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_messages_task ON chat_messages(task_id);
+  CREATE INDEX IF NOT EXISTS idx_sor_columns_table ON sor_columns(table_id);
+  CREATE INDEX IF NOT EXISTS idx_sor_permissions_table ON sor_permissions(table_id);
+  CREATE INDEX IF NOT EXISTS idx_task_deps_depends ON task_deps(depends_on);
+  CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
+
+  -- =====================================================================
+  -- Row Level Security (RLS)
+  --
+  -- All tables are accessed via the Express API using a service_role or
+  -- direct Postgres connection (which bypasses RLS). We enable RLS and
+  -- leave zero policies so the Supabase PostgREST anon/authenticated
+  -- endpoints return zero rows and reject all writes. Defense-in-depth:
+  -- even if someone has the anon key, they cannot access any data.
+  -- =====================================================================
+
+  ALTER TABLE IF EXISTS agents ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS messages ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS tasks ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS task_deps ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS chat_messages ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS chat_channels ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS approvals ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS sor_tables ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS sor_columns ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS sor_rows ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS sor_permissions ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS model_providers ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS agent_skills ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS teams ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS team_members ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS activity_log ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS notifications ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS notification_preferences ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS alert_preferences ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS goals ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS goal_tasks ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS team_subscriptions ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS team_credits ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS credit_transactions ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS model_credit_costs ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS skill_credit_costs ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS kpi_goals ENABLE ROW LEVEL SECURITY;
+
+  -- No permissive policies = deny all for anon + authenticated roles.
+  -- The Express backend connects as the Postgres owner or uses
+  -- service_role (both bypass RLS), so it is unaffected.
 `
 
 export async function migrate(db: Db): Promise<void> {

@@ -21,7 +21,7 @@ export function AgentDetailPage() {
   const [agent, setAgent] = useState<EngineAgent | null>(null)
   const [tab, setTab] = useState<'config' | 'skills' | 'activity'>('config')
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [channelId, setChannelId] = useState('')
+  const [, setChannelId] = useState('')
   const [newMessage, setNewMessage] = useState('')
   const [editPrompt, setEditPrompt] = useState('')
   const [editModelId, setEditModelId] = useState('')
@@ -321,6 +321,21 @@ export function AgentDetailPage() {
                   </p>
                 </div>
               </div>
+
+              {/* Credit Burn Warning */}
+              {editHeartbeat <= 600 && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+                  <div className="flex items-start gap-2">
+                    <span className="material-symbols-outlined text-amber-600 text-[20px] mt-0.5">local_fire_department</span>
+                    <div>
+                      <h3 className="text-sm font-bold text-amber-900">Heads up — fast check-ins burn credits quickly!</h3>
+                      <p className="mt-1 text-xs text-amber-700">
+                        A {editHeartbeat / 60}-minute check-in runs {Math.round(24 * 60 / (editHeartbeat / 60))} times per day. Consider a 30-minute check-in to stretch your credits further — most tasks don't need faster response times.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Credit Estimator */}
               {selectedCost && creditsPerDay > 0 && (

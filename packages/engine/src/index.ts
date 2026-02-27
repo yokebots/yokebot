@@ -18,16 +18,18 @@ import { runReactLoop } from './runtime.ts'
 import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
-import { createChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages } from './chat.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages } from './chat.ts'
 import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
 import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS } from './model.ts'
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
-import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam } from './teams.ts'
+import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, findUserByEmail } from './teams.ts'
 import { authMiddleware } from './auth-middleware.ts'
 import { createTeamMiddleware, requireRole } from './team-middleware.ts'
-import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam } from './notifications.ts'
+import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
+import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
+import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
 import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, AddMemberSchema, UpdateRoleSchema } from './validation.ts'
 
 const PORT = Number(process.env.PORT ?? process.env.YOKEBOT_PORT ?? 3001)
@@ -106,6 +108,15 @@ async function main() {
   const { registerBillingRoutes } = await import('./billing-routes.ts')
   registerBillingRoutes(app, db)
 
+  // ===== Ownership verification helper =====
+  // Prevents IDOR: verifies an object belongs to the requesting user's team
+  const OWNERSHIP_TABLES = new Set(['agents', 'tasks', 'goals', 'kpi_goals', 'approvals', 'chat_channels', 'sor_tables'])
+  async function verifyOwnership(table: string, id: string, teamId: string): Promise<boolean> {
+    if (!OWNERSHIP_TABLES.has(table)) throw new Error(`verifyOwnership: unknown table "${table}"`)
+    const row = await db.queryOne<{ team_id: string }>(`SELECT team_id FROM ${table} WHERE id = $1`, [id])
+    return row !== null && row.team_id === teamId
+  }
+
   // ===== Health =====
 
   app.get('/health', (_req, res) => {
@@ -127,6 +138,8 @@ async function main() {
   })
 
   app.get('/api/agents/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const agent = await getAgent(db, req.params.id)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
     res.json(agent)
@@ -165,6 +178,8 @@ async function main() {
   })
 
   app.patch('/api/agents/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const body = validate(UpdateAgentSchema, req.body)
     const agent = await updateAgent(db, req.params.id, body as Record<string, unknown>)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
@@ -174,6 +189,7 @@ async function main() {
   app.delete('/api/agents/:id', async (req, res) => {
     if (!requireRole(req, res, 'admin')) return
     const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const agent = await getAgent(db, req.params.id)
     await logActivity(db, 'agent_deleted', req.params.id, `Agent "${agent?.name ?? req.params.id}" deleted`, undefined, teamId)
     await deleteAgent(db, req.params.id)
@@ -184,6 +200,7 @@ async function main() {
   // Start/stop agent
   app.post('/api/agents/:id/start', async (req, res) => {
     const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const agent = await getAgent(db, req.params.id)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
 
@@ -211,6 +228,7 @@ async function main() {
 
   app.post('/api/agents/:id/stop', async (req, res) => {
     const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const agent = await getAgent(db, req.params.id)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
     await setAgentStatus(db, agent.id, 'stopped')
@@ -223,6 +241,7 @@ async function main() {
 
   app.post('/api/agents/:id/chat', chatLimiter, async (req: Request, res: Response) => {
     const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('agents', req.params.id as string, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const agent = await getAgent(db, req.params.id as string)
     if (!agent) return res.status(404).json({ error: 'Agent not found' })
 
@@ -284,6 +303,7 @@ async function main() {
 
   app.post('/api/approvals/:id/resolve', async (req, res) => {
     const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('approvals', req.params.id, teamId)) return res.status(404).json({ error: 'Approval not found' })
     const { status } = validate(ResolveApprovalSchema, req.body)
     const approval = await resolveApproval(db, req.params.id, status)
     if (!approval) return res.status(404).json({ error: 'Approval not found' })
@@ -304,6 +324,8 @@ async function main() {
   })
 
   app.get('/api/tasks/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
     const task = await getTask(db, req.params.id)
     if (!task) return res.status(404).json({ error: 'Task not found' })
     res.json(task)
@@ -317,6 +339,8 @@ async function main() {
   })
 
   app.patch('/api/tasks/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
     const body = validate(UpdateTaskSchema, req.body)
     const task = await updateTask(db, req.params.id, body as Record<string, unknown>)
     if (!task) return res.status(404).json({ error: 'Task not found' })
@@ -324,6 +348,9 @@ async function main() {
   })
 
   app.delete('/api/tasks/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
     await deleteTask(db, req.params.id)
     res.status(204).end()
   })
@@ -342,6 +369,17 @@ async function main() {
     res.status(201).json(channel)
   })
 
+  app.delete('/api/chat/channels/:channelId', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) { res.status(404).json({ error: 'Channel not found' }); return }
+    const channel = await getChannel(db, req.params.channelId)
+    if (!channel) { res.status(404).json({ error: 'Channel not found' }); return }
+    if (channel.type !== 'group') { res.status(400).json({ error: 'Cannot delete DM or task thread channels' }); return }
+    await db.run('DELETE FROM chat_messages WHERE channel_id = $1', [req.params.channelId])
+    await db.run('DELETE FROM chat_channels WHERE id = $1 AND team_id = $2', [req.params.channelId, teamId])
+    res.json({ deleted: true })
+  })
+
   app.get('/api/chat/dm/:agentId', async (req, res) => {
     const teamId = req.user!.activeTeamId!
     const channel = await getDmChannel(db, req.params.agentId, teamId)
@@ -355,6 +393,8 @@ async function main() {
   })
 
   app.get('/api/chat/channels/:channelId/messages', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
     const limit = Number(req.query.limit ?? 50)
     const before = req.query.before ? Number(req.query.before) : undefined
     res.json(await getChannelMessages(db, req.params.channelId, limit, before))
@@ -362,6 +402,7 @@ async function main() {
 
   app.post('/api/chat/channels/:channelId/messages', async (req, res) => {
     const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
     const { senderType, senderId, content, taskId } = validate(SendChatMessageSchema, req.body)
     const msg = await sendMessage(db, req.params.channelId, senderType, senderId, content, taskId, teamId)
     res.status(201).json(msg)
@@ -414,34 +455,43 @@ async function main() {
   })
 
   app.get('/api/sor/tables/:id/rows', async (req, res) => {
-    const table = await getSorTable(db, req.params.id)
-    if (!table) return res.status(404).json({ error: 'Table not found' })
-    res.json(await listSorRows(db, table.id))
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
+    res.json(await listSorRows(db, req.params.id))
   })
 
   app.post('/api/sor/tables/:id/rows', async (req, res) => {
-    const table = await getSorTable(db, req.params.id)
-    if (!table) return res.status(404).json({ error: 'Table not found' })
-    const row = await addSorRow(db, table.id, req.body as Record<string, unknown>)
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
+    const row = await addSorRow(db, req.params.id, req.body as Record<string, unknown>)
     res.status(201).json(row)
   })
 
   app.patch('/api/sor/tables/:tableId/rows/:rowId', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('sor_tables', req.params.tableId, teamId)) return res.status(404).json({ error: 'Table not found' })
     const row = await updateSorRow(db, req.params.rowId, req.body as Record<string, unknown>)
     if (!row) return res.status(404).json({ error: 'Row not found' })
     res.json(row)
   })
 
   app.delete('/api/sor/tables/:tableId/rows/:rowId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('sor_tables', req.params.tableId, teamId)) return res.status(404).json({ error: 'Table not found' })
     await deleteSorRow(db, req.params.rowId)
     res.status(204).end()
   })
 
   app.get('/api/sor/tables/:id/permissions', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
     res.json(await getSorPermissions(db, req.params.id))
   })
 
   app.patch('/api/sor/tables/:id/permissions', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
     const { agentId, canRead, canWrite } = validate(UpdateSorPermissionSchema, req.body)
     await setSorPermission(db, agentId, req.params.id, canRead, canWrite)
     res.json(await getSorPermissions(db, req.params.id))
@@ -501,28 +551,28 @@ async function main() {
 
   app.get('/api/skills', (_req, res) => {
     const skills = loadSkillsFromDir(SKILLS_DIR)
-    res.json(skills.map((s) => ({ metadata: s.metadata, filePath: s.filePath })))
+    res.json(skills.map((s) => ({ metadata: s.metadata })))
   })
 
   // Per-agent skill install/uninstall
   app.get('/api/agents/:id/skills', async (req, res) => {
-    const agent = await getAgent(db, req.params.id)
-    if (!agent) return res.status(404).json({ error: 'Agent not found' })
-    res.json(await getAgentSkills(db, agent.id))
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
+    res.json(await getAgentSkills(db, req.params.id))
   })
 
   app.post('/api/agents/:id/skills', async (req, res) => {
-    const agent = await getAgent(db, req.params.id)
-    if (!agent) return res.status(404).json({ error: 'Agent not found' })
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
     const { skillName } = validate(InstallSkillSchema, req.body)
-    await installSkill(db, agent.id, skillName)
-    res.status(201).json({ agentId: agent.id, skillName, installed: true })
+    await installSkill(db, req.params.id, skillName)
+    res.status(201).json({ agentId: req.params.id, skillName, installed: true })
   })
 
   app.delete('/api/agents/:id/skills/:skillName', async (req, res) => {
-    const agent = await getAgent(db, req.params.id)
-    if (!agent) return res.status(404).json({ error: 'Agent not found' })
-    await uninstallSkill(db, agent.id, req.params.skillName)
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
+    await uninstallSkill(db, req.params.id, req.params.skillName)
     res.status(204).end()
   })
 
@@ -548,9 +598,12 @@ async function main() {
   })
 
   app.delete('/api/teams/:id', async (req, res) => {
-    // Team routes are exempt from team middleware, so check membership directly
     const team = await getTeam(db, req.params.id)
     if (!team) return res.status(404).json({ error: 'Team not found' })
+    // Only admin members can delete a team
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller || caller.role !== 'admin') return res.status(403).json({ error: 'Only team admins can delete a team' })
     await deleteTeam(db, req.params.id)
     res.status(204).end()
   })
@@ -558,19 +611,41 @@ async function main() {
   app.get('/api/teams/:id/members', async (req, res) => {
     const team = await getTeam(db, req.params.id)
     if (!team) return res.status(404).json({ error: 'Team not found' })
-    res.json(await getTeamMembers(db, team.id))
+    // Must be a member of the team to view its members
+    const members = await getTeamMembers(db, team.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
+    res.json(members)
   })
 
   app.post('/api/teams/:id/members', async (req, res) => {
     const team = await getTeam(db, req.params.id)
     if (!team) return res.status(404).json({ error: 'Team not found' })
+    // Only admin members can add new members
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller || caller.role !== 'admin') return res.status(403).json({ error: 'Only team admins can add members' })
     const { userId, email, role } = validate(AddMemberSchema, req.body)
-    const member = await addMember(db, team.id, userId, email, role)
+    // Look up the real userId if the caller passed email as userId (invite flow)
+    let resolvedUserId = userId
+    if (userId === email) {
+      const existingId = await findUserByEmail(db, email)
+      if (existingId) {
+        resolvedUserId = existingId
+      }
+      // If not found, keep email as userId — it's a pending invite
+      // When the user signs up with this email, auth middleware + team creation will resolve it
+    }
+    const member = await addMember(db, team.id, resolvedUserId, email, role)
     await logActivity(db, 'member_added', null, `${email} added to team "${team.name}"`)
     res.status(201).json(member)
   })
 
   app.patch('/api/teams/:id/members/:userId', async (req, res) => {
+    // Only admin members can change roles
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller || caller.role !== 'admin') return res.status(403).json({ error: 'Only team admins can change roles' })
     const { role } = validate(UpdateRoleSchema, req.body)
     const member = await updateMemberRole(db, req.params.id, req.params.userId, role)
     if (!member) return res.status(404).json({ error: 'Member not found' })
@@ -578,6 +653,12 @@ async function main() {
   })
 
   app.delete('/api/teams/:id/members/:userId', async (req, res) => {
+    // Admins can remove anyone; members can remove themselves
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
+    const isRemovingSelf = req.params.userId === req.user!.id
+    if (!isRemovingSelf && caller.role !== 'admin') return res.status(403).json({ error: 'Only admins can remove other members' })
     await removeMember(db, req.params.id, req.params.userId)
     res.status(204).end()
   })
@@ -619,6 +700,127 @@ async function main() {
     if (!teamId) return res.status(400).json({ error: 'teamId is required' })
     const pref = await setPreference(db, req.user!.id, teamId, { inAppEnabled, emailEnabled, muted })
     res.json(pref)
+  })
+
+  // Per-category alert preferences
+  app.get('/api/notifications/alerts', async (req, res) => {
+    const teamId = req.user!.activeTeamId ?? ''
+    res.json(await listAlertPreferences(db, req.user!.id, teamId))
+  })
+
+  app.put('/api/notifications/alerts', async (req, res) => {
+    const teamId = req.user!.activeTeamId ?? ''
+    const { alerts } = req.body as { alerts: Array<{ category: string; inApp: boolean; email: boolean; slack: boolean; telegram: boolean }> }
+    if (!alerts || !Array.isArray(alerts)) return res.status(400).json({ error: 'alerts array is required' })
+    const result = await setBulkAlertPreferences(db, req.user!.id, teamId, alerts)
+    res.json(result)
+  })
+
+  // ===== Goals =====
+
+  app.get('/api/goals', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const status = req.query.status as GoalStatus | undefined
+    res.json(await listGoals(db, teamId, status))
+  })
+
+  app.post('/api/goals', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const { title, description, targetDate } = req.body as { title: string; description?: string; targetDate?: string }
+    if (!title) return res.status(400).json({ error: 'title is required' })
+    const goal = await createGoal(db, teamId, title, { description, targetDate, createdBy: req.user!.id })
+    await logActivity(db, 'goal_created', null, `Goal created: "${title}"`, undefined, teamId)
+    res.status(201).json(goal)
+  })
+
+  app.get('/api/goals/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
+    const goal = await getGoal(db, req.params.id)
+    if (!goal) return res.status(404).json({ error: 'Goal not found' })
+    const taskIds = await getGoalTasks(db, goal.id)
+    res.json({ ...goal, taskIds })
+  })
+
+  app.patch('/api/goals/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
+    const { title, description, status, targetDate } = req.body as { title?: string; description?: string; status?: GoalStatus; targetDate?: string | null }
+    const goal = await updateGoal(db, req.params.id, { title, description, status, targetDate })
+    if (!goal) return res.status(404).json({ error: 'Goal not found' })
+    res.json(goal)
+  })
+
+  app.delete('/api/goals/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
+    await deleteGoal(db, req.params.id)
+    res.json({ deleted: true })
+  })
+
+  app.post('/api/goals/:id/tasks', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
+    const { taskId } = req.body as { taskId: string }
+    if (!taskId) return res.status(400).json({ error: 'taskId is required' })
+    await linkTask(db, req.params.id, taskId)
+    res.json({ linked: true })
+  })
+
+  app.delete('/api/goals/:id/tasks/:taskId', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
+    await unlinkTask(db, req.params.id, req.params.taskId)
+    res.json({ unlinked: true })
+  })
+
+  // ===== KPI Goals (measurable milestones) =====
+
+  app.get('/api/kpi-goals', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const status = req.query.status as KpiGoalStatus | undefined
+    res.json(await listKpiGoals(db, teamId, status))
+  })
+
+  app.post('/api/kpi-goals', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const { title, metricName, targetValue, unit, currentValue, deadline } = req.body as {
+      title: string; metricName: string; targetValue: number; unit?: string; currentValue?: number; deadline?: string
+    }
+    if (!title || !metricName || targetValue === undefined) {
+      return res.status(400).json({ error: 'title, metricName, and targetValue are required' })
+    }
+    const goal = await createKpiGoal(db, teamId, title, metricName, targetValue, {
+      unit, currentValue, deadline, createdBy: req.user!.id,
+    })
+    await logActivity(db, 'kpi_goal_created', null, `Goal created: "${title}"`, undefined, teamId)
+    res.status(201).json(goal)
+  })
+
+  app.get('/api/kpi-goals/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('kpi_goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
+    const goal = await getKpiGoal(db, req.params.id)
+    if (!goal) return res.status(404).json({ error: 'Goal not found' })
+    res.json(goal)
+  })
+
+  app.patch('/api/kpi-goals/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('kpi_goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
+    const updates = req.body as Record<string, unknown>
+    const goal = await updateKpiGoal(db, req.params.id, updates)
+    if (!goal) return res.status(404).json({ error: 'Goal not found' })
+    res.json(goal)
+  })
+
+  app.delete('/api/kpi-goals/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('kpi_goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
+    await deleteKpiGoal(db, req.params.id)
+    res.json({ deleted: true })
   })
 
   // ===== Global Error Handler =====

@@ -91,7 +91,7 @@ export function TaskDetailPage() {
     <div className="mx-auto max-w-6xl">
       {/* Breadcrumb */}
       <div className="mb-4 flex items-center gap-2 text-sm text-text-muted">
-        <Link to="/mission-control" className="hover:text-forest-green">Mission Control</Link>
+        <Link to="/tasks" className="hover:text-forest-green">Tasks</Link>
         <span>/</span>
         <span className="text-text-main font-medium">{task.title}</span>
       </div>

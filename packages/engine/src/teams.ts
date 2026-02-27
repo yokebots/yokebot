@@ -78,6 +78,15 @@ export async function deleteTeam(db: Db, id: string): Promise<void> {
   await db.run('DELETE FROM teams WHERE id = $1', [id])
 }
 
+/** Look up any existing user by email across all teams. Returns userId if found. */
+export async function findUserByEmail(db: Db, email: string): Promise<string | null> {
+  const row = await db.queryOne<Record<string, unknown>>(
+    'SELECT user_id FROM team_members WHERE email = $1 LIMIT 1',
+    [email],
+  )
+  return row ? (row.user_id as string) : null
+}
+
 function rowToMember(row: Record<string, unknown>): TeamMember {
   return { teamId: row.team_id as string, userId: row.user_id as string, email: row.email as string, role: row.role as string, joinedAt: row.joined_at as string }
 }

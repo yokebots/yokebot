@@ -15,7 +15,7 @@ import { listFiles, readFile, writeFile, type WorkspaceConfig } from './workspac
 import { createTask, listTasks, updateTask } from './tasks.ts'
 import { getDmChannel, sendMessage } from './chat.ts'
 import { createApproval } from './approval.ts'
-import { listSorTables, listSorRows, updateSorRow, getSorTableByName } from './sor.ts'
+import { listSorTables, listSorRows, updateSorRow, getSorTableByName, checkSorPermission } from './sor.ts'
 import { getAgentSkills, getSkillTools } from './skills.ts'
 import { logActivity } from './activity.ts'
 import { falGenerate } from './fal.ts'
@@ -58,6 +58,12 @@ function toolDef(name: string, description: string, properties: Record<string, u
 /**
  * Built-in tools that every agent has access to.
  * Additional tools come from installed skills.
+ *
+ * IMPORTANT: Agents have NO delete tools by design. All deletion
+ * (tasks, files, channels, SOR rows, etc.) requires human action
+ * through the dashboard UI. If delete tools are ever added here,
+ * they MUST go through the approval system first (request_approval
+ * with riskLevel 'high' or 'critical').
  */
 function getBuiltinTools(): ToolDef[] {
   return [
@@ -171,7 +177,10 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'write_workspace_file': {
-      const result = writeFile(ctx.workspaceConfig, args.path as string, args.content as string, ctx.agentId)
+      const content = args.content as string
+      // Limit agent file writes to 100KB (API endpoint allows 1MB for human uploads)
+      if (content.length > 100_000) return `Error: File content too large (${content.length} chars). Maximum is 100,000 characters for agent writes.`
+      const result = writeFile(ctx.workspaceConfig, args.path as string, content, ctx.agentId)
       return result.success ? `File written: ${args.path as string}` : `Error: ${result.error}`
     }
 
@@ -193,6 +202,10 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'update_task': {
+      // Verify task belongs to this agent's team before updating
+      const existingTask = await listTasks(ctx.db, { teamId: ctx.teamId })
+      const targetTask = existingTask.find((t) => t.id === (args.taskId as string))
+      if (!targetTask) return `Task not found or access denied: ${args.taskId as string}`
       const updates: Record<string, unknown> = {}
       if (args.status) updates.status = args.status
       if (args.priority) updates.priority = args.priority
@@ -203,7 +216,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'list_tasks': {
-      const filters: Record<string, unknown> = {}
+      // Always scope to own team
+      const filters: Record<string, unknown> = { teamId: ctx.teamId }
       if (args.status) filters.status = args.status
       if (args.agentId) filters.agentId = args.agentId
       const tasks = await listTasks(ctx.db, filters as Parameters<typeof listTasks>[1])
@@ -236,16 +250,24 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Source of Record ----
     case 'query_source_of_record': {
-      const table = await getSorTableByName(ctx.db, args.tableName as string)
+      // Team-scoped: only access own team's tables
+      const table = await getSorTableByName(ctx.db, args.tableName as string, ctx.teamId)
       if (!table) return `Table not found: "${args.tableName as string}"`
+      // Enforce per-agent read permission
+      const readPerm = await checkSorPermission(ctx.db, ctx.agentId, table.id)
+      if (readPerm && !readPerm.canRead) return `Access denied: you do not have read permission on table "${table.name}".`
       const rows = await listSorRows(ctx.db, table.id)
       if (rows.length === 0) return `Table "${table.name}" has no rows.`
       return JSON.stringify(rows, null, 2)
     }
 
     case 'update_source_of_record': {
-      const table = await getSorTableByName(ctx.db, args.tableName as string)
+      // Team-scoped: only access own team's tables
+      const table = await getSorTableByName(ctx.db, args.tableName as string, ctx.teamId)
       if (!table) return `Table not found: "${args.tableName as string}"`
+      // Enforce per-agent write permission
+      const writePerm = await checkSorPermission(ctx.db, ctx.agentId, table.id)
+      if (writePerm && !writePerm.canWrite) return `Access denied: you do not have write permission on table "${table.name}".`
       const row = await updateSorRow(ctx.db, args.rowId as string, args.data as Record<string, unknown>)
       if (!row) return `Row not found: ${args.rowId as string}`
       return `Row updated: ${JSON.stringify(row.data)}`
@@ -489,7 +511,16 @@ export async function runReactLoop(
       })
 
       for (const toolCall of completion.tool_calls) {
-        const result = await executeToolCall(toolCall, toolCtx)
+        // Timeout tool execution at 30 seconds to prevent hung tools from blocking the loop
+        let result: string
+        try {
+          result = await Promise.race([
+            executeToolCall(toolCall, toolCtx),
+            new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Tool execution timed out')), 30_000)),
+          ])
+        } catch (err) {
+          result = `Error: ${err instanceof Error ? err.message : 'Tool execution failed'}`
+        }
         toolCallLog.push({ name: toolCall.function.name, result })
 
         // Log tool execution to activity log (skip 'think' — too noisy)

@@ -46,9 +46,10 @@ export function TeamPage() {
   const handleInvite = async () => {
     if (!inviteEmail.trim() || !selectedTeam) return
     try {
-      // Use email as both userId and email for now (proper user lookup would come from Supabase admin)
+      // Backend will look up the real user ID by email if they already exist
       await engine.addTeamMember(selectedTeam.id, inviteEmail.trim(), inviteEmail.trim())
       setInviteEmail('')
+      setError('')
       await loadMembers(selectedTeam.id)
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to invite member') }
   }

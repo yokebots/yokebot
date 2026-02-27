@@ -6,18 +6,27 @@
  * collision when two agents edit the same file.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync } from 'fs'
-import { join, relative, resolve } from 'path'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync, lstatSync } from 'fs'
+import { join, relative, resolve, normalize } from 'path'
 
 /**
  * Resolve a user-provided path and ensure it stays within the workspace root.
  * Prevents path traversal attacks (e.g. ../../etc/passwd).
  */
 function safePath(rootDir: string, userPath: string): string {
-  const resolved = resolve(rootDir, userPath)
-  const rel = relative(rootDir, resolved)
-  if (rel.startsWith('..') || resolve(rel) === rel) {
+  const normalizedRoot = normalize(resolve(rootDir))
+  const resolved = normalize(resolve(rootDir, userPath))
+  // Resolved path must start with the root directory
+  if (!resolved.startsWith(normalizedRoot + '/') && resolved !== normalizedRoot) {
     throw new Error('Path traversal denied')
+  }
+  // Block null bytes (used to bypass path checks in some runtimes)
+  if (userPath.includes('\0')) {
+    throw new Error('Path traversal denied')
+  }
+  // Block symlinks that point outside workspace
+  if (existsSync(resolved) && lstatSync(resolved).isSymbolicLink()) {
+    throw new Error('Symlinks are not allowed in workspace')
   }
   return resolved
 }

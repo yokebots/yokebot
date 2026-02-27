@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { UniversalSearch } from '@/components/UniversalSearch'
 import { NotificationCenter } from '@/components/NotificationCenter'
-import { getBillingStatus } from '@/lib/engine'
+import { getBillingStatus, notificationCount } from '@/lib/engine'
 
 export function TopBar() {
   const [showSearch, setShowSearch] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [credits, setCredits] = useState<number | null>(null)
+  const [unread, setUnread] = useState(0)
   const navigate = useNavigate()
 
   // Cmd+K shortcut
@@ -27,6 +28,14 @@ export function TopBar() {
     getBillingStatus()
       .then((s) => setCredits(s.credits))
       .catch(() => setCredits(null))
+  }, [])
+
+  // Poll unread notification count
+  useEffect(() => {
+    const load = () => { notificationCount().then((r) => setUnread(r.count)).catch(() => {}) }
+    load()
+    const interval = setInterval(load, 10000)
+    return () => clearInterval(interval)
   }, [])
 
   return (
@@ -60,11 +69,15 @@ export function TopBar() {
 
           {/* Notifications */}
           <button
-            onClick={() => setShowNotifications(true)}
+            onClick={() => { setShowNotifications(true); setUnread(0) }}
             className="relative text-text-muted hover:text-text-main"
           >
             <span className="material-symbols-outlined">notifications</span>
-            <span className="absolute right-0 top-0 h-2 w-2 rounded-full border border-white bg-accent-gold" />
+            {unread > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                {unread > 99 ? '99+' : unread}
+              </span>
+            )}
           </button>
         </div>
       </header>

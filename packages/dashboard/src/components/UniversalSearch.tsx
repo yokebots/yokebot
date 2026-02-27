@@ -53,7 +53,7 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
             detail: `Assigned to: ${t.assignedAgentId ?? 'Unassigned'}`,
             badge: `Task #${t.id.slice(0, 4)}`,
             badgeClass: 'bg-gray-100 text-gray-600',
-            action: () => { navigate(`/mission-control/${t.id}`); onClose() },
+            action: () => { navigate(`/tasks/${t.id}`); onClose() },
           })
         }
       } catch { /* offline */ }

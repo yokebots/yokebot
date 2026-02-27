@@ -3,7 +3,7 @@
   "buildCommand": "cd packages/dashboard && npx vite build",
   "outputDirectory": "packages/dashboard/dist",
   "installCommand": "pnpm install --filter @yokebot/dashboard",
-  "framework": "vite",
+  "framework": null,
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]

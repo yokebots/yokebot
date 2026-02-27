@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { ProviderConfig } from '@/lib/engine'
+import { useTeam } from '@/lib/team-context'
 
 interface AlertRow {
+  category: string
   label: string
   description: string
   inApp: boolean
@@ -12,33 +14,30 @@ interface AlertRow {
   telegram: boolean
 }
 
-interface ConnectedChannel {
-  name: string
-  icon: string
-  connected: boolean
-  detail: string
-}
+const DEFAULT_ALERTS: AlertRow[] = [
+  { category: 'critical_errors', label: 'Critical Errors', description: 'System failures and agent crashes', inApp: true, email: true, slack: true, telegram: false },
+  { category: 'task_completions', label: 'Task Completions', description: 'Successful agent run summaries', inApp: true, email: false, slack: false, telegram: false },
+  { category: 'new_invoices', label: 'New Invoices', description: 'Billing updates and subscription renewals', inApp: false, email: false, slack: false, telegram: false },
+  { category: 'agent_feedback', label: 'Agent Feedback', description: 'Requests for human-in-the-loop review', inApp: true, email: true, slack: true, telegram: false },
+  { category: 'approval_queue', label: 'Approval Queue', description: 'Items waiting for approval', inApp: true, email: true, slack: false, telegram: false },
+]
 
 export function SettingsPage() {
   const navigate = useNavigate()
+  const { activeTeam } = useTeam()
   const [tab, setTab] = useState<'notifications' | 'providers'>('providers')
-  const [globalEnabled, setGlobalEnabled] = useState(true)
   const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [keyInput, setKeyInput] = useState('')
   const [saving, setSaving] = useState(false)
-  const [alerts, setAlerts] = useState<AlertRow[]>([
-    { label: 'Critical Errors', description: 'System failures and agent crashes', inApp: true, email: true, slack: true, telegram: false },
-    { label: 'Task Completions', description: 'Successful agent run summaries', inApp: true, email: false, slack: false, telegram: false },
-    { label: 'New Invoices', description: 'Billing updates and subscription renewals', inApp: false, email: false, slack: false, telegram: false },
-    { label: 'Agent Feedback', description: 'Requests for human-in-the-loop review', inApp: true, email: true, slack: true, telegram: false },
-    { label: 'Approval Queue', description: 'Items waiting for approval', inApp: true, email: true, slack: false, telegram: false },
-  ])
+  const [savingNotifs, setSavingNotifs] = useState(false)
+  const [notifSaved, setNotifSaved] = useState(false)
 
-  const [channels] = useState<ConnectedChannel[]>([
-    { name: 'Slack Integration', icon: 'chat', connected: true, detail: 'Receive alerts directly in your team\'s workspace. Currently linked to acme-corp.slack.com.' },
-    { name: 'Telegram Bot', icon: 'send', connected: false, detail: 'Connect the YokeBot Telegram bot to get mobile-friendly instant alerts on the go.' },
-  ])
+  // Notification state
+  const [globalEnabled, setGlobalEnabled] = useState(true)
+  const [inAppEnabled, setInAppEnabled] = useState(true)
+  const [emailEnabled, setEmailEnabled] = useState(true)
+  const [alerts, setAlerts] = useState<AlertRow[]>(DEFAULT_ALERTS)
 
   const loadProviders = async () => {
     try {
@@ -47,10 +46,70 @@ export function SettingsPage() {
     } catch { /* offline */ }
   }
 
-  useEffect(() => { loadProviders() }, [])
+  const loadNotificationPrefs = useCallback(async () => {
+    if (!activeTeam) return
+    try {
+      // Load global team preferences
+      const prefs = await engine.listNotificationPreferences()
+      const teamPref = prefs.find((p) => p.teamId === activeTeam.id)
+      if (teamPref) {
+        setGlobalEnabled(!teamPref.muted)
+        setInAppEnabled(teamPref.inAppEnabled)
+        setEmailEnabled(teamPref.emailEnabled)
+      }
 
-  const toggleAlert = (idx: number, field: 'inApp' | 'email' | 'slack' | 'telegram') => {
-    setAlerts((prev) => prev.map((a, i) => i === idx ? { ...a, [field]: !a[field] } : a))
+      // Load per-category alert preferences
+      const alertPrefs = await engine.listAlertPreferences()
+      if (alertPrefs.length > 0) {
+        setAlerts((prev) => prev.map((a) => {
+          const saved = alertPrefs.find((p) => p.category === a.category)
+          return saved ? { ...a, inApp: saved.inApp, email: saved.email, slack: saved.slack, telegram: saved.telegram } : a
+        }))
+      }
+    } catch { /* offline */ }
+  }, [activeTeam?.id])
+
+  useEffect(() => { loadProviders() }, [])
+  useEffect(() => { loadNotificationPrefs() }, [loadNotificationPrefs])
+
+  const toggleAlert = async (idx: number, field: 'inApp' | 'email' | 'slack' | 'telegram') => {
+    const updated = alerts.map((a, i) => i === idx ? { ...a, [field]: !a[field] } : a)
+    setAlerts(updated)
+    // Save all alert preferences to backend
+    try {
+      await engine.saveAlertPreferences(updated.map((a) => ({
+        category: a.category, inApp: a.inApp, email: a.email, slack: a.slack, telegram: a.telegram,
+      })))
+    } catch { /* error */ }
+  }
+
+  const saveNotificationPrefs = async (updates: { muted?: boolean; inAppEnabled?: boolean; emailEnabled?: boolean }) => {
+    if (!activeTeam) return
+    setSavingNotifs(true)
+    try {
+      await engine.updateNotificationPreference(activeTeam.id, updates)
+      setNotifSaved(true)
+      setTimeout(() => setNotifSaved(false), 2000)
+    } catch { /* error */ }
+    setSavingNotifs(false)
+  }
+
+  const handleGlobalToggle = () => {
+    const newVal = !globalEnabled
+    setGlobalEnabled(newVal)
+    saveNotificationPrefs({ muted: !newVal })
+  }
+
+  const handleInAppToggle = () => {
+    const newVal = !inAppEnabled
+    setInAppEnabled(newVal)
+    saveNotificationPrefs({ inAppEnabled: newVal })
+  }
+
+  const handleEmailToggle = () => {
+    const newVal = !emailEnabled
+    setEmailEnabled(newVal)
+    saveNotificationPrefs({ emailEnabled: newVal })
   }
 
   const handleSaveKey = async (providerId: string) => {
@@ -82,7 +141,7 @@ export function SettingsPage() {
     <div className="max-w-3xl">
       <div className="mb-6">
         <h1 className="font-display text-2xl font-bold text-text-main">Settings</h1>
-        <p className="text-sm text-text-muted">Configure model providers, notifications, and integrations.</p>
+        <p className="text-sm text-text-muted">Configure model providers and notifications.</p>
       </div>
 
       {/* Tabs */}
@@ -202,8 +261,16 @@ export function SettingsPage() {
       {/* Notifications Tab */}
       {tab === 'notifications' && (
         <>
+          {/* Saved indicator */}
+          {notifSaved && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">
+              <span className="material-symbols-outlined text-[16px]">check_circle</span>
+              Preferences saved
+            </div>
+          )}
+
           {/* Global Toggle */}
-          <div className="mb-8 flex items-center justify-between rounded-lg border border-border-subtle bg-white p-4">
+          <div className="mb-6 flex items-center justify-between rounded-lg border border-border-subtle bg-white p-4">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-xl text-text-muted">notifications</span>
               <div>
@@ -212,11 +279,53 @@ export function SettingsPage() {
               </div>
             </div>
             <button
-              onClick={() => setGlobalEnabled(!globalEnabled)}
+              onClick={handleGlobalToggle}
+              disabled={savingNotifs}
               className={`relative h-6 w-11 rounded-full transition-colors ${globalEnabled ? 'bg-forest-green' : 'bg-gray-300'}`}
             >
               <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${globalEnabled ? 'left-5.5' : 'left-0.5'}`} />
             </button>
+          </div>
+
+          {/* Delivery Channels */}
+          <div className="mb-6">
+            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-text-muted">
+              Delivery Channels
+            </h2>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="flex items-center justify-between rounded-lg border border-border-subtle bg-white p-4">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-xl text-text-muted">notifications_active</span>
+                  <div>
+                    <p className="text-sm font-bold text-text-main">In-App Notifications</p>
+                    <p className="text-xs text-text-muted">Bell icon alerts in the dashboard</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleInAppToggle}
+                  disabled={savingNotifs}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${inAppEnabled ? 'bg-forest-green' : 'bg-gray-300'}`}
+                >
+                  <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${inAppEnabled ? 'left-5.5' : 'left-0.5'}`} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-border-subtle bg-white p-4">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-xl text-text-muted">email</span>
+                  <div>
+                    <p className="text-sm font-bold text-text-main">Email Notifications</p>
+                    <p className="text-xs text-text-muted">Critical alerts sent to your email</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleEmailToggle}
+                  disabled={savingNotifs}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${emailEnabled ? 'bg-forest-green' : 'bg-gray-300'}`}
+                >
+                  <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${emailEnabled ? 'left-5.5' : 'left-0.5'}`} />
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Alert Configuration */}
@@ -238,7 +347,7 @@ export function SettingsPage() {
                 </thead>
                 <tbody>
                   {alerts.map((alert, idx) => (
-                    <tr key={alert.label} className="border-b border-border-subtle last:border-0">
+                    <tr key={alert.category} className="border-b border-border-subtle last:border-0">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-text-main">{alert.label}</p>
                         <p className="text-xs text-text-muted">{alert.description}</p>
@@ -261,46 +370,6 @@ export function SettingsPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          </div>
-
-          {/* Connected Channels */}
-          <div>
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-text-main">
-              <span className="material-symbols-outlined text-xl">link</span>
-              Connected Channels
-            </h2>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {channels.map((ch) => (
-                <div key={ch.name} className="rounded-lg border border-border-subtle bg-white p-5">
-                  <div className="mb-3 flex items-center gap-3">
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${ch.connected ? 'bg-forest-green/10 text-forest-green' : 'bg-gray-100 text-gray-500'}`}>
-                      <span className="material-symbols-outlined">{ch.icon}</span>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-text-main">{ch.name}</h3>
-                      <span className={`text-xs font-medium ${ch.connected ? 'text-green-600' : 'text-text-muted'}`}>
-                        {ch.connected ? 'Connected' : 'Not Connected'}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="mb-4 text-xs text-text-muted">{ch.detail}</p>
-                  {ch.connected ? (
-                    <div className="flex gap-2">
-                      <button className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm font-medium text-text-secondary hover:bg-light-surface-alt">
-                        Configure
-                      </button>
-                      <button className="flex-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50">
-                        Disconnect
-                      </button>
-                    </div>
-                  ) : (
-                    <button className="w-full rounded-lg bg-forest-green px-3 py-2 text-sm font-medium text-white hover:bg-forest-green/90">
-                      Connect {ch.name.split(' ')[0]}
-                    </button>
-                  )}
-                </div>
-              ))}
             </div>
           </div>
         </>

@@ -214,12 +214,38 @@ export const MODEL_CATALOG: LogicalModel[] = [
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/flux/schnell', priority: 1 }],
   },
   {
+    id: 'flux-2-dev',
+    name: 'FLUX.2 [dev]',
+    description: 'High-quality image generation at mid-range price',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/flux-2/dev', priority: 1 }],
+  },
+  {
+    id: 'seedream-5.0-lite',
+    name: 'Seedream 5.0 Lite',
+    description: 'ByteDance image gen with web search and reasoning',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/bytedance/seedream/v5.0/text-to-image', priority: 1 }],
+  },
+  {
     id: 'nano-banana-pro',
     name: 'Nano Banana Pro',
     description: 'Premium image generation, up to 4K',
     type: 'image',
     category: 'image',
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/nano-banana-pro', priority: 1 }],
+  },
+
+  // ---- Image Editing (via fal.ai) ----
+  {
+    id: 'firered-image-edit',
+    name: 'FireRed Image Edit',
+    description: 'Instruction-based image editing — style transfer, object removal, text overlay',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/firered-image-edit', priority: 1 }],
   },
 
   // ---- Video Generation (via fal.ai) ----

@@ -12,6 +12,9 @@ import { getSubscription, isSubscriptionActive, type TeamSubscription } from './
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
+// Admin emails that bypass billing gates (comma-separated env var)
+const ADMIN_EMAILS = (process.env.YOKEBOT_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+
 // Paths exempt from billing checks
 const BILLING_EXEMPT_PATHS = [
   '/health',
@@ -38,6 +41,13 @@ export function createBillingMiddleware(db: Db) {
 
     // Exempt paths
     if (BILLING_EXEMPT_PATHS.some((p) => req.path === p || req.path.startsWith(p + '/'))) {
+      next()
+      return
+    }
+
+    // Admin bypass — admin users skip all billing checks
+    const userEmail = req.user?.email?.toLowerCase()
+    if (userEmail && ADMIN_EMAILS.includes(userEmail)) {
       next()
       return
     }

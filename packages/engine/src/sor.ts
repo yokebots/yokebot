@@ -52,12 +52,21 @@ export async function getSorTable(db: Db, id: string): Promise<SorTable | null> 
   return { id: row.id as string, name: row.name as string, createdAt: row.created_at as string }
 }
 
-export async function getSorTableByName(db: Db, name: string): Promise<SorTable | null> {
+export async function getSorTableByName(db: Db, name: string, teamId?: string): Promise<SorTable | null> {
   let row: Record<string, unknown> | null
-  if (db.driver === 'postgres') {
-    row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE LOWER(name) = LOWER($1)', [name])
+  if (teamId) {
+    // Team-scoped lookup (used by runtime to prevent cross-team access)
+    if (db.driver === 'postgres') {
+      row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE LOWER(name) = LOWER($1) AND team_id = $2', [name, teamId])
+    } else {
+      row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE name = $1 COLLATE NOCASE AND team_id = $2', [name, teamId])
+    }
   } else {
-    row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE name = $1 COLLATE NOCASE', [name])
+    if (db.driver === 'postgres') {
+      row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE LOWER(name) = LOWER($1)', [name])
+    } else {
+      row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE name = $1 COLLATE NOCASE', [name])
+    }
   }
   if (!row) return null
   return { id: row.id as string, name: row.name as string, createdAt: row.created_at as string }

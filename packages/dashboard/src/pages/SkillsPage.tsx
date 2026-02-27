@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import * as engine from '@/lib/engine'
+import type { EngineAgent } from '@/lib/engine'
 
 interface SkillCard {
   name: string
@@ -7,8 +8,9 @@ interface SkillCard {
   icon: string
   category: string
   source: string
-  creditCost: number | null  // null = BYOK or internal
+  creditCost: number | null
   keyType: 'native' | 'byok' | 'internal'
+  skillId: string
 }
 
 const SKILL_ICONS: Record<string, string> = {
@@ -18,7 +20,6 @@ const SKILL_ICONS: Record<string, string> = {
   'Google Sheets': 'table_chart',
 }
 
-// Credit costs for known skills (mirrors skill_credit_costs table)
 const SKILL_COSTS: Record<string, { credits: number; keyType: 'native' | 'byok' | 'internal' }> = {
   'web-search': { credits: 10, keyType: 'native' },
   'code-interpreter': { credits: 0, keyType: 'internal' },
@@ -32,9 +33,14 @@ export function SkillsPage() {
   const [filter, setFilter] = useState('All')
   const [search, setSearch] = useState('')
   const [skills, setSkills] = useState<SkillCard[]>([])
+  const [agents, setAgents] = useState<EngineAgent[]>([])
+  const [installTarget, setInstallTarget] = useState<string | null>(null) // skill name being installed
+  const [installing, setInstalling] = useState(false)
+  const [installSuccess, setInstallSuccess] = useState<string | null>(null)
 
   useEffect(() => {
-    engine.listSkills().then((loaded) => {
+    Promise.all([engine.listSkills(), engine.listAgents()]).then(([loaded, ag]) => {
+      setAgents(ag)
       const loadedCards: SkillCard[] = loaded.map((s) => {
         const skillId = s.metadata.name.toLowerCase().replace(/\s+/g, '-')
         const costInfo = SKILL_COSTS[skillId]
@@ -46,6 +52,7 @@ export function SkillsPage() {
           source: s.metadata.source === 'yokebot' ? 'YokeBot' : s.metadata.source,
           creditCost: costInfo?.credits ?? 0,
           keyType: costInfo?.keyType ?? 'internal',
+          skillId,
         }
       })
       setSkills(loadedCards)
@@ -61,18 +68,34 @@ export function SkillsPage() {
   const featured = filtered.filter((s) => s.source === 'YokeBot').slice(0, 2)
   const rest = filtered.filter((s) => !featured.includes(s))
 
+  const handleInstall = async (agentId: string, skillName: string) => {
+    setInstalling(true)
+    try {
+      await engine.installAgentSkill(agentId, skillName)
+      const agent = agents.find((a) => a.id === agentId)
+      setInstallSuccess(`${skillName} added to ${agent?.name ?? 'agent'}`)
+      setTimeout(() => setInstallSuccess(null), 3000)
+    } catch { /* error */ }
+    setInstalling(false)
+    setInstallTarget(null)
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-text-main">Skills Marketplace</h1>
-          <p className="text-sm text-text-muted">Supercharge your agents with official integrations and community-built skills.</p>
+          <p className="text-sm text-text-muted">Supercharge your agents with official and community-built skills.</p>
         </div>
-        <button className="flex items-center gap-2 rounded-lg border border-border-subtle bg-white px-4 py-2 text-sm font-medium text-text-secondary hover:bg-light-surface-alt">
-          <span className="material-symbols-outlined text-[18px]">upload</span>
-          Request New Skill
-        </button>
       </div>
+
+      {/* Success toast */}
+      {installSuccess && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">
+          <span className="material-symbols-outlined text-[16px]">check_circle</span>
+          {installSuccess}
+        </div>
+      )}
 
       {/* Search + Filters */}
       <div className="mb-6 flex items-center gap-4">
@@ -120,9 +143,22 @@ export function SkillsPage() {
                   </div>
                   <p className="mt-1 text-sm text-text-muted">{skill.description}</p>
                 </div>
-                <span className="shrink-0 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700">
-                  Available
-                </span>
+                <div className="relative shrink-0">
+                  <button
+                    onClick={() => setInstallTarget(installTarget === skill.skillId ? null : skill.skillId)}
+                    className="rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green/90 transition-colors"
+                  >
+                    Add to Agent
+                  </button>
+                  {installTarget === skill.skillId && (
+                    <AgentPicker
+                      agents={agents}
+                      installing={installing}
+                      onSelect={(agentId) => handleInstall(agentId, skill.skillId)}
+                      onClose={() => setInstallTarget(null)}
+                    />
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -154,9 +190,22 @@ export function SkillsPage() {
                 </div>
                 <h3 className="mb-1 text-sm font-bold text-text-main">{skill.name}</h3>
                 <p className="mb-4 text-xs text-text-muted line-clamp-2">{skill.description}</p>
-                <span className="block w-full rounded-lg border border-green-200 bg-green-50 py-2 text-center text-sm font-medium text-green-700">
-                  Available
-                </span>
+                <div className="relative">
+                  <button
+                    onClick={() => setInstallTarget(installTarget === skill.skillId ? null : skill.skillId)}
+                    className="block w-full rounded-lg bg-forest-green py-2 text-center text-sm font-medium text-white hover:bg-forest-green/90 transition-colors"
+                  >
+                    Add to Agent
+                  </button>
+                  {installTarget === skill.skillId && (
+                    <AgentPicker
+                      agents={agents}
+                      installing={installing}
+                      onSelect={(agentId) => handleInstall(agentId, skill.skillId)}
+                      onClose={() => setInstallTarget(null)}
+                    />
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -166,9 +215,51 @@ export function SkillsPage() {
       {skills.length === 0 && (
         <div className="rounded-lg border border-border-subtle bg-white p-12 text-center">
           <span className="material-symbols-outlined mb-3 text-5xl text-text-muted">extension</span>
-          <p className="text-sm text-text-muted">No skills found. Add SKILL.md files to the skills directory to get started.</p>
+          <h2 className="mb-2 font-display text-lg font-bold text-text-main">No skills found</h2>
+          <p className="text-sm text-text-muted">Add SKILL.md files to the skills directory to get started.</p>
         </div>
       )}
+    </div>
+  )
+}
+
+function AgentPicker({ agents, installing, onSelect, onClose }: {
+  agents: EngineAgent[]
+  installing: boolean
+  onSelect: (agentId: string) => void
+  onClose: () => void
+}) {
+  if (agents.length === 0) {
+    return (
+      <div className="absolute right-0 top-full z-10 mt-2 w-56 rounded-lg border border-border-subtle bg-white p-4 shadow-lg">
+        <p className="text-sm text-text-muted">No agents yet. Create an agent first.</p>
+        <button onClick={onClose} className="mt-2 text-xs text-text-muted hover:text-text-main">Close</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="absolute right-0 top-full z-10 mt-2 w-56 rounded-lg border border-border-subtle bg-white shadow-lg">
+      <p className="border-b border-border-subtle px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-muted">
+        Select Agent
+      </p>
+      {agents.map((agent) => (
+        <button
+          key={agent.id}
+          onClick={() => onSelect(agent.id)}
+          disabled={installing}
+          className="flex w-full items-center gap-2 px-3 py-2 text-sm text-text-main hover:bg-light-surface-alt disabled:opacity-50"
+        >
+          <span className={`h-2 w-2 rounded-full ${agent.status === 'running' ? 'bg-green-500' : 'bg-gray-300'}`} />
+          {agent.name}
+        </button>
+      ))}
+      <button
+        onClick={onClose}
+        className="w-full border-t border-border-subtle px-3 py-2 text-xs text-text-muted hover:bg-light-surface-alt"
+      >
+        Cancel
+      </button>
     </div>
   )
 }

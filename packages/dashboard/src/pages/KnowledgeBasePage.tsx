@@ -17,6 +17,9 @@ export function KnowledgeBasePage() {
   const [fileContent, setFileContent] = useState('')
   const [editing, setEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
+  const [search, setSearch] = useState('')
+  const [newFileName, setNewFileName] = useState('')
+  const [showNewFile, setShowNewFile] = useState(false)
 
   const loadFiles = async (dir = '') => {
     try {
@@ -63,6 +66,39 @@ export function KnowledgeBasePage() {
     setEditing(false)
   }
 
+  const handleCreateFile = async () => {
+    const name = newFileName.trim()
+    if (!name) return
+    const path = name.endsWith('.md') ? name : `${name}.md`
+    await engine.writeFile(path, `# ${name.replace('.md', '')}\n\n`, 'user')
+    setNewFileName('')
+    setShowNewFile(false)
+    await loadFiles().then(setFiles)
+    setSelectedFile(path)
+    const data = await engine.readFile(path)
+    setFileContent(data.content)
+    setEditContent(data.content)
+    setEditing(true)
+  }
+
+  const filterNodes = (nodes: FileNode[], query: string): FileNode[] => {
+    if (!query) return nodes
+    const q = query.toLowerCase()
+    return nodes.reduce<FileNode[]>((acc, node) => {
+      if (node.isDirectory) {
+        const filteredChildren = node.children ? filterNodes(node.children, query) : []
+        if (filteredChildren.length > 0 || node.name.toLowerCase().includes(q)) {
+          acc.push({ ...node, children: filteredChildren, expanded: true })
+        }
+      } else if (node.name.toLowerCase().includes(q)) {
+        acc.push(node)
+      }
+      return acc
+    }, [])
+  }
+
+  const displayFiles = search ? filterNodes(files, search) : files
+
   const renderTree = (nodes: FileNode[], depth = 0) => (
     <div>
       {nodes.map((node) => (
@@ -96,19 +132,50 @@ export function KnowledgeBasePage() {
       <div className="w-72 shrink-0 border-r border-border-subtle bg-light-surface overflow-y-auto p-4">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg font-bold text-text-main">Knowledge Base</h2>
-          <button className="text-text-muted hover:text-forest-green">
+          <button
+            onClick={() => setShowNewFile(!showNewFile)}
+            className="text-text-muted hover:text-forest-green"
+            title="New file"
+          >
             <span className="material-symbols-outlined text-[20px]">note_add</span>
           </button>
         </div>
+
+        {showNewFile && (
+          <div className="mb-3 flex items-center gap-1 rounded-lg border border-forest-green bg-white px-2 py-1.5">
+            <input
+              type="text"
+              value={newFileName}
+              onChange={(e) => setNewFileName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateFile()
+                if (e.key === 'Escape') { setShowNewFile(false); setNewFileName('') }
+              }}
+              placeholder="filename.md"
+              className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-text-muted/50"
+              autoFocus
+            />
+            <button
+              onClick={handleCreateFile}
+              disabled={!newFileName.trim()}
+              className="rounded p-0.5 text-forest-green hover:bg-forest-green/10 disabled:opacity-40"
+            >
+              <span className="material-symbols-outlined text-[16px]">check</span>
+            </button>
+          </div>
+        )}
+
         <div className="mb-3">
           <input
             type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Search files..."
             className="w-full rounded-lg border border-border-subtle px-3 py-1.5 text-sm focus:border-forest-green focus:outline-none"
           />
         </div>
-        {files.length > 0 ? (
-          renderTree(files)
+        {displayFiles.length > 0 ? (
+          renderTree(displayFiles)
         ) : (
           <p className="py-8 text-center text-xs text-text-muted">No files yet. Create workspace files from the engine.</p>
         )}

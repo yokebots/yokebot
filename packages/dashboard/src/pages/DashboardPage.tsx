@@ -1,86 +1,46 @@
 import { useState, useEffect } from 'react'
-import { AgentCard, DeployNewAgentCard } from '@/components/AgentCard'
 import { StatsRow } from '@/components/StatsRow'
 import { CreateAgentModal } from '@/components/CreateAgentModal'
-import { mockAgents } from '@/lib/mock-data'
 import * as engine from '@/lib/engine'
-import type { Agent } from '@/types/agent'
 import type { ActivityLogEntry } from '@/lib/engine'
-
-/** Map engine agent to dashboard Agent shape */
-function toDisplayAgent(a: engine.EngineAgent): Agent {
-  const iconMap: Record<string, { symbol: string; bgColor: string; textColor: string; borderColor: string }> = {
-    SALES: { symbol: 'attach_money', bgColor: 'bg-blue-50', textColor: 'text-blue-600', borderColor: 'border-blue-100' },
-    SUPPORT: { symbol: 'support_agent', bgColor: 'bg-purple-50', textColor: 'text-purple-600', borderColor: 'border-purple-100' },
-    OPS: { symbol: 'calendar_month', bgColor: 'bg-amber-50', textColor: 'text-accent-gold', borderColor: 'border-amber-100' },
-    RESEARCH: { symbol: 'travel_explore', bgColor: 'bg-pink-50', textColor: 'text-pink-500', borderColor: 'border-pink-100' },
-    FINANCE: { symbol: 'receipt_long', bgColor: 'bg-green-50', textColor: 'text-green-600', borderColor: 'border-green-100' },
-  }
-
-  const dept = (a.department ?? '').toUpperCase()
-  const icon = iconMap[dept] ?? { symbol: 'smart_toy', bgColor: 'bg-gray-50', textColor: 'text-gray-600', borderColor: 'border-gray-100' }
-
-  const statusMap: Record<string, Agent['status']> = {
-    running: 'active',
-    stopped: 'paused',
-    error: 'error',
-  }
-
-  return {
-    id: a.id,
-    name: a.name,
-    department: a.department ?? 'GENERAL',
-    status: statusMap[a.status] ?? 'offline',
-    model: a.modelName,
-    icon,
-    channels: [],
-    lastActive: new Date(a.updatedAt).toLocaleTimeString(),
-    metricLabel: 'Status',
-    metricValue: a.status,
-    progressPercent: a.status === 'running' ? 100 : 0,
-    progressColor: a.status === 'running' ? 'bg-accent-green' : 'bg-gray-300',
-  }
-}
+import { Link } from 'react-router'
 
 export function DashboardPage() {
-  const [agents, setAgents] = useState<Agent[]>(mockAgents)
-  const [engineConnected, setEngineConnected] = useState(false)
+  const [agents, setAgents] = useState<engine.EngineAgent[]>([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [recentActivity, setRecentActivity] = useState<ActivityLogEntry[]>([])
+  const [tasks, setTasks] = useState<engine.EngineTask[]>([])
+  const [projects, setProjects] = useState<engine.Goal[]>([])
   const [stats, setStats] = useState({
     activeAgents: 0,
     totalAgents: 0,
     pendingApprovals: 0,
     totalTasks: 0,
+    completedTasks: 0,
   })
 
   const loadData = async () => {
     try {
-      const [agentList, approvalData, taskList, activity] = await Promise.all([
+      const [agentList, approvalData, taskList, activity, projectList] = await Promise.all([
         engine.listAgents(),
         engine.approvalCount(),
         engine.listTasks(),
-        engine.listActivityLog({ limit: 5 }),
+        engine.listActivityLog({ limit: 8 }),
+        engine.listGoals().catch(() => [] as engine.Goal[]),
       ])
 
-      setEngineConnected(true)
-
-      if (agentList.length > 0) {
-        setAgents(agentList.map(toDisplayAgent))
-      }
-      // If no agents in engine yet, keep mock data for visual demo
-
+      setAgents(agentList)
+      setTasks(taskList)
+      setProjects(projectList)
       setRecentActivity(activity)
       setStats({
         activeAgents: agentList.filter((a) => a.status === 'running').length,
         totalAgents: agentList.length,
         pendingApprovals: approvalData.count,
         totalTasks: taskList.length,
+        completedTasks: taskList.filter((t) => t.status === 'done').length,
       })
-    } catch {
-      // Engine not running — use mock data
-      setEngineConnected(false)
-    }
+    } catch { /* engine offline */ }
   }
 
   useEffect(() => {
@@ -89,38 +49,21 @@ export function DashboardPage() {
     return () => clearInterval(interval)
   }, [])
 
+  const statusColors: Record<string, string> = {
+    running: 'bg-green-500',
+    stopped: 'bg-gray-400',
+    error: 'bg-red-500',
+  }
+
+  const inProgressTasks = tasks.filter((t) => t.status === 'in_progress').slice(0, 5)
+  const activeProjects = projects.filter((p) => p.status === 'active').slice(0, 4)
+
   return (
-    <div className="relative">
+    <div className="max-w-6xl">
       {/* Header */}
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="mb-1 font-display text-3xl font-bold text-text-main">Fleet Overview</h1>
-          <p className="text-sm text-text-muted">
-            Manage your AI workforce and monitor real-time performance.
-            {!engineConnected && (
-              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                Engine offline — showing demo data
-              </span>
-            )}
-            {engineConnected && (
-              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                Engine connected
-              </span>
-            )}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button className="flex items-center gap-2 rounded-lg border border-border-subtle bg-white px-4 py-2 text-sm font-medium text-text-secondary shadow-sm transition-colors hover:bg-light-surface-alt">
-            <span className="material-symbols-outlined text-[18px]">filter_list</span>
-            Filter
-          </button>
-          <button className="flex items-center gap-2 rounded-lg border border-border-subtle bg-white px-4 py-2 text-sm font-medium text-text-secondary shadow-sm transition-colors hover:bg-light-surface-alt">
-            <span className="material-symbols-outlined text-[18px]">sort</span>
-            Sort
-          </button>
-        </div>
+      <div className="mb-8">
+        <h1 className="mb-1 font-display text-3xl font-bold text-text-main">Dashboard</h1>
+        <p className="text-sm text-text-muted">Overview of your AI workforce and current activity.</p>
       </div>
 
       {/* Stats */}
@@ -129,14 +72,122 @@ export function DashboardPage() {
         totalAgents={stats.totalAgents}
         pendingApprovals={stats.pendingApprovals}
         totalTasks={stats.totalTasks}
-        connected={engineConnected}
+        connected={true}
       />
+
+      {/* Two-column grid: Agents + Tasks */}
+      <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Agents summary */}
+        <div className="rounded-xl border border-border-subtle bg-white p-5 shadow-card">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-text-muted">Agents</h2>
+            <Link to="/agents" className="text-xs text-forest-green hover:underline">View all</Link>
+          </div>
+          {agents.length === 0 ? (
+            <div className="py-6 text-center">
+              <span className="material-symbols-outlined mb-2 text-3xl text-text-muted">smart_toy</span>
+              <p className="text-sm text-text-muted">No agents yet.</p>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="mt-2 rounded-lg bg-forest-green px-3 py-1.5 text-xs font-medium text-white hover:bg-forest-green/90"
+              >
+                Deploy Your First Agent
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {agents.slice(0, 5).map((agent) => (
+                <Link key={agent.id} to={`/agents/${agent.id}`} className="flex items-center gap-3 rounded-lg p-2 hover:bg-light-surface-alt transition-colors">
+                  <span className={`h-2.5 w-2.5 rounded-full ${statusColors[agent.status] ?? 'bg-gray-400'}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-text-main truncate">{agent.name}</p>
+                    <p className="text-xs text-text-muted">{agent.department ?? 'General'} · {agent.modelName}</p>
+                  </div>
+                  <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                    agent.status === 'running' ? 'bg-green-50 text-green-700' : agent.status === 'error' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
+                  }`}>
+                    {agent.status}
+                  </span>
+                </Link>
+              ))}
+              {agents.length > 5 && (
+                <p className="text-center text-xs text-text-muted pt-1">+{agents.length - 5} more</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Tasks in progress */}
+        <div className="rounded-xl border border-border-subtle bg-white p-5 shadow-card">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-text-muted">Active Tasks</h2>
+            <Link to="/tasks" className="text-xs text-forest-green hover:underline">View all</Link>
+          </div>
+          {inProgressTasks.length === 0 ? (
+            <div className="py-6 text-center">
+              <span className="material-symbols-outlined mb-2 text-3xl text-text-muted">task_alt</span>
+              <p className="text-sm text-text-muted">No tasks in progress.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {inProgressTasks.map((task) => {
+                const agent = agents.find((a) => a.id === task.assignedAgentId)
+                return (
+                  <Link key={task.id} to={`/tasks/${task.id}`} className="flex items-center gap-3 rounded-lg p-2 hover:bg-light-surface-alt transition-colors">
+                    <span className="material-symbols-outlined text-[16px] text-forest-green">play_circle</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text-main truncate">{task.title}</p>
+                      <p className="text-xs text-text-muted">{agent ? agent.name : 'Unassigned'} · {task.priority}</p>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+          <div className="mt-3 flex items-center gap-4 border-t border-border-subtle pt-3 text-xs text-text-muted">
+            <span>{stats.completedTasks} completed</span>
+            <span>{stats.totalTasks - stats.completedTasks} remaining</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Projects row */}
+      {activeProjects.length > 0 && (
+        <div className="mb-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-text-muted">Active Projects</h2>
+            <Link to="/projects" className="text-xs text-forest-green hover:underline">View all</Link>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {activeProjects.map((project) => (
+              <div key={project.id} className="rounded-xl border border-border-subtle bg-white p-4 shadow-card">
+                <h3 className="text-sm font-bold text-text-main truncate">{project.title}</h3>
+                <div className="mt-2">
+                  <div className="flex items-center justify-between text-xs text-text-muted mb-1">
+                    <span>{project.taskCount ?? 0} tasks</span>
+                    <span>{project.progress}%</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-light-surface-alt overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${project.progress === 100 ? 'bg-green-500' : 'bg-forest-green'}`}
+                      style={{ width: `${project.progress}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recent Activity */}
       {recentActivity.length > 0 && (
         <div className="mb-8">
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-text-muted">Recent Activity</h2>
-          <div className="rounded-lg border border-border-subtle bg-white divide-y divide-border-subtle">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-text-muted">Recent Activity</h2>
+            <Link to="/activity" className="text-xs text-forest-green hover:underline">View all</Link>
+          </div>
+          <div className="rounded-xl border border-border-subtle bg-white divide-y divide-border-subtle shadow-card">
             {recentActivity.map((entry) => (
               <div key={entry.id} className="flex items-center gap-3 px-4 py-2.5">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-forest-green" />
@@ -150,21 +201,22 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* Agent Grid */}
-      <div className="grid grid-cols-1 gap-6 pb-20 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} />
-        ))}
-        <DeployNewAgentCard onClick={() => setShowCreateModal(true)} />
-      </div>
-
-      {/* FAB */}
-      <button
-        onClick={() => setShowCreateModal(true)}
-        className="fixed bottom-8 right-8 z-30 flex h-14 w-14 transform items-center justify-center rounded-full bg-forest-green text-white shadow-lg transition-all hover:scale-105 hover:bg-forest-green/90 hover:shadow-xl"
-      >
-        <span className="material-symbols-outlined text-3xl font-bold">add</span>
-      </button>
+      {/* Pending Approvals */}
+      {stats.pendingApprovals > 0 && (
+        <div className="mb-8">
+          <Link
+            to="/approvals"
+            className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 hover:bg-amber-100 transition-colors"
+          >
+            <span className="material-symbols-outlined text-amber-600">approval</span>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-800">{stats.pendingApprovals} pending approval{stats.pendingApprovals !== 1 ? 's' : ''}</p>
+              <p className="text-xs text-amber-600">Agents are waiting for your review.</p>
+            </div>
+            <span className="material-symbols-outlined text-amber-600">arrow_forward</span>
+          </Link>
+        </div>
+      )}
 
       {/* Create Agent Modal */}
       {showCreateModal && (

@@ -37,9 +37,16 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   }
 
   // Dev mode: no JWT secret configured — use a deterministic dev user
-  if (!JWT_SECRET) {
+  // Only allow this bypass in development to prevent accidental production exposure
+  if (!JWT_SECRET && process.env.NODE_ENV !== 'production') {
     req.user = { id: 'dev-user-local', email: 'dev@localhost' }
     next()
+    return
+  }
+
+  // In production with no JWT secret, refuse all requests (misconfiguration)
+  if (!JWT_SECRET) {
+    res.status(500).json({ error: 'Server authentication not configured' })
     return
   }
 
@@ -52,7 +59,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   const token = authHeader.slice(7)
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as jwt.JwtPayload
     req.user = {
       id: payload.sub ?? '',
       email: (payload.email as string) ?? '',
