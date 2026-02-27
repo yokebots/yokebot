@@ -1,0 +1,20 @@
+{
+  "name": "yokebot",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "pnpm --filter @yokebot/dashboard dev",
+    "dev:engine": "pnpm --filter @yokebot/engine dev",
+    "dev:all": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "build:dashboard": "pnpm --filter @yokebot/dashboard build",
+    "build:engine": "pnpm --filter @yokebot/engine build",
+    "lint": "pnpm -r lint"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

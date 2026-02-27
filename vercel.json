@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd packages/dashboard && npx vite build",
+  "outputDirectory": "packages/dashboard/dist",
+  "installCommand": "pnpm install --filter @yokebot/dashboard",
+  "framework": "vite"
+}
