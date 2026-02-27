@@ -24,6 +24,8 @@ import { GoalsPage } from '@/pages/GoalsPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
+import { DocsLayout } from '@/layouts/DocsLayout'
+import { DocsPage } from '@/pages/docs/DocsPage'
 import { ToastProvider } from '@/components/ToastNotifications'
 import { useState, useEffect, type ReactNode } from 'react'
 import * as engine from '@/lib/engine'
@@ -103,6 +105,12 @@ function AppRoutes() {
       <Route path="login" element={<LoginPage />} />
       <Route path="auth/callback" element={<AuthCallbackPage />} />
       <Route path="onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
+
+      <Route path="docs" element={<DocsLayout />}>
+        <Route index element={<DocsPage />} />
+        <Route path=":slug" element={<DocsPage />} />
+        <Route path=":section/:slug" element={<DocsPage />} />
+      </Route>
 
       <Route
         element={
