@@ -25,7 +25,7 @@ import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow,
 import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam } from './teams.ts'
 import { authMiddleware } from './auth-middleware.ts'
 
-const PORT = Number(process.env.YOKEBOT_PORT ?? 3001)
+const PORT = Number(process.env.PORT ?? process.env.YOKEBOT_PORT ?? 3001)
 const DATA_DIR = process.env.YOKEBOT_DATA_DIR ?? join(homedir(), '.yokebot')
 const WORKSPACE_DIR = process.env.YOKEBOT_WORKSPACE_DIR ?? join(DATA_DIR, 'workspace')
 const SKILLS_DIR = process.env.YOKEBOT_SKILLS_DIR ?? join(process.cwd(), '..', '..', 'skills')
