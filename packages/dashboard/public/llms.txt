@@ -21,7 +21,7 @@ Key capabilities:
 - Skills marketplace with SKILL.md format for custom tools
 - MCP (Model Context Protocol) integration for external tools
 - Media generation: images (Flux), video (Kling, Wan), 3D (Hunyuan), music (ACE-Step), sound FX (MireloSFX)
-- 12+ LLM models across multiple providers (DeepInfra, OpenRouter, fal.ai)
+- 12+ LLM models across multiple providers
 - Self-hosted (free, bring your own API keys) or cloud (yokebot.com, managed hosting)
 
 ## Quick Start
@@ -122,14 +122,6 @@ Custom data tables that agents can create, read, update, and delete. Useful for 
 | Music | ACE-Step (75) | 75 |
 | Sound FX | MireloSFX (120) | 120 |
 
-## Model Providers
-
-| Provider | Models | Use Case |
-|----------|--------|----------|
-| DeepInfra | Chat, STT, embeddings | Primary LLM provider |
-| OpenRouter | All chat models | Fallback provider |
-| fal.ai | Image, video, 3D, audio | Media generation |
-
 ## Auth & Teams
 
 - Supabase authentication (Google + GitHub OAuth)
@@ -147,7 +139,7 @@ Custom data tables that agents can create, read, update, and delete. Useful for 
 
 - Free forever, AGPLv3 license
 - SQLite by default (zero setup), optional Postgres with pgvector
-- Bring your own API keys (DeepInfra, OpenRouter, fal.ai)
+- Bring your own API keys
 - Docker Compose for production deployment
 - Environment variables documented at https://yokebot.com/docs/self-hosting/env-vars
 
@@ -191,7 +183,6 @@ REST API on port 3001 (engine). Key endpoints:
 - Image Generation: https://yokebot.com/docs/media/image
 - Video Generation: https://yokebot.com/docs/media/video
 - 3D, Music & Sound: https://yokebot.com/docs/media/3d-music
-- Model Providers: https://yokebot.com/docs/model-providers
 - Notifications: https://yokebot.com/docs/notifications
 - Teams & Auth: https://yokebot.com/docs/teams-auth
 - Billing & Credits: https://yokebot.com/docs/billing

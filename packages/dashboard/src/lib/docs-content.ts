@@ -54,7 +54,7 @@ export const docsSections: Array<{ title: string; icon: string; slugs: string[] 
   {
     title: 'Configuration',
     icon: 'tune',
-    slugs: ['model-providers', 'notifications', 'teams-auth', 'billing'],
+    slugs: ['notifications', 'teams-auth', 'billing'],
   },
   {
     title: 'Deployment',
@@ -128,7 +128,7 @@ export const docsContent: Record<string, DocEntry> = {
     keywords: ['cloud', 'hosted', 'yokebot.com', 'sign up', 'quickstart'],
     content: () => [
       H2({ children: 'Sign Up' }),
-      P({ children: 'Head to yokebot.com and click Sign Up. You can authenticate with either Google or GitHub via Supabase-powered OAuth.' }),
+      P({ children: 'Head to yokebot.com and click Sign Up. You can authenticate with either Google or GitHub.' }),
       OL({ children: [
         LI({ children: 'Click "Sign Up" on the landing page.' }),
         LI({ children: 'Choose Google or GitHub as your identity provider.' }),
@@ -169,7 +169,7 @@ export const docsContent: Record<string, DocEntry> = {
     content: () => [
       H2({ children: 'Clone and Install' }),
       P({ children: 'YokeBot is distributed as a single Git repository using pnpm workspaces.' }),
-      CodeBlock({ language: 'bash', children: `git clone https://github.com/yokebot/yokebot.git
+      CodeBlock({ language: 'bash', children: `git clone https://github.com/yokebots/yokebot.git
 cd yokebot
 pnpm install` }),
 
@@ -177,7 +177,7 @@ pnpm install` }),
       P({ children: ['Copy the example environment file and fill in at least one model provider API key. See the ', A({ href: '/docs/self-hosting/env-vars', children: 'Environment Variables' }), ' reference for the full list.'] }),
       CodeBlock({ language: 'bash', children: `cp .env.example .env
 # Edit .env with your API keys` }),
-      Tip({ children: 'At minimum you need one LLM provider key (e.g. DEEPINFRA_API_KEY or OPENROUTER_API_KEY). Everything else is optional for local development.' }),
+      Tip({ children: 'At minimum you need one LLM provider key (YOKEBOT_LLM_API_KEY). Everything else is optional for local development.' }),
 
       H2({ children: 'Database' }),
       P({ children: 'By default YokeBot uses SQLite, which requires zero configuration. The database file is created automatically in the engine package directory on first run.' }),
@@ -290,7 +290,7 @@ You always flag when sources conflict. You prefer primary sources over secondary
       }),
 
       H2({ children: 'Creating Agents' }),
-      P({ children: 'You can create agents from the Agents page in the dashboard. Click "New Agent", fill in the required fields, assign skills, and activate. There is no hard limit on the number of agents you can create, though each active agent consumes resources on every heartbeat.' }),
+      P({ children: 'You can create agents from the Agents page in the dashboard. Click "New Agent", fill in the required fields, assign skills, and activate.' }),
 
       H2({ children: 'Agent Communication' }),
       P({ children: 'Agents participate in the chat system just like human users. They can be added to channels, receive direct messages, and respond to @mentions. When an agent is @mentioned, it wakes up immediately rather than waiting for its next scheduled heartbeat.' }),
@@ -328,14 +328,14 @@ You always flag when sources conflict. You prefer primary sources over secondary
       ] }),
 
       H2({ children: 'Configuring the Interval' }),
-      P({ children: 'The heartbeat interval can be set between 5 minutes and 1 hour. Choose an interval that matches the agent\'s workload:' }),
+      P({ children: 'The available heartbeat interval depends on your plan. Faster intervals mean more frequent check-ins and credit usage:' }),
       Table({
-        headers: ['Interval', 'Best For'],
+        headers: ['Plan', 'Fastest Interval'],
         rows: [
-          ['5 minutes', 'Agents that handle time-sensitive monitoring or quick responses.'],
-          ['15 minutes', 'General-purpose agents with moderate task volume. This is the default.'],
-          ['30 minutes', 'Research or analysis agents that handle longer-running work.'],
-          ['1 hour', 'Background agents that perform periodic batch operations.'],
+          ['Starter Crew', '30 minutes'],
+          ['Growth Crew', '15 minutes'],
+          ['Power Crew', '5 minutes'],
+          ['Self-Hosted', 'No limit (configurable)'],
         ],
       }),
 
@@ -515,8 +515,8 @@ After processing each document, post a summary in #data-imports.` }),
       P({ children: 'Configure your preferred provider by setting the appropriate API key in your environment variables. If both are set, agents can choose between them.' }),
 
       H2({ children: 'Image Generation' }),
-      P({ children: 'Agents can generate images using the Flux model via fal.ai. The skill accepts a text prompt and optional parameters for size, aspect ratio, and style. Generated images are stored and displayed inline in chat messages.' }),
-      CodeBlock({ language: 'text', children: 'Skill: image_generation\nProvider: Flux (via fal.ai)\nRequired env: FAL_KEY\nParameters: prompt (required), width, height, aspect_ratio, num_images' }),
+      P({ children: 'Agents can generate images using the Flux model. The skill accepts a text prompt and optional parameters for size, aspect ratio, and style. Generated images are stored and displayed inline in chat messages.' }),
+      CodeBlock({ language: 'text', children: 'Skill: image_generation\nProvider: Flux\nRequired env: YOKEBOT_MEDIA_API_KEY\nParameters: prompt (required), width, height, aspect_ratio, num_images' }),
 
       H2({ children: 'Video Generation' }),
       P({ children: 'YokeBot supports two video generation models:' }),
@@ -524,10 +524,10 @@ After processing each document, post a summary in #data-imports.` }),
         LI({ children: 'Kling \u2014 high-quality video generation from text prompts.' }),
         LI({ children: 'Wan \u2014 fast video generation suitable for iterative workflows.' }),
       ] }),
-      P({ children: 'Both are accessed via fal.ai. Set the FAL_KEY environment variable to enable video generation skills.' }),
+      P({ children: 'Set the YOKEBOT_MEDIA_API_KEY environment variable to enable video generation skills.' }),
 
       H2({ children: '3D Model Generation' }),
-      P({ children: 'The 3D generation skill uses the Hunyuan model (via fal.ai) to create 3D models from text descriptions. Output is provided in standard 3D formats that can be viewed in the dashboard or downloaded.' }),
+      P({ children: 'The 3D generation skill uses the Hunyuan model to create 3D models from text descriptions. Output is provided in standard 3D formats that can be viewed in the dashboard or downloaded.' }),
 
       H2({ children: 'Music Generation' }),
       P({ children: 'The music generation skill uses the ACE-Step model to compose original music from text prompts describing genre, mood, tempo, and instrumentation. Generated audio files are playable directly in the dashboard.' }),
@@ -892,7 +892,7 @@ export const handler: SkillHandler = async (params) => {
           ['Model', 'Qwen3 Embedding'],
           ['Dimensions', '1024'],
           ['Max Input Tokens', '8192'],
-          ['Provider', 'DeepInfra / configurable'],
+          ['Provider', 'Configurable'],
         ],
       }),
 
@@ -922,7 +922,7 @@ export const handler: SkillHandler = async (params) => {
 
       H2({ children: 'Performance Considerations' }),
       P({ children: 'Embedding generation happens once per document upload and is the most compute-intensive step. Queries are fast even for large knowledge bases because vector search is optimized with approximate nearest neighbor (ANN) indexing.' }),
-      Tip({ children: 'If you notice slow embedding on self-hosted instances, consider using a GPU-enabled machine or offloading embedding to a hosted provider like DeepInfra.' }),
+      Tip({ children: 'If you notice slow embedding on self-hosted instances, consider using a GPU-enabled machine or offloading embedding to a hosted provider.' }),
     ],
   },
 
@@ -1179,23 +1179,23 @@ export const handler: SkillHandler = async (params) => {
     keywords: ['media', 'generation', 'image', 'video', '3d', 'music', 'audio', 'creative'],
     content: () => [
       H2({ children: 'Overview' }),
-      P({ children: 'YokeBot agents can generate rich media content including images, videos, 3D models, music, and sound effects. All media generation uses state-of-the-art AI models accessed through provider APIs (primarily fal.ai).' }),
+      P({ children: 'YokeBot agents can generate rich media content including images, videos, 3D models, music, and sound effects — all powered by state-of-the-art AI models.' }),
 
       H2({ children: 'Supported Media Types' }),
       Table({
-        headers: ['Type', 'Model(s)', 'Provider'],
+        headers: ['Type', 'Model(s)'],
         rows: [
-          ['Image', 'Flux', 'fal.ai'],
-          ['Video', 'Kling, Wan', 'fal.ai'],
-          ['3D Model', 'Hunyuan', 'fal.ai'],
-          ['Music', 'ACE-Step', 'fal.ai'],
-          ['Sound FX', 'MireloSFX', 'fal.ai'],
+          ['Image', 'Flux'],
+          ['Video', 'Kling, Wan'],
+          ['3D Model', 'Hunyuan'],
+          ['Music', 'ACE-Step'],
+          ['Sound FX', 'MireloSFX'],
         ],
       }),
 
       H2({ children: 'Prerequisites' }),
-      P({ children: 'Media generation requires a fal.ai API key. On YokeBot Cloud, this is included. For self-hosted instances, set:' }),
-      CodeBlock({ language: 'bash', children: 'FAL_KEY=your_fal_ai_api_key' }),
+      P({ children: 'On YokeBot Cloud, media generation is included with your plan. For self-hosted instances, set:' }),
+      CodeBlock({ language: 'bash', children: 'YOKEBOT_MEDIA_API_KEY=your_media_provider_key' }),
 
       H2({ children: 'How Agents Use Media Skills' }),
       P({ children: 'Agents with media generation skills can produce content autonomously as part of their task work or in response to chat messages. For example:' }),
@@ -1222,11 +1222,11 @@ export const handler: SkillHandler = async (params) => {
     slug: 'media/image',
     title: 'Image Generation',
     section: 'Media Generation',
-    description: 'Generate images with the Flux model via fal.ai.',
-    keywords: ['image', 'generation', 'flux', 'fal.ai', 'picture', 'art', 'illustration'],
+    description: 'Generate images with the Flux model.',
+    keywords: ['image', 'generation', 'flux', 'picture', 'art', 'illustration'],
     content: () => [
       H2({ children: 'Overview' }),
-      P({ children: 'The image generation skill uses the Flux model (via fal.ai) to create high-quality images from text prompts. Agents can generate images as part of their task work or in response to user requests in chat.' }),
+      P({ children: 'The image generation skill uses the Flux model to create high-quality images from text prompts. Agents can generate images as part of their task work or in response to user requests in chat.' }),
 
       H2({ children: 'Parameters' }),
       Table({
@@ -1274,11 +1274,11 @@ Style: clean, modern, corporate but not boring. Aspect ratio 16:9.` }),
     slug: 'media/video',
     title: 'Video Generation',
     section: 'Media Generation',
-    description: 'Generate videos with Kling and Wan models via fal.ai.',
+    description: 'Generate videos with Kling and Wan models.',
     keywords: ['video', 'generation', 'kling', 'wan', 'animation', 'clip'],
     content: () => [
       H2({ children: 'Overview' }),
-      P({ children: 'YokeBot supports AI video generation through two models, both accessed via fal.ai:' }),
+      P({ children: 'YokeBot supports AI video generation through two models:' }),
       Table({
         headers: ['Model', 'Strengths', 'Duration'],
         rows: [
@@ -1379,55 +1379,6 @@ Use the Kling model for best quality. Aspect ratio 16:9.` }),
   // ---------------------------------------------------------------------------
   // CONFIGURATION
   // ---------------------------------------------------------------------------
-  'model-providers': {
-    slug: 'model-providers',
-    title: 'Model Providers',
-    section: 'Configuration',
-    description: 'Configure LLM providers for your agents: DeepInfra, OpenRouter, and fal.ai.',
-    keywords: ['model', 'provider', 'llm', 'deepinfra', 'openrouter', 'fal.ai', 'api key'],
-    content: () => [
-      H2({ children: 'Overview' }),
-      P({ children: 'YokeBot supports multiple model providers for LLM reasoning and media generation. You can configure one or more providers depending on your needs.' }),
-
-      H2({ children: 'Supported Providers' }),
-      Table({
-        headers: ['Provider', 'Purpose', 'Env Variable', 'Website'],
-        rows: [
-          ['DeepInfra', 'LLM reasoning, text embeddings', 'DEEPINFRA_API_KEY', 'deepinfra.com'],
-          ['OpenRouter', 'LLM reasoning (wide model selection)', 'OPENROUTER_API_KEY', 'openrouter.ai'],
-          ['fal.ai', 'Media generation (image, video, 3D, music, SFX)', 'FAL_KEY', 'fal.ai'],
-        ],
-      }),
-
-      H2({ children: 'Configuration' }),
-      H3({ children: 'Cloud (yokebot.com)' }),
-      P({ children: 'On YokeBot Cloud, model providers are pre-configured. You do not need to bring your own API keys \u2014 usage is covered by your credits. However, you can optionally add your own keys from Settings > Model Providers to use specific models not included in the default rotation.' }),
-
-      H3({ children: 'Self-Hosted' }),
-      P({ children: 'For self-hosted instances, add your API keys to the .env file:' }),
-      CodeBlock({ language: 'bash', children: `# At least one LLM provider is required
-DEEPINFRA_API_KEY=your_key_here
-OPENROUTER_API_KEY=your_key_here
-
-# Required for media generation
-FAL_KEY=your_key_here` }),
-
-      H2({ children: 'Choosing a Provider' }),
-      P({ children: 'If you configure multiple LLM providers, you can select which provider each agent uses from the agent settings. Factors to consider:' }),
-      UL({ children: [
-        LI({ children: 'DeepInfra \u2014 good performance/cost ratio, recommended for most workloads.' }),
-        LI({ children: 'OpenRouter \u2014 widest selection of models. Useful if you need a specific model (GPT-4, Claude, Llama, etc.).' }),
-      ] }),
-
-      H2({ children: 'Model Selection' }),
-      P({ children: 'Each agent can be assigned a specific model. The available models depend on which providers are configured. You can change an agent\'s model at any time from the agent settings page. The change takes effect on the next heartbeat.' }),
-      Tip({ children: 'Start with a recommended default model and only switch to specialized models if you have specific performance or cost requirements.' }),
-
-      H2({ children: 'Rate Limits and Quotas' }),
-      P({ children: 'Each provider has its own rate limits and quotas. If an agent hits a rate limit, the engine will retry with exponential backoff. Persistent rate limit errors will move the agent to the Error state. Check your provider dashboard for quota information.' }),
-    ],
-  },
-
   'notifications': {
     slug: 'notifications',
     title: 'Notifications',
@@ -1491,7 +1442,7 @@ FAL_KEY=your_key_here` }),
     keywords: ['teams', 'auth', 'authentication', 'supabase', 'oauth', 'google', 'github', 'invite', 'members', 'roles'],
     content: () => [
       H2({ children: 'Authentication' }),
-      P({ children: 'YokeBot uses Supabase for authentication. On YokeBot Cloud, two OAuth providers are available:' }),
+      P({ children: 'On YokeBot Cloud, two OAuth providers are available:' }),
       UL({ children: [
         LI({ children: 'Google \u2014 sign in with your Google account.' }),
         LI({ children: 'GitHub \u2014 sign in with your GitHub account.' }),
@@ -1681,7 +1632,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
       ] }),
 
       H2({ children: 'Quick Start' }),
-      CodeBlock({ language: 'bash', children: `git clone https://github.com/yokebot/yokebot.git
+      CodeBlock({ language: 'bash', children: `git clone https://github.com/yokebots/yokebot.git
 cd yokebot
 cp .env.example .env
 # Edit .env with your API keys and configuration
@@ -1703,8 +1654,8 @@ DATABASE_URL=postgresql://yokebot:yokebot@yokebot-db:5432/yokebot
 PUBLIC_URL=https://yokebot.yourdomain.com
 
 # API keys (required)
-DEEPINFRA_API_KEY=your_key
-FAL_KEY=your_key
+YOKEBOT_LLM_API_KEY=your_llm_provider_key
+YOKEBOT_MEDIA_API_KEY=your_media_provider_key
 
 # Supabase (required for auth)
 SUPABASE_URL=https://your-project.supabase.co
@@ -1765,8 +1716,8 @@ docker compose logs -f dashboard # dashboard only` }),
       Table({
         headers: ['Variable', 'Required', 'Default', 'Description'],
         rows: [
-          ['DEEPINFRA_API_KEY', 'No*', '\u2014', 'API key for DeepInfra. *At least one LLM provider is required.'],
-          ['OPENROUTER_API_KEY', 'No*', '\u2014', 'API key for OpenRouter. *At least one LLM provider is required.'],
+          ['YOKEBOT_LLM_API_KEY', 'Yes*', '\u2014', 'Primary LLM provider API key (chat, embeddings, STT). *At least one LLM provider is required.'],
+          ['YOKEBOT_LLM2_API_KEY', 'No', '\u2014', 'Secondary/fallback LLM provider API key.'],
         ],
       }),
 
@@ -1774,7 +1725,7 @@ docker compose logs -f dashboard # dashboard only` }),
       Table({
         headers: ['Variable', 'Required', 'Default', 'Description'],
         rows: [
-          ['FAL_KEY', 'No', '\u2014', 'API key for fal.ai. Required for image, video, 3D, music, and SFX generation.'],
+          ['YOKEBOT_MEDIA_API_KEY', 'No', '\u2014', 'Media provider API key. Required for image, video, 3D, music, and SFX generation.'],
         ],
       }),
 

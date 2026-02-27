@@ -28,7 +28,6 @@
   <url><loc>https://yokebot.com/docs/media/image</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://yokebot.com/docs/media/video</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://yokebot.com/docs/media/3d-music</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://yokebot.com/docs/model-providers</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://yokebot.com/docs/notifications</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
   <url><loc>https://yokebot.com/docs/teams-auth</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
   <url><loc>https://yokebot.com/docs/billing</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>

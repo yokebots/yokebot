@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 export function H2({ id, children }: { id?: string; children: ReactNode }) {
   return (
@@ -30,14 +30,27 @@ export function Code({ children }: { children: ReactNode }) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function CodeBlock({ children, title, language: _lang }: { children: string; title?: string; language?: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    navigator.clipboard.writeText(children)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
   return (
-    <div className="mb-6 overflow-hidden rounded-lg border border-border-subtle">
+    <div className="group/code relative mb-6 overflow-hidden rounded-lg border border-border-subtle">
       {title && (
         <div className="border-b border-border-subtle bg-light-surface-alt px-4 py-2 font-mono text-xs text-text-muted">
           {title}
         </div>
       )}
-      <pre className="overflow-x-auto bg-gray-950 p-4 font-mono text-sm leading-relaxed text-gray-300">
+      <button
+        onClick={handleCopy}
+        className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-md bg-white/10 text-gray-400 opacity-0 transition-opacity hover:bg-white/20 hover:text-white group-hover/code:opacity-100"
+        title="Copy to clipboard"
+      >
+        <span className="material-symbols-outlined text-[16px]">{copied ? 'check' : 'content_copy'}</span>
+      </button>
+      <pre className="overflow-x-auto bg-gray-950 p-4 pr-12 font-mono text-sm leading-relaxed text-gray-300">
         <code>{children}</code>
       </pre>
     </div>

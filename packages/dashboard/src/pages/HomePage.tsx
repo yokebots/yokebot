@@ -480,7 +480,7 @@ export function HomePage() {
               { title: 'Get Started', links: [
                 { label: 'Log In', href: '/login' },
                 { label: 'Sign Up Free', href: '/login' },
-                { label: 'Self-Host Guide', href: '/docs/self-hosting-guide' },
+                { label: 'Self-Host Guide', href: '/docs/self-hosting' },
               ]},
             ].map((col) => (
               <div key={col.title}>
