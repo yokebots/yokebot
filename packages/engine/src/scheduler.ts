@@ -36,6 +36,9 @@ const state: SchedulerState = {
   skillsDir: '',
 }
 
+// Email sequence processing interval (check every 5 minutes)
+let sequenceTimer: ReturnType<typeof setInterval> | null = null
+
 /**
  * Start the scheduler. Registers staggered heartbeat timers for each running agent.
  */
@@ -66,6 +69,15 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
     })
   }
 
+  // Start email sequence processor (every 5 minutes)
+  if (!sequenceTimer) {
+    sequenceTimer = setInterval(() => {
+      void processEmailSequences(db)
+    }, 5 * 60 * 1000)
+    // Run once on startup after a short delay
+    setTimeout(() => void processEmailSequences(db), 30_000)
+  }
+
   console.log(`[scheduler] Started with ${state.timers.size} agent(s)`)
 }
 
@@ -76,6 +88,10 @@ export function stopScheduler(): void {
   for (const [id, timer] of state.timers) {
     clearTimeout(timer)
     state.timers.delete(id)
+  }
+  if (sequenceTimer) {
+    clearInterval(sequenceTimer)
+    sequenceTimer = null
   }
   state.running = false
   console.log('[scheduler] Stopped')
@@ -239,5 +255,20 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     } catch (err) {
       console.error(`[scheduler] Heartbeat error for "${agent.name}":`, err)
     }
+  }
+}
+
+/**
+ * Process pending email sequence sends.
+ */
+async function processEmailSequences(db: Db): Promise<void> {
+  try {
+    const { processSequenceSends } = await import('./email-sequences.ts')
+    const sent = await processSequenceSends(db)
+    if (sent > 0) {
+      console.log(`[scheduler] Processed ${sent} email sequence send(s)`)
+    }
+  } catch (err) {
+    console.error('[scheduler] Email sequence processing error:', err instanceof Error ? err.message : err)
   }
 }

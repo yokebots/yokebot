@@ -30,7 +30,7 @@ const JWT_SECRET = process.env.SUPABASE_JWT_SECRET ?? ''
 const SUPABASE_URL = process.env.SUPABASE_URL ?? ''
 
 // Paths that don't require authentication
-const PUBLIC_PATHS = ['/health', '/api/ollama', '/api/config', '/api/debug']
+const PUBLIC_PATHS = ['/health', '/api/ollama', '/api/config', '/api/debug', '/api/contact']
 
 // Cached JWKS public key for ES256 verification
 let cachedPublicKey: crypto.KeyObject | null = null

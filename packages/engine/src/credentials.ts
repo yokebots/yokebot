@@ -76,7 +76,9 @@ export interface CredentialInfo {
 /** List all credentials for a team (never exposes actual values). */
 export async function listCredentials(db: Db, teamId: string): Promise<CredentialInfo[]> {
   const rows = await db.query<{ service_id: string; credential_type: string; updated_at: string }>(
-    `SELECT service_id, credential_type, updated_at FROM team_credentials WHERE team_id = ?`,
+    db.driver === 'postgres'
+      ? `SELECT service_id, credential_type, updated_at FROM team_credentials WHERE team_id = $1`
+      : `SELECT service_id, credential_type, updated_at FROM team_credentials WHERE team_id = ?`,
     [teamId],
   )
   return rows.map((r: { service_id: string; credential_type: string; updated_at: string }) => ({
@@ -90,7 +92,9 @@ export async function listCredentials(db: Db, teamId: string): Promise<Credentia
 /** Get a single decrypted credential value. Returns null if not set. */
 export async function getCredential(db: Db, teamId: string, serviceId: string): Promise<string | null> {
   const row = await db.queryOne<{ encrypted_value: string }>(
-    `SELECT encrypted_value FROM team_credentials WHERE team_id = ? AND service_id = ?`,
+    db.driver === 'postgres'
+      ? `SELECT encrypted_value FROM team_credentials WHERE team_id = $1 AND service_id = $2`
+      : `SELECT encrypted_value FROM team_credentials WHERE team_id = ? AND service_id = ?`,
     [teamId, serviceId],
   )
   if (!row) return null
@@ -104,10 +108,20 @@ export async function getCredentials(
   serviceIds: string[],
 ): Promise<Record<string, string>> {
   if (serviceIds.length === 0) return {}
-  const placeholders = serviceIds.map(() => '?').join(',')
+  let sql: string
+  let params: unknown[]
+  if (db.driver === 'postgres') {
+    const placeholders = serviceIds.map((_, i) => `$${i + 2}`).join(',')
+    sql = `SELECT service_id, encrypted_value FROM team_credentials WHERE team_id = $1 AND service_id IN (${placeholders})`
+    params = [teamId, ...serviceIds]
+  } else {
+    const placeholders = serviceIds.map(() => '?').join(',')
+    sql = `SELECT service_id, encrypted_value FROM team_credentials WHERE team_id = ? AND service_id IN (${placeholders})`
+    params = [teamId, ...serviceIds]
+  }
   const rows = await db.query<{ service_id: string; encrypted_value: string }>(
-    `SELECT service_id, encrypted_value FROM team_credentials WHERE team_id = ? AND service_id IN (${placeholders})`,
-    [teamId, ...serviceIds],
+    sql,
+    params,
   )
   const result: Record<string, string> = {}
   for (const row of rows) {
@@ -152,12 +166,16 @@ export async function setCredential(
 export async function deleteCredential(db: Db, teamId: string, serviceId: string): Promise<boolean> {
   // Check existence first since db.run() returns void
   const existing = await db.queryOne(
-    `SELECT 1 FROM team_credentials WHERE team_id = ? AND service_id = ?`,
+    db.driver === 'postgres'
+      ? `SELECT 1 FROM team_credentials WHERE team_id = $1 AND service_id = $2`
+      : `SELECT 1 FROM team_credentials WHERE team_id = ? AND service_id = ?`,
     [teamId, serviceId],
   )
   if (!existing) return false
   await db.run(
-    `DELETE FROM team_credentials WHERE team_id = ? AND service_id = ?`,
+    db.driver === 'postgres'
+      ? `DELETE FROM team_credentials WHERE team_id = $1 AND service_id = $2`
+      : `DELETE FROM team_credentials WHERE team_id = ? AND service_id = ?`,
     [teamId, serviceId],
   )
   return true

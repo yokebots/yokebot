@@ -57,32 +57,53 @@ export async function executeSkillHandler(
   if (requiredCredentials.length > 0) {
     credentials = await getCredentials(ctx.db, ctx.teamId, requiredCredentials)
 
-    // Fall back to env vars for backward compatibility (self-hosted)
-    const envFallbacks: Record<string, string> = {
-      brave: 'BRAVE_API_KEY',
-      slack: 'SLACK_WEBHOOK_URL',
-      sendgrid: 'SENDGRID_API_KEY',
-      twilio: 'TWILIO_AUTH',
-      discord: 'DISCORD_WEBHOOK_URL',
-      hubspot: 'HUBSPOT_API_KEY',
-      apollo: 'APOLLO_API_KEY',
-      hunter: 'HUNTER_API_KEY',
-      google: 'GOOGLE_SERVICE_ACCOUNT_KEY',
-      'google-analytics': 'GOOGLE_ANALYTICS_KEY',
-      'google-places': 'GOOGLE_PLACES_API_KEY',
-      notion: 'NOTION_API_KEY',
-      github: 'GITHUB_TOKEN',
-      stripe: 'STRIPE_SECRET_KEY',
-      openai: 'OPENAI_API_KEY',
-      firecrawl: 'FIRECRAWL_API_KEY',
-      newsapi: 'NEWSAPI_KEY',
-      eventbrite: 'EVENTBRITE_API_KEY',
+    // Native skills: platform provides the key in hosted mode, charges credits.
+    // Users can still BYOK (team_credentials checked first above).
+    if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
+      const NATIVE_SKILL_KEYS: Record<string, string> = {
+        brave: 'BRAVE_API_KEY',
+        resend: 'RESEND_API_KEY',
+        tavily: 'TAVILY_API_KEY',
+      }
+      for (const svcId of requiredCredentials) {
+        if (!credentials[svcId]) {
+          const nativeEnvKey = NATIVE_SKILL_KEYS[svcId]
+          const nativeVal = nativeEnvKey ? process.env[nativeEnvKey] : undefined
+          if (nativeVal) credentials[svcId] = nativeVal
+        }
+      }
     }
-    for (const svcId of requiredCredentials) {
-      if (!credentials[svcId]) {
-        const envKey = envFallbacks[svcId]
-        const envVal = envKey ? process.env[envKey] : undefined
-        if (envVal) credentials[svcId] = envVal
+
+    // Fall back to env vars ONLY for self-hosted (never in hosted mode)
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      const envFallbacks: Record<string, string> = {
+        brave: 'BRAVE_API_KEY',
+        slack: 'SLACK_WEBHOOK_URL',
+        sendgrid: 'SENDGRID_API_KEY',
+        twilio: 'TWILIO_AUTH',
+        discord: 'DISCORD_WEBHOOK_URL',
+        hubspot: 'HUBSPOT_API_KEY',
+        apollo: 'APOLLO_API_KEY',
+        hunter: 'HUNTER_API_KEY',
+        google: 'GOOGLE_SERVICE_ACCOUNT_KEY',
+        'google-analytics': 'GOOGLE_ANALYTICS_KEY',
+        'google-places': 'GOOGLE_PLACES_API_KEY',
+        notion: 'NOTION_API_KEY',
+        github: 'GITHUB_TOKEN',
+        stripe: 'STRIPE_SECRET_KEY',
+        openai: 'OPENAI_API_KEY',
+        firecrawl: 'FIRECRAWL_API_KEY',
+        newsapi: 'NEWSAPI_KEY',
+        eventbrite: 'EVENTBRITE_API_KEY',
+        tavily: 'TAVILY_API_KEY',
+        resend: 'RESEND_API_KEY',
+      }
+      for (const svcId of requiredCredentials) {
+        if (!credentials[svcId]) {
+          const envKey = envFallbacks[svcId]
+          const envVal = envKey ? process.env[envKey] : undefined
+          if (envVal) credentials[svcId] = envVal
+        }
       }
     }
 
@@ -134,8 +155,24 @@ registerHandler('slack_send_message', async (args, creds) => {
   return 'Message sent to Slack successfully.'
 }, ['slack'])
 
-// ---- Send Email (SendGrid) ----
+// ---- Send Email (Resend) ----
 registerHandler('send_email', async (args, creds) => {
+  const apiKey = creds.resend
+  const { Resend } = await import('resend')
+  const resend = new Resend(apiKey)
+  const { data, error } = await resend.emails.send({
+    from: (args.from as string) || 'YokeBot <noreply@mail.yokebot.com>',
+    to: [args.to as string],
+    subject: args.subject as string,
+    html: args.body as string,
+    replyTo: (args.replyTo as string) || undefined,
+  })
+  if (error) return `Resend error: ${error.message}`
+  return `Email sent to ${args.to as string} (id: ${data?.id ?? 'unknown'})`
+}, ['resend'])
+
+// ---- Send Email (SendGrid — legacy backward compat) ----
+registerHandler('send_email_sendgrid', async (args, creds) => {
   const apiKey = creds.sendgrid
   const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
     method: 'POST',
@@ -190,8 +227,24 @@ registerHandler('discord_post', async (args, creds) => {
   return 'Message posted to Discord.'
 }, ['discord'])
 
-// ---- Scrape Webpage (Firecrawl) ----
+// ---- Scrape Webpage (Tavily — native default) ----
 registerHandler('scrape_webpage', async (args, creds) => {
+  const apiKey = creds.tavily
+  const res = await fetch('https://api.tavily.com/extract', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, urls: [args.url as string] }),
+  })
+  if (!res.ok) return `Tavily extract error: ${res.status}`
+  const data = await res.json() as { results?: Array<{ raw_content?: string }> }
+  const content = data.results?.[0]?.raw_content
+  if (!content) return 'Scrape returned no content.'
+  // Truncate very long pages
+  return content.length > 8000 ? content.slice(0, 8000) + '\n\n[...truncated]' : content
+}, ['tavily'])
+
+// ---- Scrape Webpage via Firecrawl (BYOK) ----
+registerHandler('scrape_webpage_firecrawl', async (args, creds) => {
   const apiKey = creds.firecrawl
   const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
     method: 'POST',
@@ -202,7 +255,6 @@ registerHandler('scrape_webpage', async (args, creds) => {
   const data = await res.json() as { data?: { markdown?: string } }
   const md = data.data?.markdown
   if (!md) return 'Scrape returned no content.'
-  // Truncate very long pages
   return md.length > 8000 ? md.slice(0, 8000) + '\n\n[...truncated]' : md
 }, ['firecrawl'])
 
@@ -951,4 +1003,34 @@ registerHandler('check_integrations', async (_args, _creds, ctx) => {
 
   return `Integration Status:\n\nConnected (${connected.length}):\n${connectedList || '  (none)'}\n\nAvailable (${services.length - connected.length}):\n${availableList}\n\n` +
     `To connect a service, guide the user to Settings → Integrations in the dashboard.`
+})
+
+// ---- Email Sequences (Drip Campaigns) ----
+registerHandler('create_email_sequence', async (args, _creds, ctx) => {
+  const { createSequence } = await import('./email-sequences.ts')
+  const steps = args.steps as Array<{ delayDays: number; subject: string; body: string }>
+  if (!args.name || !steps?.length) return 'Sequence requires a name and at least one step.'
+  const seq = await createSequence(ctx.db, ctx.teamId, args.name as string, (args.fromEmail as string) || '', steps)
+  return `Email sequence "${seq.name}" created with ${steps.length} step(s). ID: ${seq.id}`
+})
+
+registerHandler('list_email_sequences', async (_args, _creds, ctx) => {
+  const { listSequences } = await import('./email-sequences.ts')
+  const seqs = await listSequences(ctx.db, ctx.teamId)
+  if (seqs.length === 0) return 'No email sequences found.'
+  return seqs.map((s) => `${s.name} (${s.status}) — ${s.steps.length} steps — ID: ${s.id}`).join('\n')
+})
+
+registerHandler('enroll_contact', async (args, _creds, ctx) => {
+  const { enrollContact } = await import('./email-sequences.ts')
+  if (!args.sequenceId || !args.email) return 'sequenceId and email are required.'
+  const enrollment = await enrollContact(ctx.db, args.sequenceId as string, ctx.teamId, args.email as string, (args.name as string) || '')
+  return `Enrolled ${args.email} in sequence. Next email at ${enrollment.nextSendAt}. Enrollment ID: ${enrollment.id}`
+})
+
+registerHandler('unenroll_contact', async (args, _creds, ctx) => {
+  const { unenrollContact } = await import('./email-sequences.ts')
+  if (!args.enrollmentId) return 'enrollmentId is required.'
+  await unenrollContact(ctx.db, args.enrollmentId as string, ctx.teamId)
+  return `Contact unenrolled from sequence.`
 })

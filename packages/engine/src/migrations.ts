@@ -292,9 +292,7 @@ const migrations: Migration[] = [
         { id: 'gemma-3-27b', credits: 5, type: 'chat', si: 2, sp: 2, ss: 5, desc: 'Quick worker for simple repetitive tasks', tag: 'Fast intern', pros: '["Extremely fast","Dirt cheap"]', cons: '["Struggles with complex reasoning"]', date: '2025-03-12', pop: 40 },
         { id: 'llama-4-scout', credits: 8, type: 'chat', si: 3, sp: 2, ss: 4, desc: 'Reliable assistant for everyday tasks', tag: 'Dependable junior', pros: '["Fast","Affordable","Solid all-rounder"]', cons: '["Not great at multi-step planning"]', date: '2025-04-05', pop: 55 },
         { id: 'devstral-small', credits: 8, type: 'chat', si: 3, sp: 3, ss: 4, desc: 'Code specialist for technical work', tag: 'Junior developer', pros: '["Punches above weight on coding"]', cons: '["Weaker on non-technical tasks"]', date: '2025-05-20', pop: 35 },
-        { id: 'gpt-4o-mini', credits: 15, type: 'chat', si: 3, sp: 3, ss: 4, desc: 'Smooth communicator for customer-facing work', tag: 'Professional communicator', pros: '["Polished output","Reliable"]', cons: '["Closed-source","Slightly pricier"]', date: '2024-07-18', pop: 80 },
         { id: 'llama-4-maverick', credits: 15, type: 'chat', si: 4, sp: 3, ss: 3, desc: 'Versatile workhorse for creative content', tag: 'Mid-level marketing hire', pros: '["Great creative writing","Strong reasoning"]', cons: '["Slower than budget models"]', date: '2025-04-05', pop: 65 },
-        { id: 'grok-4-fast', credits: 15, type: 'chat', si: 4, sp: 3, ss: 5, desc: 'Speed demon for real-time high-volume tasks', tag: 'Fast-talking closer', pros: '["Blazing fast","Good reasoning"]', cons: '["Newer, less battle-tested"]', date: '2025-12-01', pop: 50 },
         { id: 'deepseek-v3.2', credits: 10, type: 'chat', si: 5, sp: 4, ss: 5, desc: 'Bargain genius — gold-medal reasoning at budget price', tag: 'Senior engineer at junior pay', pros: '["Dual chat+reasoning","Absurdly cheap"]', cons: '["Chinese company (data sensitivity)"]', date: '2025-12-01', pop: 90 },
         { id: 'minimax-m2.5', credits: 25, type: 'chat', si: 4, sp: 4, ss: 3, desc: 'Orchestrator for complex multi-step workflows', tag: 'Project manager', pros: '["Excellent task breakdown","Strong context handling"]', cons: '["Not the cheapest"]', date: '2025-06-01', pop: 60 },
         { id: 'devstral-2', credits: 40, type: 'chat', si: 5, sp: 4, ss: 3, desc: 'Senior developer for complex code and architecture', tag: 'Senior software engineer', pros: '["Beats Claude 3.5 on SWE-bench"]', cons: '["Expensive","Slower"]', date: '2025-09-15', pop: 45 },
@@ -539,6 +537,112 @@ const migrations: Migration[] = [
           [u.credits, u.id],
         )
       }
+    },
+  },
+  {
+    version: 9,
+    name: 'add_contact_submissions_and_email_sequences',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS contact_submissions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS email_sequences (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            from_email TEXT NOT NULL DEFAULT '',
+            steps JSONB NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS email_sequence_enrollments (
+            id TEXT PRIMARY KEY,
+            sequence_id TEXT NOT NULL REFERENCES email_sequences(id) ON DELETE CASCADE,
+            team_id TEXT NOT NULL,
+            contact_email TEXT NOT NULL,
+            contact_name TEXT NOT NULL DEFAULT '',
+            current_step INTEGER NOT NULL DEFAULT 0,
+            next_send_at TIMESTAMPTZ,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_email_sequences_team ON email_sequences(team_id);
+          CREATE INDEX IF NOT EXISTS idx_email_enrollments_seq ON email_sequence_enrollments(sequence_id);
+          CREATE INDEX IF NOT EXISTS idx_email_enrollments_team ON email_sequence_enrollments(team_id);
+          CREATE INDEX IF NOT EXISTS idx_email_enrollments_pending ON email_sequence_enrollments(status, next_send_at);
+        `)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS contact_submissions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE TABLE IF NOT EXISTS email_sequences (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            from_email TEXT NOT NULL DEFAULT '',
+            steps TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE TABLE IF NOT EXISTS email_sequence_enrollments (
+            id TEXT PRIMARY KEY,
+            sequence_id TEXT NOT NULL REFERENCES email_sequences(id) ON DELETE CASCADE,
+            team_id TEXT NOT NULL,
+            contact_email TEXT NOT NULL,
+            contact_name TEXT NOT NULL DEFAULT '',
+            current_step INTEGER NOT NULL DEFAULT 0,
+            next_send_at TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_email_sequences_team ON email_sequences(team_id);
+          CREATE INDEX IF NOT EXISTS idx_email_enrollments_seq ON email_sequence_enrollments(sequence_id);
+          CREATE INDEX IF NOT EXISTS idx_email_enrollments_team ON email_sequence_enrollments(team_id);
+          CREATE INDEX IF NOT EXISTS idx_email_enrollments_pending ON email_sequence_enrollments(status, next_send_at);
+        `)
+      }
+    },
+  },
+  {
+    version: 10,
+    name: 'update_skill_credit_prices_and_add_tavily_scrape',
+    async up(db: Db) {
+      // Update skill credit costs to reflect real API costs with healthy margins
+      const priceUpdates = [
+        { name: 'web_search', credits: 25 },      // Brave: ~$0.005/query → 25 credits ($0.0125) = 60% margin
+        { name: 'web_scrape', credits: 30 },       // Tavily: ~$0.008-0.016/extract → 30 credits ($0.015) = 38-69% margin
+        { name: 'email_send', credits: 8 },        // Resend: ~$0.0009/email → 8 credits ($0.004) = 78% margin
+      ]
+
+      for (const u of priceUpdates) {
+        await db.run(
+          'UPDATE skill_credit_costs SET credits_per_use = $1 WHERE skill_name = $2',
+          [u.credits, u.name],
+        )
+      }
+
+      // Add scrape_webpage_firecrawl as a separate BYOK skill (0 credits — user pays Firecrawl directly)
+      await db.run(
+        `INSERT INTO skill_credit_costs (skill_name, credits_per_use) VALUES ($1, $2) ON CONFLICT (skill_name) DO NOTHING`,
+        ['scrape_webpage_firecrawl', 30],
+      )
     },
   },
 ]

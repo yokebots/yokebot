@@ -199,8 +199,12 @@ async function main() {
       templateId,
     })
 
+    // Auto-start the agent so it's immediately available
+    await setAgentStatus(db, agent.id, 'running')
+    scheduleAgent(db, { ...agent, status: 'running' })
+
     await logActivity(db, 'agent_created', agent.id, `Agent "${agent.name}" created`, undefined, teamId)
-    res.status(201).json(agent)
+    res.status(201).json({ ...agent, status: 'running' })
   })
 
   app.patch('/api/agents/:id', async (req, res) => {
@@ -965,6 +969,8 @@ async function main() {
               templateId: 'advisor-bot',
             })
             await installSkill(db, advisorAgent.id, 'advisor-tools')
+            await setAgentStatus(db, advisorAgent.id, 'running')
+            scheduleAgent(db, { ...advisorAgent, status: 'running' })
             await logActivity(db, 'agent_created', advisorAgent.id, `AdvisorBot auto-deployed for new team`, undefined, team.id)
           }
         }
@@ -1273,6 +1279,8 @@ ${truncated}`,
       templateId: 'advisor-bot',
     })
     await installSkill(db, agent.id, 'advisor-tools')
+    await setAgentStatus(db, agent.id, 'running')
+    scheduleAgent(db, { ...agent, status: 'running' })
     await logActivity(db, 'agent_created', agent.id, `AdvisorBot deployed via setup`, undefined, req.params.id)
 
     res.status(201).json({ agentId: agent.id, alreadyExists: false })
@@ -1476,6 +1484,49 @@ ${truncated}`,
     } catch (err) {
       console.error('[meetings] Raise hand error:', err)
       res.status(500).json({ error: 'Failed to raise hand' })
+    }
+  })
+
+  // ===== Contact Form (public, rate limited) =====
+
+  const contactLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 3, keyGenerator: (req) => req.ip ?? 'unknown' })
+
+  app.post('/api/contact', contactLimiter, async (req: Request, res: Response) => {
+    try {
+      const { name, email, message } = req.body as { name?: string; email?: string; message?: string }
+      if (!name?.trim() || !email?.trim() || !message?.trim()) {
+        res.status(400).json({ error: 'Name, email, and message are required' })
+        return
+      }
+      // Basic email format check
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        res.status(400).json({ error: 'Invalid email address' })
+        return
+      }
+
+      const id = (await import('crypto')).randomUUID()
+      await db.run(
+        'INSERT INTO contact_submissions (id, name, email, message) VALUES ($1, $2, $3, $4)',
+        [id, name.trim(), email.trim(), message.trim()],
+      )
+
+      // Send notification email
+      try {
+        const { sendEmail } = await import('./email.ts')
+        await sendEmail({
+          to: 'james@yokebot.com',
+          subject: `[YokeBot Contact] ${name.trim()}`,
+          html: `<p><strong>From:</strong> ${name.trim()} &lt;${email.trim()}&gt;</p><p><strong>Message:</strong></p><p>${message.trim().replace(/\n/g, '<br>')}</p>`,
+          replyTo: email.trim(),
+        })
+      } catch (emailErr) {
+        console.error('[contact] Failed to send notification email:', emailErr instanceof Error ? emailErr.message : emailErr)
+      }
+
+      res.json({ ok: true })
+    } catch (err) {
+      console.error('[contact] Error:', err)
+      res.status(500).json({ error: 'Failed to submit' })
     }
   })
 

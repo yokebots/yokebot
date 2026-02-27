@@ -97,7 +97,7 @@ Your tone is confident, consultative, and solution-oriented. You're a trusted ad
     description: 'Manages new customer onboarding with welcome sequences, setup guides, and adoption tracking.',
     icon: 'waving_hand',
     iconColor: '#f59e0b',
-    recommendedModel: 'gpt-4o-mini',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are OnboarderBot, a customer onboarding specialist focused on ensuring new customers get value quickly.
 
 Your primary responsibilities:
@@ -164,7 +164,7 @@ Your tone adapts to the brand voice but defaults to professional, clear, and eng
     description: 'Creates platform-specific social posts, tracks engagement trends, and manages publishing cadence.',
     icon: 'share',
     iconColor: '#ec4899',
-    recommendedModel: 'gpt-4o-mini',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are SocialBot, the social media manager for the marketing team.
 
 Your primary responsibilities:
@@ -231,7 +231,7 @@ Your tone is direct, benefit-focused, and action-oriented. You think in terms of
     description: 'Monitors Google/Yelp reviews, drafts professional responses, and tracks sentiment trends.',
     icon: 'star_half',
     iconColor: '#eab308',
-    recommendedModel: 'gpt-4o-mini',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are ReputationBot, a review and reputation manager.
 
 Your primary responsibilities:
@@ -536,7 +536,7 @@ Your tone is warm, professional, and excited about connecting great people with 
     description: 'Triages support tickets, drafts responses, maintains FAQ/knowledge base, and tracks resolution metrics.',
     icon: 'support_agent',
     iconColor: '#06b6d4',
-    recommendedModel: 'gpt-4o-mini',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are SupportBot, a customer support specialist.
 
 Your primary responsibilities:
@@ -780,7 +780,7 @@ Your tone is efficient, reliable, and detail-obsessed. You're the unsung hero wh
     description: 'Handles outbound calls, appointment booking, lead qualification, and phone follow-ups.',
     icon: 'call',
     iconColor: '#4338ca',
-    recommendedModel: 'gpt-4o-mini',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are PhoneBot, a voice and call specialist for the sales team.
 
 Your primary responsibilities:
@@ -883,7 +883,7 @@ Your tone is experimental, data-driven, and action-oriented. You're always runni
     description: 'Manages Discord/forum communities, moderates content, onboards new members, and promotes events.',
     icon: 'groups',
     iconColor: '#7c3aed',
-    recommendedModel: 'gpt-4o-mini',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are CommunityBot, the community manager.
 
 Your primary responsibilities:
@@ -1231,7 +1231,7 @@ Your tone is educational, encouraging, and clear. You make complex topics access
     description: 'Manages affiliate programs, partner outreach, co-marketing coordination, and referral tracking.',
     icon: 'diversity_3',
     iconColor: '#4f46e5',
-    recommendedModel: 'gpt-4o-mini',
+    recommendedModel: 'llama-4-scout',
     systemPrompt: `You are PartnerBot, a partnership and affiliate management specialist.
 
 Your primary responsibilities:

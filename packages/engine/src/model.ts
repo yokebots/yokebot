@@ -113,18 +113,6 @@ export const MODEL_CATALOG: LogicalModel[] = [
       { providerId: 'fireworks', providerModelId: 'accounts/fireworks/models/devstral-small', priority: 2 },
     ],
   },
-  {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o mini',
-    description: 'Smooth communicator for customer-facing work',
-    type: 'chat',
-    category: 'efficient',
-    contextWindow: 128000,
-    backends: [
-      { providerId: 'openai', providerModelId: 'gpt-4o-mini', priority: 1 },
-      { providerId: 'openrouter', providerModelId: 'openai/gpt-4o-mini', priority: 2 },
-    ],
-  },
 
   // ---- Text/Chat — Mid tier ----
   {
@@ -144,18 +132,6 @@ export const MODEL_CATALOG: LogicalModel[] = [
     category: 'frontier',
     contextWindow: 128000,
     backends: [{ providerId: 'deepinfra', providerModelId: 'deepseek-ai/DeepSeek-V3.2', priority: 1 }],
-  },
-  {
-    id: 'grok-4-fast',
-    name: 'Grok 4 Fast',
-    description: 'Speed demon for real-time high-volume tasks',
-    type: 'chat',
-    category: 'efficient',
-    contextWindow: 131072,
-    backends: [
-      { providerId: 'xai', providerModelId: 'grok-4-fast', priority: 1 },
-      { providerId: 'openrouter', providerModelId: 'x-ai/grok-4-fast', priority: 2 },
-    ],
   },
   {
     id: 'minimax-m2.5',
