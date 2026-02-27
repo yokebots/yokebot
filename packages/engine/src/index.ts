@@ -25,6 +25,7 @@ import { logActivity, listActivity, countActivity } from './activity.ts'
 import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS } from './model.ts'
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
 import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, findUserByEmail } from './teams.ts'
+import jwt from 'jsonwebtoken'
 import { authMiddleware } from './auth-middleware.ts'
 import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
@@ -80,13 +81,14 @@ async function main() {
   // Body size limit
   app.use(express.json({ limit: '1mb' }))
 
-  // Rate limiting — general
+  // Rate limiting — general (per IP, generous for dashboard usage)
   app.use(rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    max: 1000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later' },
+    skip: (req) => req.path === '/health' || req.path === '/api/config',
   }))
 
   // Stricter rate limit for chat completions (LLM calls are expensive)
@@ -1054,6 +1056,23 @@ async function main() {
 
   app.get('/api/config', (_req, res) => {
     res.json({ hostedMode: process.env.YOKEBOT_HOSTED_MODE === 'true' })
+  })
+
+  // Temporary debug endpoint — test JWT verification (public, remove after debugging)
+  app.post('/api/debug/verify-token', (req, res) => {
+    const jwtSecret = process.env.SUPABASE_JWT_SECRET ?? ''
+    const authHeader = req.headers.authorization
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.json({ error: 'No Bearer token', secretLength: jwtSecret.length, secretPrefix: jwtSecret.slice(0, 6) })
+    }
+    const token = authHeader.slice(7)
+    try {
+      const payload = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] })
+      return res.json({ success: true, payload })
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown'
+      return res.json({ success: false, error: errMsg, secretLength: jwtSecret.length, secretPrefix: jwtSecret.slice(0, 6), tokenPrefix: token.slice(0, 30) })
+    }
   })
 
   // ===== Notifications (cross-team, uses user_id) =====

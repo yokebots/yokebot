@@ -720,6 +720,17 @@ const POSTGRES_DDL = `
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- Migrations: Add columns to tables that may pre-date multi-tenancy
+  ALTER TABLE agents ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE agents ADD COLUMN IF NOT EXISTS template_id TEXT;
+  ALTER TABLE messages ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE tasks ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE chat_channels ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE approvals ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE sor_tables ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '';
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);

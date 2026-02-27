@@ -17,7 +17,8 @@ COPY packages/engine/package.json packages/engine/
 # Install dependencies
 RUN pnpm install --frozen-lockfile --filter @yokebot/engine...
 
-# Copy engine source
+# Copy engine source (ARG busts Docker cache on redeploy)
+ARG CACHEBUST=1
 COPY packages/engine/ packages/engine/
 
 # Copy enterprise module

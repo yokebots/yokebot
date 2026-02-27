@@ -52,7 +52,14 @@ function OnboardingGuard({ children }: { children: ReactNode }) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
 
   useEffect(() => {
-    if (!activeTeam || teamLoading) return
+    if (teamLoading) return
+
+    // If no active team (e.g. API failed with 401), skip onboarding check
+    if (!activeTeam) {
+      setChecking(false)
+      return
+    }
+
     engine.getTeamProfile(activeTeam.id)
       .then((profile) => {
         setNeedsOnboarding(!profile.onboardedAt)

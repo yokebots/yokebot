@@ -19,6 +19,7 @@ const ADMIN_EMAILS = (process.env.YOKEBOT_ADMIN_EMAILS ?? '').split(',').map((e)
 const BILLING_EXEMPT_PATHS = [
   '/health',
   '/api/ollama',
+  '/api/config',
   '/api/teams',
   '/api/notifications',
   '/api/billing',

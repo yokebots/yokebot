@@ -75,11 +75,11 @@ export interface CredentialInfo {
 
 /** List all credentials for a team (never exposes actual values). */
 export async function listCredentials(db: Db, teamId: string): Promise<CredentialInfo[]> {
-  const rows = await db.all<{ service_id: string; credential_type: string; updated_at: string }>(
+  const rows = await db.query<{ service_id: string; credential_type: string; updated_at: string }>(
     `SELECT service_id, credential_type, updated_at FROM team_credentials WHERE team_id = ?`,
     [teamId],
   )
-  return rows.map((r) => ({
+  return rows.map((r: { service_id: string; credential_type: string; updated_at: string }) => ({
     serviceId: r.service_id,
     credentialType: r.credential_type,
     hasValue: true,
@@ -89,7 +89,7 @@ export async function listCredentials(db: Db, teamId: string): Promise<Credentia
 
 /** Get a single decrypted credential value. Returns null if not set. */
 export async function getCredential(db: Db, teamId: string, serviceId: string): Promise<string | null> {
-  const row = await db.get<{ encrypted_value: string }>(
+  const row = await db.queryOne<{ encrypted_value: string }>(
     `SELECT encrypted_value FROM team_credentials WHERE team_id = ? AND service_id = ?`,
     [teamId, serviceId],
   )
@@ -105,7 +105,7 @@ export async function getCredentials(
 ): Promise<Record<string, string>> {
   if (serviceIds.length === 0) return {}
   const placeholders = serviceIds.map(() => '?').join(',')
-  const rows = await db.all<{ service_id: string; encrypted_value: string }>(
+  const rows = await db.query<{ service_id: string; encrypted_value: string }>(
     `SELECT service_id, encrypted_value FROM team_credentials WHERE team_id = ? AND service_id IN (${placeholders})`,
     [teamId, ...serviceIds],
   )
@@ -150,9 +150,15 @@ export async function setCredential(
 
 /** Delete a credential. */
 export async function deleteCredential(db: Db, teamId: string, serviceId: string): Promise<boolean> {
-  const result = await db.run(
+  // Check existence first since db.run() returns void
+  const existing = await db.queryOne(
+    `SELECT 1 FROM team_credentials WHERE team_id = ? AND service_id = ?`,
+    [teamId, serviceId],
+  )
+  if (!existing) return false
+  await db.run(
     `DELETE FROM team_credentials WHERE team_id = ? AND service_id = ?`,
     [teamId, serviceId],
   )
-  return (result.changes ?? 0) > 0
+  return true
 }

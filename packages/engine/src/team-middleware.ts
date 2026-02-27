@@ -13,6 +13,8 @@ import { getMember } from './teams.ts'
 const EXEMPT_PATHS = [
   '/health',
   '/api/ollama',
+  '/api/config',
+  '/api/debug',
   '/api/teams',
   '/api/notifications',
 ]
