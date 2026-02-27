@@ -438,8 +438,10 @@ const migrations: Migration[] = [
           CREATE INDEX IF NOT EXISTS idx_kb_memories_team ON kb_memories(team_id);
           CREATE INDEX IF NOT EXISTS idx_kb_memories_agent ON kb_memories(agent_id);
 
-          CREATE INDEX IF NOT EXISTS idx_kb_chunks_embedding ON kb_chunks USING hnsw (embedding vector_cosine_ops);
-          CREATE INDEX IF NOT EXISTS idx_kb_memories_embedding ON kb_memories USING hnsw (embedding vector_cosine_ops);
+          -- Note: HNSW indexes limited to 2000 dimensions on Railway's pgvector.
+          -- Qwen3 embeddings are 4096 dims, so we use exact nearest-neighbor search
+          -- (operator class on the column enables <=> cosine distance without an index).
+          -- At typical KB scale (<10K chunks per team) this is fast enough.
 
           ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY;
           ALTER TABLE kb_chunks ENABLE ROW LEVEL SECURITY;
@@ -490,6 +492,52 @@ const migrations: Migration[] = [
           CREATE INDEX IF NOT EXISTS idx_kb_memories_team ON kb_memories(team_id);
           CREATE INDEX IF NOT EXISTS idx_kb_memories_agent ON kb_memories(agent_id);
         `)
+      }
+    },
+  },
+  {
+    version: 8,
+    name: 'credit_carryover_and_pricing_fixes',
+    async up(db: Db) {
+      // Add purchased_balance column to team_credits so purchased credit packs
+      // carry over month-to-month while base included credits reset.
+      if (db.driver === 'postgres') {
+        await db.run('ALTER TABLE team_credits ADD COLUMN IF NOT EXISTS purchased_balance INTEGER NOT NULL DEFAULT 0')
+      } else {
+        const cols = await db.query<{ name: string }>('PRAGMA table_info(team_credits)')
+        if (!cols.some((c) => c.name === 'purchased_balance')) {
+          await db.run('ALTER TABLE team_credits ADD COLUMN purchased_balance INTEGER NOT NULL DEFAULT 0')
+        }
+      }
+
+      // Fix credit pricing for models that were underwater or had wrong IDs.
+      // Use UPDATE to overwrite values seeded in earlier migrations.
+      const priceUpdates = [
+        // flux-schnell: was 5, cost ~$0.003, now 10 → $0.005 revenue (40% margin)
+        { id: 'flux-schnell', credits: 10 },
+        // kling-o3: was 2000, cost ~$1.12/5s, now 3000 → $1.50 revenue (34% margin)
+        { id: 'kling-o3', credits: 3000 },
+        // kling-3.0: was 1500, cost ~$1.68/5s pro+audio, now 3500 → $1.75 revenue (4%... too thin)
+        // Actually kling-3.0 at standard no-audio is $0.84/5s. Pro+audio is $1.68.
+        // Keep at 2500 for standard usage = $1.25 revenue vs $0.84 cost = 33% margin
+        { id: 'kling-3.0', credits: 2500 },
+        // wan-2.6: was 500, cost ~$0.50-0.75/5s, now 2000 → $1.00 revenue (25-50% margin)
+        { id: 'wan-2.6', credits: 2000 },
+        // mirelo-sfx: was 75, cost ~$0.035/5s, now 120 → $0.06 revenue (42% margin)
+        { id: 'mirelo-sfx', credits: 120 },
+        // hunyuan-3d-v3.1-pro: already 600, cost ~$0.50, revenue $0.30 at $0.0005/credit — underwater
+        // bump to 1200 → $0.60 revenue (17%... still thin. $0.50 cost * 1.3 = $0.65 = 1300 credits)
+        { id: 'hunyuan-3d-v3.1-pro', credits: 1300 },
+        // hunyuan-3d-v2.1: cost ~$0.10, was 80 credits ($0.04) — underwater
+        // bump to 250 → $0.125 revenue (25% margin)
+        { id: 'hunyuan-3d-v2.1', credits: 250 },
+      ]
+
+      for (const u of priceUpdates) {
+        await db.run(
+          'UPDATE model_credit_costs SET credits_per_use = $1 WHERE model_id = $2',
+          [u.credits, u.id],
+        )
       }
     },
   },

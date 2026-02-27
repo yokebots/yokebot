@@ -277,14 +277,6 @@ export const MODEL_CATALOG: LogicalModel[] = [
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/kling-video/o3/standard/image-to-video', priority: 1 }],
   },
   {
-    id: 'kling-2.6-pro',
-    name: 'Kling 2.6 Pro',
-    description: 'Long-form video up to 2 minutes, 1080p/30fps, audio-synced',
-    type: 'video',
-    category: 'video',
-    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/kling-video/v2.6/pro/image-to-video', priority: 1 }],
-  },
-  {
     id: 'kling-3.0',
     name: 'Kling 3.0 Pro',
     description: 'Multi-shot cinematic sequences (up to 6 shots), character consistency',
@@ -311,7 +303,7 @@ export const MODEL_CATALOG: LogicalModel[] = [
 
   // ---- 3D Generation (via fal.ai) ----
   {
-    id: 'hunyuan-3d',
+    id: 'hunyuan-3d-v3.1-pro',
     name: 'Hunyuan 3D 3.1',
     description: 'Tencent 3D asset generation with PBR materials',
     type: '3d',

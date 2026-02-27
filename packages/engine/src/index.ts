@@ -1287,7 +1287,8 @@ ${truncated}`,
     if (!requireRole(req, res, 'admin')) return
 
     try {
-      const { startMeetAndGreet } = await import('./cloud/orchestrator.ts')
+      const cloudPath = './cloud/orchestrator.ts'
+      const { startMeetAndGreet } = await import(/* @vite-ignore */ cloudPath)
       const teamId = req.user!.activeTeamId!
 
       // Find all deployed agents for this team
@@ -1329,7 +1330,8 @@ ${truncated}`,
     }
 
     try {
-      const { addSseClient, getMeeting } = await import('./cloud/orchestrator.ts')
+      const cloudPath2 = './cloud/orchestrator.ts'
+      const { addSseClient, getMeeting } = await import(/* @vite-ignore */ cloudPath2)
 
       // Verify meeting exists and belongs to this team
       const meeting = getMeeting(req.params.meetingId)
@@ -1373,7 +1375,8 @@ ${truncated}`,
     }
 
     try {
-      const { injectHumanMessage, getMeeting } = await import('./cloud/orchestrator.ts')
+      const cloudPath3 = './cloud/orchestrator.ts'
+      const { injectHumanMessage, getMeeting } = await import(/* @vite-ignore */ cloudPath3)
 
       // Verify meeting belongs to this team
       const meeting = getMeeting(req.params.meetingId)

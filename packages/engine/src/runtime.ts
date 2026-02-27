@@ -161,7 +161,7 @@ function getBuiltinTools(): ToolDef[] {
 
     toolDef('generate_3d', 'Generate a 3D model from an image. Returns the URL of the .glb file.', {
       imageUrl: { type: 'string', description: 'URL of the input image to convert to 3D' },
-      modelId: { type: 'string', description: 'Model to use. Default: "hunyuan-3d"' },
+      modelId: { type: 'string', description: 'Model to use. Default: "hunyuan-3d-v3.1-pro"' },
     }, ['imageUrl']),
 
   ]
@@ -358,7 +358,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'generate_3d': {
-      const modelId = (args.modelId as string) || 'hunyuan-3d'
+      const modelId = (args.modelId as string) || 'hunyuan-3d-v3.1-pro'
       const logical = getLogicalModel(modelId)
       if (!logical || logical.type !== '3d') return `Unknown 3D model: ${modelId}`
       const falModelId = logical.backends[0]?.providerModelId

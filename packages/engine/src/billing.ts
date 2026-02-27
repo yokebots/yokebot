@@ -135,7 +135,7 @@ export async function addCredits(
   // Ensure credits row exists
   const existing = await db.queryOne<{ balance: number }>('SELECT balance FROM team_credits WHERE team_id = $1', [teamId])
   if (!existing) {
-    await db.run('INSERT INTO team_credits (team_id, balance) VALUES ($1, $2)', [teamId, 0])
+    await db.run('INSERT INTO team_credits (team_id, balance, purchased_balance) VALUES ($1, $2, $3)', [teamId, 0, 0])
   }
 
   // Atomic add
@@ -143,6 +143,14 @@ export async function addCredits(
     `UPDATE team_credits SET balance = balance + $1, updated_at = ${db.now()} WHERE team_id = $2`,
     [amount, teamId],
   )
+
+  // Credit packs also increase purchased_balance (these carry over month-to-month)
+  if (type === 'credit_pack') {
+    await db.run(
+      `UPDATE team_credits SET purchased_balance = purchased_balance + $1 WHERE team_id = $2`,
+      [amount, teamId],
+    )
+  }
 
   const newBalance = await getCreditBalance(db, teamId)
 
@@ -165,21 +173,30 @@ export async function deductCredits(
     [amount, teamId],
   )
 
-  const balance = await getCreditBalance(db, teamId)
-
-  // If balance didn't change (or no row), the WHERE clause prevented the update
-  const row = await db.queryOne<{ balance: number }>('SELECT balance FROM team_credits WHERE team_id = $1', [teamId])
+  const row = await db.queryOne<{ balance: number; purchased_balance: number }>(
+    'SELECT balance, purchased_balance FROM team_credits WHERE team_id = $1', [teamId],
+  )
   if (!row || row.balance < 0) {
     return { success: false, balance: row?.balance ?? 0 }
+  }
+
+  // Base credits are consumed first, purchased credits consumed last.
+  // If balance dips below purchased_balance, it means base is exhausted
+  // and we're now spending purchased credits.
+  if (row.balance < row.purchased_balance) {
+    await db.run(
+      `UPDATE team_credits SET purchased_balance = $1 WHERE team_id = $2`,
+      [Math.max(0, row.balance), teamId],
+    )
   }
 
   // Record the debit transaction
   await db.run(
     'INSERT INTO credit_transactions (id, team_id, amount, balance_after, type, description) VALUES ($1, $2, $3, $4, $5, $6)',
-    [randomUUID(), teamId, -amount, balance, type, description],
+    [randomUUID(), teamId, -amount, row.balance, type, description],
   )
 
-  return { success: true, balance }
+  return { success: true, balance: row.balance }
 }
 
 export async function listCreditTransactions(db: Db, teamId: string, limit = 50): Promise<CreditTransaction[]> {
@@ -251,26 +268,34 @@ export async function listModelCreditCosts(db: Db): Promise<ModelCreditCost[]> {
 }
 
 export async function resetMonthlyCredits(db: Db, teamId: string, amount: number): Promise<void> {
-  // Set balance to the included amount (use-it-or-lose-it for included credits)
-  const currentBalance = await getCreditBalance(db, teamId)
+  // Monthly reset: base included credits are use-it-or-lose-it,
+  // but purchased credit pack credits carry over indefinitely.
 
   // Ensure credits row exists
-  const existing = await db.queryOne<{ balance: number }>('SELECT balance FROM team_credits WHERE team_id = $1', [teamId])
+  const existing = await db.queryOne<{ balance: number; purchased_balance: number }>(
+    'SELECT balance, purchased_balance FROM team_credits WHERE team_id = $1', [teamId],
+  )
   if (!existing) {
-    await db.run('INSERT INTO team_credits (team_id, balance) VALUES ($1, $2)', [teamId, 0])
+    await db.run('INSERT INTO team_credits (team_id, balance, purchased_balance) VALUES ($1, $2, $3)', [teamId, 0, 0])
   }
 
-  // Set balance to the new included amount (purchased pack credits are already in balance — this resets to floor)
+  const purchasedBalance = existing?.purchased_balance ?? 0
+  const currentBalance = existing?.balance ?? 0
+
+  // New balance = fresh included credits + any remaining purchased credits
+  const newBalance = amount + purchasedBalance
+
   await db.run(
     `UPDATE team_credits SET balance = $1, updated_at = ${db.now()} WHERE team_id = $2`,
-    [amount, teamId],
+    [newBalance, teamId],
   )
 
   // Record the reset transaction
-  const diff = amount - currentBalance
+  const diff = newBalance - currentBalance
   await db.run(
     'INSERT INTO credit_transactions (id, team_id, amount, balance_after, type, description) VALUES ($1, $2, $3, $4, $5, $6)',
-    [randomUUID(), teamId, diff, amount, 'credit_reset', `Monthly credit reset: ${amount.toLocaleString()} included credits`],
+    [randomUUID(), teamId, diff, newBalance, 'credit_reset',
+      `Monthly reset: ${amount.toLocaleString()} included + ${purchasedBalance.toLocaleString()} purchased carried over`],
   )
 }
 
