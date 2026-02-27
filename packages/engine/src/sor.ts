@@ -6,7 +6,7 @@
  * Row data is stored as JSON blobs for schema flexibility.
  */
 
-import type Database from 'better-sqlite3'
+import type { Db } from './db/types.ts'
 import { randomUUID } from 'crypto'
 
 export interface SorTable {
@@ -40,41 +40,46 @@ export interface SorPermission {
 
 // ---- Tables ----
 
-export function createSorTable(db: Database.Database, name: string): SorTable {
+export async function createSorTable(db: Db, name: string): Promise<SorTable> {
   const id = randomUUID()
-  db.prepare('INSERT INTO sor_tables (id, name) VALUES (?, ?)').run(id, name)
-  return getSorTable(db, id)!
+  await db.run('INSERT INTO sor_tables (id, name) VALUES ($1, $2)', [id, name])
+  return (await getSorTable(db, id))!
 }
 
-export function getSorTable(db: Database.Database, id: string): SorTable | null {
-  const row = db.prepare('SELECT * FROM sor_tables WHERE id = ?').get(id) as Record<string, unknown> | undefined
+export async function getSorTable(db: Db, id: string): Promise<SorTable | null> {
+  const row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE id = $1', [id])
   if (!row) return null
   return { id: row.id as string, name: row.name as string, createdAt: row.created_at as string }
 }
 
-export function getSorTableByName(db: Database.Database, name: string): SorTable | null {
-  const row = db.prepare('SELECT * FROM sor_tables WHERE name = ? COLLATE NOCASE').get(name) as Record<string, unknown> | undefined
+export async function getSorTableByName(db: Db, name: string): Promise<SorTable | null> {
+  let row: Record<string, unknown> | null
+  if (db.driver === 'postgres') {
+    row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE LOWER(name) = LOWER($1)', [name])
+  } else {
+    row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE name = $1 COLLATE NOCASE', [name])
+  }
   if (!row) return null
   return { id: row.id as string, name: row.name as string, createdAt: row.created_at as string }
 }
 
-export function listSorTables(db: Database.Database): SorTable[] {
-  const rows = db.prepare('SELECT * FROM sor_tables ORDER BY created_at DESC').all() as Record<string, unknown>[]
+export async function listSorTables(db: Db): Promise<SorTable[]> {
+  const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_tables ORDER BY created_at DESC')
   return rows.map((r) => ({ id: r.id as string, name: r.name as string, createdAt: r.created_at as string }))
 }
 
 // ---- Columns ----
 
-export function addSorColumn(db: Database.Database, tableId: string, name: string, colType = 'text'): SorColumn {
+export async function addSorColumn(db: Db, tableId: string, name: string, colType = 'text'): Promise<SorColumn> {
   const id = randomUUID()
-  const maxPos = db.prepare('SELECT MAX(position) as m FROM sor_columns WHERE table_id = ?').get(tableId) as { m: number | null }
-  const position = (maxPos.m ?? -1) + 1
-  db.prepare('INSERT INTO sor_columns (id, table_id, name, col_type, position) VALUES (?, ?, ?, ?, ?)').run(id, tableId, name, colType, position)
+  const maxPos = await db.queryOne<{ m: number | null }>('SELECT MAX(position) as m FROM sor_columns WHERE table_id = $1', [tableId])
+  const position = ((maxPos?.m) ?? -1) + 1
+  await db.run('INSERT INTO sor_columns (id, table_id, name, col_type, position) VALUES ($1, $2, $3, $4, $5)', [id, tableId, name, colType, position])
   return { id, tableId, name, colType, position }
 }
 
-export function listSorColumns(db: Database.Database, tableId: string): SorColumn[] {
-  const rows = db.prepare('SELECT * FROM sor_columns WHERE table_id = ? ORDER BY position').all(tableId) as Record<string, unknown>[]
+export async function listSorColumns(db: Db, tableId: string): Promise<SorColumn[]> {
+  const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_columns WHERE table_id = $1 ORDER BY position', [tableId])
   return rows.map((r) => ({
     id: r.id as string, tableId: r.table_id as string, name: r.name as string,
     colType: r.col_type as string, position: r.position as number,
@@ -83,54 +88,63 @@ export function listSorColumns(db: Database.Database, tableId: string): SorColum
 
 // ---- Rows ----
 
-export function addSorRow(db: Database.Database, tableId: string, data: Record<string, unknown>): SorRow {
+export async function addSorRow(db: Db, tableId: string, data: Record<string, unknown>): Promise<SorRow> {
   const id = randomUUID()
-  db.prepare('INSERT INTO sor_rows (id, table_id, data) VALUES (?, ?, ?)').run(id, tableId, JSON.stringify(data))
-  return getSorRow(db, id)!
+  await db.run('INSERT INTO sor_rows (id, table_id, data) VALUES ($1, $2, $3)', [id, tableId, JSON.stringify(data)])
+  return (await getSorRow(db, id))!
 }
 
-export function getSorRow(db: Database.Database, id: string): SorRow | null {
-  const row = db.prepare('SELECT * FROM sor_rows WHERE id = ?').get(id) as Record<string, unknown> | undefined
+export async function getSorRow(db: Db, id: string): Promise<SorRow | null> {
+  const row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_rows WHERE id = $1', [id])
   if (!row) return null
   return rowToSorRow(row)
 }
 
-export function listSorRows(db: Database.Database, tableId: string): SorRow[] {
-  const rows = db.prepare('SELECT * FROM sor_rows WHERE table_id = ? ORDER BY created_at DESC').all(tableId) as Record<string, unknown>[]
+export async function listSorRows(db: Db, tableId: string): Promise<SorRow[]> {
+  const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_rows WHERE table_id = $1 ORDER BY created_at DESC', [tableId])
   return rows.map(rowToSorRow)
 }
 
-export function updateSorRow(db: Database.Database, id: string, data: Record<string, unknown>): SorRow | null {
-  const existing = getSorRow(db, id)
+export async function updateSorRow(db: Db, id: string, data: Record<string, unknown>): Promise<SorRow | null> {
+  const existing = await getSorRow(db, id)
   if (!existing) return null
   const merged = { ...existing.data, ...data }
-  db.prepare("UPDATE sor_rows SET data = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(merged), id)
+  await db.run(`UPDATE sor_rows SET data = $1, updated_at = ${db.now()} WHERE id = $2`, [JSON.stringify(merged), id])
   return getSorRow(db, id)
 }
 
-export function deleteSorRow(db: Database.Database, id: string): void {
-  db.prepare('DELETE FROM sor_rows WHERE id = ?').run(id)
+export async function deleteSorRow(db: Db, id: string): Promise<void> {
+  await db.run('DELETE FROM sor_rows WHERE id = $1', [id])
 }
 
 // ---- Permissions ----
 
-export function setSorPermission(db: Database.Database, agentId: string, tableId: string, canRead: boolean, canWrite: boolean): void {
-  db.prepare(`
-    INSERT INTO sor_permissions (agent_id, table_id, can_read, can_write) VALUES (?, ?, ?, ?)
-    ON CONFLICT(agent_id, table_id) DO UPDATE SET can_read = excluded.can_read, can_write = excluded.can_write
-  `).run(agentId, tableId, canRead ? 1 : 0, canWrite ? 1 : 0)
+export async function setSorPermission(db: Db, agentId: string, tableId: string, canRead: boolean, canWrite: boolean): Promise<void> {
+  if (db.driver === 'postgres') {
+    await db.run(
+      `INSERT INTO sor_permissions (agent_id, table_id, can_read, can_write) VALUES ($1, $2, $3, $4)
+       ON CONFLICT(agent_id, table_id) DO UPDATE SET can_read = excluded.can_read, can_write = excluded.can_write`,
+      [agentId, tableId, canRead ? 1 : 0, canWrite ? 1 : 0],
+    )
+  } else {
+    await db.run(
+      `INSERT INTO sor_permissions (agent_id, table_id, can_read, can_write) VALUES ($1, $2, $3, $4)
+       ON CONFLICT(agent_id, table_id) DO UPDATE SET can_read = excluded.can_read, can_write = excluded.can_write`,
+      [agentId, tableId, canRead ? 1 : 0, canWrite ? 1 : 0],
+    )
+  }
 }
 
-export function getSorPermissions(db: Database.Database, tableId: string): SorPermission[] {
-  const rows = db.prepare('SELECT * FROM sor_permissions WHERE table_id = ?').all(tableId) as Record<string, unknown>[]
+export async function getSorPermissions(db: Db, tableId: string): Promise<SorPermission[]> {
+  const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_permissions WHERE table_id = $1', [tableId])
   return rows.map((r) => ({
     agentId: r.agent_id as string, tableId: r.table_id as string,
     canRead: (r.can_read as number) === 1, canWrite: (r.can_write as number) === 1,
   }))
 }
 
-export function checkSorPermission(db: Database.Database, agentId: string, tableId: string): SorPermission | null {
-  const row = db.prepare('SELECT * FROM sor_permissions WHERE agent_id = ? AND table_id = ?').get(agentId, tableId) as Record<string, unknown> | undefined
+export async function checkSorPermission(db: Db, agentId: string, tableId: string): Promise<SorPermission | null> {
+  const row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_permissions WHERE agent_id = $1 AND table_id = $2', [agentId, tableId])
   if (!row) return null
   return {
     agentId: row.agent_id as string, tableId: row.table_id as string,
@@ -139,9 +153,11 @@ export function checkSorPermission(db: Database.Database, agentId: string, table
 }
 
 function rowToSorRow(row: Record<string, unknown>): SorRow {
+  const rawData = row.data
+  const data = typeof rawData === 'string' ? JSON.parse(rawData) as Record<string, unknown> : rawData as Record<string, unknown>
   return {
     id: row.id as string, tableId: row.table_id as string,
-    data: JSON.parse(row.data as string) as Record<string, unknown>,
+    data,
     createdAt: row.created_at as string, updatedAt: row.updated_at as string,
   }
 }

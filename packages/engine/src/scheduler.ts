@@ -6,7 +6,7 @@
  * the agent to think about what SHOULD be done.
  */
 
-import type Database from 'better-sqlite3'
+import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
 import { runReactLoop } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
@@ -31,13 +31,13 @@ const state: SchedulerState = {
 /**
  * Start the scheduler. Registers a heartbeat timer for each running agent.
  */
-export function startScheduler(db: Database.Database, workspaceConfig?: WorkspaceConfig, skillsDir?: string): void {
+export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, skillsDir?: string): Promise<void> {
   if (state.running) return
   state.running = true
   if (workspaceConfig) state.workspaceConfig = workspaceConfig
   if (skillsDir) state.skillsDir = skillsDir
 
-  const agents = listAgents(db)
+  const agents = await listAgents(db)
   for (const agent of agents) {
     if (agent.status === 'running') {
       scheduleAgent(db, agent)
@@ -62,7 +62,7 @@ export function stopScheduler(): void {
 /**
  * Register a heartbeat timer for a specific agent.
  */
-export function scheduleAgent(db: Database.Database, agent: Agent): void {
+export function scheduleAgent(db: Db, agent: Agent): void {
   // Clear existing timer if any
   unscheduleAgent(agent.id)
 
@@ -90,7 +90,7 @@ export function unscheduleAgent(agentId: string): void {
 /**
  * Single heartbeat cycle for an agent.
  */
-async function heartbeat(db: Database.Database, agent: Agent): Promise<void> {
+async function heartbeat(db: Db, agent: Agent): Promise<void> {
   // Check if within active hours
   const hour = new Date().getHours()
   if (hour < agent.activeHoursStart || hour >= agent.activeHoursEnd) {
@@ -100,8 +100,7 @@ async function heartbeat(db: Database.Database, agent: Agent): Promise<void> {
   // For proactive agents: prompt the agent to review its state
   if (agent.proactive) {
     // Resolve provider ID → real endpoint + API key
-    // Note: db is captured from the heartbeat closure
-    const modelConfig = resolveModelConfig(db, agent.modelEndpoint, agent.modelName)
+    const modelConfig = await resolveModelConfig(db, agent.modelEndpoint, agent.modelName)
 
     const systemPrompt = agent.systemPrompt ?? `You are ${agent.name}, a proactive AI agent.`
     const proactivePrompt = [
@@ -120,9 +119,9 @@ async function heartbeat(db: Database.Database, agent: Agent): Promise<void> {
       const result = await runReactLoop(db, agent.id, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir)
       if (result.response && !result.response.includes('[no-op]')) {
         // Route proactive messages to the agent's DM channel
-        const dmChannel = getDmChannel(db, agent.id)
-        sendMessage(db, dmChannel.id, 'agent', agent.id, result.response)
-        logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`)
+        const dmChannel = await getDmChannel(db, agent.id)
+        await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response)
+        await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`)
         console.log(`[scheduler] Proactive message from "${agent.name}" posted to DM`)
       }
     } catch (err) {

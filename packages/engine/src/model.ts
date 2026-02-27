@@ -3,16 +3,14 @@
  *
  * Works with Ollama, DeepInfra, Together, OpenAI, or any
  * endpoint that speaks the OpenAI chat completions API.
- * For hosted yokebot.com: the endpoint is our proxy that meters usage.
- * For self-hosted: the endpoint is Ollama or the user's own API key.
  */
 
-import type Database from 'better-sqlite3'
+import type { Db } from './db/types.ts'
 
 export interface ModelConfig {
-  endpoint: string   // e.g. "http://localhost:11434/v1" for Ollama
-  model: string      // e.g. "llama3.2" or "deepseek-r1"
-  apiKey?: string    // optional, not needed for Ollama
+  endpoint: string
+  model: string
+  apiKey?: string
 }
 
 export interface ChatMessage {
@@ -56,10 +54,6 @@ export interface ProviderDef {
   models: Array<{ id: string; name: string; contextWindow?: number }>
 }
 
-/**
- * Known model providers and their curated model lists.
- * The endpoint for Ollama can vary; others are fixed.
- */
 export const PROVIDERS: ProviderDef[] = [
   {
     id: 'ollama',
@@ -132,207 +126,111 @@ export interface StoredProvider {
   updatedAt: string
 }
 
-export function getStoredProvider(db: Database.Database, id: string): StoredProvider | null {
-  const row = db.prepare('SELECT * FROM model_providers WHERE id = ?').get(id) as Record<string, unknown> | undefined
+export async function getStoredProvider(db: Db, id: string): Promise<StoredProvider | null> {
+  const row = await db.queryOne<Record<string, unknown>>('SELECT * FROM model_providers WHERE id = $1', [id])
   if (!row) return null
   return { id: row.id as string, apiKey: row.api_key as string, enabled: (row.enabled as number) === 1, updatedAt: row.updated_at as string }
 }
 
-export function listStoredProviders(db: Database.Database): StoredProvider[] {
-  const rows = db.prepare('SELECT * FROM model_providers ORDER BY id').all() as Record<string, unknown>[]
+export async function listStoredProviders(db: Db): Promise<StoredProvider[]> {
+  const rows = await db.query<Record<string, unknown>>('SELECT * FROM model_providers ORDER BY id')
   return rows.map((r) => ({ id: r.id as string, apiKey: r.api_key as string, enabled: (r.enabled as number) === 1, updatedAt: r.updated_at as string }))
 }
 
-export function upsertProvider(db: Database.Database, id: string, apiKey: string, enabled: boolean): void {
-  db.prepare(`
-    INSERT INTO model_providers (id, api_key, enabled) VALUES (?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET api_key = excluded.api_key, enabled = excluded.enabled, updated_at = datetime('now')
-  `).run(id, apiKey, enabled ? 1 : 0)
+export async function upsertProvider(db: Db, id: string, apiKey: string, enabled: boolean): Promise<void> {
+  await db.run(
+    `INSERT INTO model_providers (id, api_key, enabled) VALUES ($1, $2, $3)
+     ON CONFLICT(id) DO UPDATE SET api_key = excluded.api_key, enabled = excluded.enabled, updated_at = ${db.now()}`,
+    [id, apiKey, enabled ? 1 : 0],
+  )
 }
 
-/**
- * Resolve an agent's model config. If the endpoint matches a known provider ID,
- * look up the real endpoint URL and API key from the database.
- */
-export function resolveModelConfig(db: Database.Database, endpoint: string, model: string): ModelConfig {
+export async function resolveModelConfig(db: Db, endpoint: string, model: string): Promise<ModelConfig> {
   const provider = getProvider(endpoint)
-  if (!provider) {
-    // Raw endpoint URL (e.g. Ollama at custom address) — use as-is
-    return { endpoint, model }
-  }
-
-  // Known provider — resolve endpoint and API key
-  const stored = getStoredProvider(db, provider.id)
-  return {
-    endpoint: provider.endpoint,
-    model,
-    apiKey: stored?.apiKey || undefined,
-  }
+  if (!provider) return { endpoint, model }
+  const stored = await getStoredProvider(db, provider.id)
+  return { endpoint: provider.endpoint, model, apiKey: stored?.apiKey || undefined }
 }
 
-/**
- * Get available models across all configured providers.
- * Merges static model lists with live Ollama detection.
- */
-export async function getAvailableModels(db: Database.Database): Promise<Array<{
-  providerId: string
-  providerName: string
-  enabled: boolean
+export async function getAvailableModels(db: Db): Promise<Array<{
+  providerId: string; providerName: string; enabled: boolean
   models: Array<{ id: string; name: string; contextWindow?: number }>
 }>> {
   const result = []
-
   for (const provider of PROVIDERS) {
     if (provider.id === 'ollama') {
-      // For Ollama, detect live models and merge with known list
       const detection = await detectOllama()
       const liveModels = detection.models.map((m) => ({ id: m, name: m }))
-      // Merge: known models + any detected models not in the known list
       const knownIds = new Set(provider.models.map((m) => m.id))
       const merged = [...provider.models, ...liveModels.filter((m) => !knownIds.has(m.id))]
-      result.push({
-        providerId: provider.id,
-        providerName: provider.name,
-        enabled: detection.connected,
-        models: merged,
-      })
+      result.push({ providerId: provider.id, providerName: provider.name, enabled: detection.connected, models: merged })
     } else {
-      const stored = getStoredProvider(db, provider.id)
-      result.push({
-        providerId: provider.id,
-        providerName: provider.name,
-        enabled: stored?.enabled ?? false,
-        models: provider.models,
-      })
+      const stored = await getStoredProvider(db, provider.id)
+      result.push({ providerId: provider.id, providerName: provider.name, enabled: stored?.enabled ?? false, models: provider.models })
     }
   }
-
   return result
 }
 
 // ---- Chat completion ----
 
-/**
- * Call any OpenAI-compatible chat completions endpoint.
- */
 export async function chatCompletion(
   config: ModelConfig,
   messages: ChatMessage[],
   tools?: ToolDef[],
 ): Promise<CompletionResponse> {
   const url = `${config.endpoint}/chat/completions`
+  const body: Record<string, unknown> = { model: config.model, messages, stream: false }
+  if (tools && tools.length > 0) { body.tools = tools; body.tool_choice = 'auto' }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
 
-  const body: Record<string, unknown> = {
-    model: config.model,
-    messages,
-    stream: false,
-  }
-
-  if (tools && tools.length > 0) {
-    body.tools = tools
-    body.tool_choice = 'auto'
-  }
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
-
-  if (config.apiKey) {
-    headers['Authorization'] = `Bearer ${config.apiKey}`
-  }
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Model API error ${res.status}: ${text}`)
-  }
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+  if (!res.ok) { const text = await res.text(); throw new Error(`Model API error ${res.status}: ${text}`) }
 
   const data = await res.json() as {
-    choices: Array<{
-      message: {
-        content: string | null
-        tool_calls?: ToolCall[]
-      }
-    }>
+    choices: Array<{ message: { content: string | null; tool_calls?: ToolCall[] } }>
     usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
   }
 
   const choice = data.choices[0]
-  if (!choice) {
-    throw new Error('No choices returned from model API')
-  }
-
-  return {
-    content: choice.message.content,
-    tool_calls: choice.message.tool_calls ?? [],
-    usage: data.usage,
-  }
+  if (!choice) throw new Error('No choices returned from model API')
+  return { content: choice.message.content, tool_calls: choice.message.tool_calls ?? [], usage: data.usage }
 }
 
 // ---- Fallback support ----
 
-export interface FallbackConfig {
-  endpoint: string
-  model: string
-  apiKey?: string
-}
+export interface FallbackConfig { endpoint: string; model: string; apiKey?: string }
 
 let fallbackConfig: FallbackConfig | null = null
 
-export function setFallbackConfig(config: FallbackConfig): void {
-  fallbackConfig = config
-}
+export function setFallbackConfig(config: FallbackConfig): void { fallbackConfig = config }
+export function getFallbackConfig(): FallbackConfig | null { return fallbackConfig }
 
-export function getFallbackConfig(): FallbackConfig | null {
-  return fallbackConfig
-}
-
-/**
- * Try primary model, fall back to secondary on failure.
- */
 export async function chatCompletionWithFallback(
-  config: ModelConfig,
-  messages: ChatMessage[],
-  tools?: ToolDef[],
+  config: ModelConfig, messages: ChatMessage[], tools?: ToolDef[],
 ): Promise<CompletionResponse> {
   try {
     return await chatCompletion(config, messages, tools)
   } catch (primaryErr) {
     if (!fallbackConfig) throw primaryErr
-
     console.log(`[model] Primary model failed, trying fallback: ${fallbackConfig.endpoint}/${fallbackConfig.model}`)
     try {
-      return await chatCompletion({
-        endpoint: fallbackConfig.endpoint,
-        model: fallbackConfig.model,
-        apiKey: fallbackConfig.apiKey,
-      }, messages, tools)
+      return await chatCompletion({ endpoint: fallbackConfig.endpoint, model: fallbackConfig.model, apiKey: fallbackConfig.apiKey }, messages, tools)
     } catch (fallbackErr) {
-      // Both failed — throw the original error with a note
       throw new Error(`Primary: ${(primaryErr as Error).message}; Fallback: ${(fallbackErr as Error).message}`)
     }
   }
 }
 
-/**
- * Check if an Ollama instance is reachable and list available models.
- */
 export async function detectOllama(
   endpoint = 'http://localhost:11434',
 ): Promise<{ connected: boolean; models: string[] }> {
   try {
-    const res = await fetch(`${endpoint}/api/tags`, {
-      signal: AbortSignal.timeout(3000),
-    })
+    const res = await fetch(`${endpoint}/api/tags`, { signal: AbortSignal.timeout(3000) })
     if (!res.ok) return { connected: false, models: [] }
     const data = await res.json() as { models?: Array<{ name: string }> }
-    const models = data.models?.map((m) => m.name) ?? []
-    return { connected: true, models }
+    return { connected: true, models: data.models?.map((m) => m.name) ?? [] }
   } catch {
     return { connected: false, models: [] }
   }

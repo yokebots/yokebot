@@ -5,7 +5,7 @@
  * task changes, approval decisions, and proactive heartbeats.
  */
 
-import type Database from 'better-sqlite3'
+import type { Db } from './db/types.ts'
 
 export interface ActivityEntry {
   id: number
@@ -16,35 +16,39 @@ export interface ActivityEntry {
   createdAt: string
 }
 
-export function logActivity(
-  db: Database.Database,
+export async function logActivity(
+  db: Db,
   eventType: string,
   agentId: string | null,
   description: string,
   details?: Record<string, unknown>,
-): void {
-  db.prepare(
-    'INSERT INTO activity_log (event_type, agent_id, description, details) VALUES (?, ?, ?, ?)',
-  ).run(eventType, agentId, description, details ? JSON.stringify(details) : null)
+): Promise<void> {
+  await db.run(
+    'INSERT INTO activity_log (event_type, agent_id, description, details) VALUES ($1, $2, $3, $4)',
+    [eventType, agentId, description, details ? JSON.stringify(details) : null],
+  )
 }
 
-export function listActivity(
-  db: Database.Database,
+export async function listActivity(
+  db: Db,
   filters?: { agentId?: string; eventType?: string; limit?: number; before?: number },
-): ActivityEntry[] {
+): Promise<ActivityEntry[]> {
   const clauses: string[] = []
   const params: unknown[] = []
+  let paramIdx = 1
 
-  if (filters?.agentId) { clauses.push('agent_id = ?'); params.push(filters.agentId) }
-  if (filters?.eventType) { clauses.push('event_type = ?'); params.push(filters.eventType) }
-  if (filters?.before) { clauses.push('id < ?'); params.push(filters.before) }
+  if (filters?.agentId) { clauses.push(`agent_id = $${paramIdx++}`); params.push(filters.agentId) }
+  if (filters?.eventType) { clauses.push(`event_type = $${paramIdx++}`); params.push(filters.eventType) }
+  if (filters?.before) { clauses.push(`id < $${paramIdx++}`); params.push(filters.before) }
 
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
   const limit = filters?.limit ?? 100
+  params.push(limit)
 
-  const rows = db.prepare(
-    `SELECT * FROM activity_log ${where} ORDER BY created_at DESC, id DESC LIMIT ?`,
-  ).all(...params, limit) as Array<Record<string, unknown>>
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM activity_log ${where} ORDER BY created_at DESC, id DESC LIMIT $${paramIdx}`,
+    params,
+  )
 
   return rows.map((r) => ({
     id: r.id as number,
@@ -56,11 +60,11 @@ export function listActivity(
   }))
 }
 
-export function countActivity(db: Database.Database, agentId?: string): number {
+export async function countActivity(db: Db, agentId?: string): Promise<number> {
   if (agentId) {
-    const row = db.prepare('SELECT COUNT(*) as count FROM activity_log WHERE agent_id = ?').get(agentId) as { count: number }
-    return row.count
+    const row = await db.queryOne<{ count: number }>('SELECT COUNT(*) as count FROM activity_log WHERE agent_id = $1', [agentId])
+    return row?.count ?? 0
   }
-  const row = db.prepare('SELECT COUNT(*) as count FROM activity_log').get() as { count: number }
-  return row.count
+  const row = await db.queryOne<{ count: number }>('SELECT COUNT(*) as count FROM activity_log')
+  return row?.count ?? 0
 }

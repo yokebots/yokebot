@@ -8,7 +8,7 @@
  * to do, optionally calls tools, observes the results, and responds.
  */
 
-import type Database from 'better-sqlite3'
+import type { Db } from './db/types.ts'
 import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCall, type ModelConfig } from './model.ts'
 import { getMessages, addMessage } from './agent.ts'
 import { listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
@@ -29,7 +29,7 @@ const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
 
 /** Context passed to tool execution so tools can access DB / workspace. */
 export interface ToolContext {
-  db: Database.Database
+  db: Db
   agentId: string
   workspaceConfig: WorkspaceConfig
   skillsDir: string
@@ -160,7 +160,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Tasks ----
     case 'create_task': {
-      const task = createTask(ctx.db, args.title as string, {
+      const task = await createTask(ctx.db, args.title as string, {
         description: args.description as string | undefined,
         priority: (args.priority as 'low' | 'medium' | 'high' | 'urgent') ?? 'medium',
         assignedAgentId: ctx.agentId,
@@ -173,7 +173,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (args.status) updates.status = args.status
       if (args.priority) updates.priority = args.priority
       if (args.description) updates.description = args.description
-      const task = updateTask(ctx.db, args.taskId as string, updates)
+      const task = await updateTask(ctx.db, args.taskId as string, updates)
       if (!task) return `Task not found: ${args.taskId as string}`
       return `Task updated: "${task.title}" (status: ${task.status}, priority: ${task.priority})`
     }
@@ -182,23 +182,24 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const filters: Record<string, unknown> = {}
       if (args.status) filters.status = args.status
       if (args.agentId) filters.agentId = args.agentId
-      const tasks = listTasks(ctx.db, filters as Parameters<typeof listTasks>[1])
+      const tasks = await listTasks(ctx.db, filters as Parameters<typeof listTasks>[1])
       if (tasks.length === 0) return 'No tasks found.'
       return tasks.map((t) => `- [${t.status}] ${t.title} (${t.priority}, id: ${t.id})`).join('\n')
     }
 
     // ---- Chat ----
     case 'send_chat_message': {
+      const dmChannel = await getDmChannel(ctx.db, ctx.agentId)
       const channelId = (args.channelId as string) === 'dm'
-        ? getDmChannel(ctx.db, ctx.agentId).id
+        ? dmChannel.id
         : args.channelId as string
-      const msg = sendMessage(ctx.db, channelId, 'agent', ctx.agentId, args.content as string)
+      const msg = await sendMessage(ctx.db, channelId, 'agent', ctx.agentId, args.content as string)
       return `Message sent (id: ${msg.id})`
     }
 
     // ---- Approvals ----
     case 'request_approval': {
-      const approval = createApproval(
+      const approval = await createApproval(
         ctx.db,
         ctx.agentId,
         args.actionType as string,
@@ -210,17 +211,17 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Source of Record ----
     case 'query_source_of_record': {
-      const table = getSorTableByName(ctx.db, args.tableName as string)
+      const table = await getSorTableByName(ctx.db, args.tableName as string)
       if (!table) return `Table not found: "${args.tableName as string}"`
-      const rows = listSorRows(ctx.db, table.id)
+      const rows = await listSorRows(ctx.db, table.id)
       if (rows.length === 0) return `Table "${table.name}" has no rows.`
       return JSON.stringify(rows, null, 2)
     }
 
     case 'update_source_of_record': {
-      const table = getSorTableByName(ctx.db, args.tableName as string)
+      const table = await getSorTableByName(ctx.db, args.tableName as string)
       if (!table) return `Table not found: "${args.tableName as string}"`
-      const row = updateSorRow(ctx.db, args.rowId as string, args.data as Record<string, unknown>)
+      const row = await updateSorRow(ctx.db, args.rowId as string, args.data as Record<string, unknown>)
       if (!row) return `Row not found: ${args.rowId as string}`
       return `Row updated: ${JSON.stringify(row.data)}`
     }
@@ -294,7 +295,7 @@ export interface RunResult {
  * 4. When model responds with text (no tool calls), return the response
  */
 export async function runReactLoop(
-  db: Database.Database,
+  db: Db,
   agentId: string,
   userMessage: string,
   modelConfig: ModelConfig,
@@ -304,10 +305,10 @@ export async function runReactLoop(
   config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
 ): Promise<RunResult> {
   // Save the user message
-  addMessage(db, agentId, 'user', userMessage)
+  await addMessage(db, agentId, 'user', userMessage)
 
   // Build the message history
-  const history = getMessages(db, agentId, 50)
+  const history = await getMessages(db, agentId, 50)
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     ...history.map((m) => ({
@@ -317,7 +318,7 @@ export async function runReactLoop(
   ]
 
   // Merge builtin tools with installed skill tools
-  const installedSkills = getAgentSkills(db, agentId).map((s) => s.skillName)
+  const installedSkills = (await getAgentSkills(db, agentId)).map((s) => s.skillName)
   const skillTools = getSkillTools(skillsDir, installedSkills)
   const tools = [...getBuiltinTools(), ...skillTools]
   const toolCtx: ToolContext = { db, agentId, workspaceConfig, skillsDir }
@@ -342,7 +343,7 @@ export async function runReactLoop(
 
         // Log tool execution to activity log (skip 'think' — too noisy)
         if (toolCall.function.name !== 'think') {
-          logActivity(db, 'tool_executed', agentId, `${toolCall.function.name}: ${result.slice(0, 200)}`, {
+          await logActivity(db, 'tool_executed', agentId, `${toolCall.function.name}: ${result.slice(0, 200)}`, {
             tool: toolCall.function.name,
             resultPreview: result.slice(0, 500),
           })
@@ -364,7 +365,7 @@ export async function runReactLoop(
 
       // If agent responded, we're done
       if (response !== null) {
-        addMessage(db, agentId, 'assistant', response)
+        await addMessage(db, agentId, 'assistant', response)
         return { response, iterations: i + 1, toolCalls: toolCallLog }
       }
 
@@ -375,7 +376,7 @@ export async function runReactLoop(
     // No tool calls — model gave a direct text response
     if (completion.content) {
       response = completion.content
-      addMessage(db, agentId, 'assistant', response)
+      await addMessage(db, agentId, 'assistant', response)
       return { response, iterations: i + 1, toolCalls: toolCallLog }
     }
 
@@ -385,6 +386,6 @@ export async function runReactLoop(
 
   // If we hit max iterations without a response
   const fallback = response ?? 'I was unable to complete the task within the iteration limit.'
-  addMessage(db, agentId, 'assistant', fallback)
+  await addMessage(db, agentId, 'assistant', fallback)
   return { response: fallback, iterations: config.maxIterations, toolCalls: toolCallLog }
 }
