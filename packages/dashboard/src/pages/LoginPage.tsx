@@ -49,9 +49,9 @@ export function LoginPage() {
         {/* Terms */}
         <p className="text-center text-xs leading-relaxed text-text-muted">
           By signing in, you agree to our{' '}
-          <a href="#" className="underline hover:text-forest-green">Terms of Service</a>{' '}
+          <a href="/terms" className="underline hover:text-forest-green">Terms of Service</a>{' '}
           and{' '}
-          <a href="#" className="underline hover:text-forest-green">Privacy Policy</a>.
+          <a href="/privacy" className="underline hover:text-forest-green">Privacy Policy</a>.
         </p>
 
         {/* Back */}

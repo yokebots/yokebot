@@ -26,6 +26,15 @@ import { LoginPage } from '@/pages/LoginPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
 import { DocsLayout } from '@/layouts/DocsLayout'
 import { DocsPage } from '@/pages/docs/DocsPage'
+import { TermsPage } from '@/pages/TermsPage'
+import { PrivacyPage } from '@/pages/PrivacyPage'
+import { FeaturesIndexPage } from '@/pages/features/FeaturesIndexPage'
+import { AgentsFeaturePage } from '@/pages/features/AgentsFeaturePage'
+import { TasksFeaturePage } from '@/pages/features/TasksFeaturePage'
+import { TeamChatFeaturePage } from '@/pages/features/TeamChatFeaturePage'
+import { GoalsFeaturePage } from '@/pages/features/GoalsFeaturePage'
+import { WorkspaceFeaturePage } from '@/pages/features/WorkspaceFeaturePage'
+import { MeetingsFeaturePage } from '@/pages/features/MeetingsFeaturePage'
 import { ToastProvider } from '@/components/ToastNotifications'
 import { useState, useEffect, type ReactNode } from 'react'
 import * as engine from '@/lib/engine'
@@ -105,6 +114,15 @@ function AppRoutes() {
       <Route path="login" element={<LoginPage />} />
       <Route path="auth/callback" element={<AuthCallbackPage />} />
       <Route path="onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
+      <Route path="terms" element={<TermsPage />} />
+      <Route path="privacy" element={<PrivacyPage />} />
+      <Route path="features" element={<FeaturesIndexPage />} />
+      <Route path="features/agents" element={<AgentsFeaturePage />} />
+      <Route path="features/tasks" element={<TasksFeaturePage />} />
+      <Route path="features/team-chat" element={<TeamChatFeaturePage />} />
+      <Route path="features/goals" element={<GoalsFeaturePage />} />
+      <Route path="features/workspace" element={<WorkspaceFeaturePage />} />
+      <Route path="features/meetings" element={<MeetingsFeaturePage />} />
 
       <Route path="docs" element={<DocsLayout />}>
         <Route index element={<DocsPage />} />

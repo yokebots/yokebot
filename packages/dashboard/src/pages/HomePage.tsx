@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ParticleConstellation } from '@/components/ParticleConstellation'
+import { FeaturesMegaMenu } from '@/components/FeaturesMegaMenu'
 
 const agentCards = [
   { icon: 'person_search', bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-100', hoverBg: 'group-hover:bg-blue-600', name: 'Lead Gen Specialist', role: 'Outreach & Qualify', action: 'Analyzing 50 leads...', actionIcon: 'sync', spin: true },
@@ -60,10 +61,10 @@ export function HomePage() {
             <img src="/logo-full-color.png" alt="YokeBot" className="h-12 object-contain transition-all duration-300 group-hover:opacity-80" />
           </div>
           <nav className="hidden items-center gap-8 md:flex">
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#features">Features</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#pricing">Pricing</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="/docs">Docs</a>
-            <a className="text-sm font-medium text-text-muted hover:text-forest-green transition-colors" href="#contact">Contact</a>
+            <FeaturesMegaMenu />
+            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="#pricing">Pricing</a>
+            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/docs">Docs</a>
+            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="#contact">Contact Us</a>
           </nav>
           <div className="flex items-center gap-4">
             <button onClick={goToLogin} className="hidden text-sm font-bold text-text-main hover:text-forest-green transition-colors sm:block">
@@ -85,9 +86,9 @@ export function HomePage() {
               { label: 'Features', href: '#features' },
               { label: 'Pricing', href: '#pricing' },
               { label: 'Docs', href: '/docs' },
-              { label: 'Contact', href: '#contact' },
+              { label: 'Contact Us', href: '#contact' },
             ].map((item) => (
-              <a key={item.label} href={item.href} onClick={() => setMobileNav(false)} className="block text-sm font-medium text-text-muted hover:text-forest-green transition-colors">{item.label}</a>
+              <a key={item.label} href={item.href} onClick={() => setMobileNav(false)} className="block text-base font-medium text-text-muted hover:text-forest-green transition-colors">{item.label}</a>
             ))}
             <div className="pt-3 border-t border-border-subtle flex flex-col gap-2">
               <button onClick={goToLogin} className="text-sm font-bold text-text-main hover:text-forest-green transition-colors text-left">Log In</button>
@@ -108,20 +109,20 @@ export function HomePage() {
           <ParticleConstellation />
           <div className="relative z-10 mx-auto grid max-w-7xl items-center gap-16 lg:grid-cols-2">
             <div className="flex max-w-2xl flex-col gap-8">
-              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-gray-700 bg-gray-900 px-3 py-1 shadow-sm">
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 shadow-sm">
                 <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-forest-green opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-forest-green" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-400" />
                 </span>
-                <span className="font-mono text-xs font-medium uppercase tracking-wider text-forest-green">Ox-Strength AI</span>
+                <span className="font-mono text-xs font-medium uppercase tracking-wider text-green-400">24/7 Team Members</span>
               </div>
               <div className="space-y-4">
                 <h1 className="font-display text-6xl font-bold leading-[0.9] tracking-tight text-white md:text-8xl">
-                  GET <br />
-                  <span className="bg-gradient-to-r from-forest-green via-green-400 to-accent-gold bg-clip-text text-transparent">YOKED.</span>
+                  Build Your <br />
+                  <span className="bg-gradient-to-r from-forest-green via-green-400 to-accent-gold bg-clip-text text-transparent">AI Workforce</span>
                 </h1>
                 <p className="max-w-lg border-l-4 border-accent-gold py-2 pl-6 text-lg leading-relaxed text-gray-400 md:text-xl">
-                  Build an automated workforce that pulls its weight. <br />The AI agent platform for serious entrepreneurs.
+                  Deploy a team of AI agents who work together to scale your business. Your new specialists plan ahead, collaborate &amp; fully execute on their own.
                 </p>
               </div>
               <div className="flex flex-col gap-4 pt-4 sm:flex-row">
@@ -409,15 +410,15 @@ export function HomePage() {
           <div className="relative mx-auto max-w-4xl text-center">
             <span className="pointer-events-none absolute -left-10 -top-10 -z-10 select-none font-display text-[120px] leading-none text-gray-200 opacity-60">"</span>
             <h2 className="relative z-10 mb-8 font-display text-2xl font-bold leading-tight text-text-main md:text-3xl">
-              "YokeBot pulls more weight than my entire previous outsourcing team combined. It runs 24/7, doesn't complain, and costs a fraction of the price."
+              "Humans scope their vision. AdvisorBot runs point on OPS. Agent Specialists collab with each other in Team Chat and Task Manager. They create &amp; assign tasks, conduct meetings if needed, set deadlines, and accomplish goals 24/7."
             </h2>
             <div className="flex items-center justify-center gap-4">
               <div className="relative h-14 w-14 overflow-hidden rounded-full border-2 border-forest-green bg-gray-100 shadow-lg">
-                <div className="flex h-full w-full items-center justify-center bg-forest-green/10 font-display text-lg font-bold text-forest-green">MR</div>
+                <div className="flex h-full w-full items-center justify-center bg-forest-green/10 font-display text-lg font-bold text-forest-green">JW</div>
               </div>
               <div className="text-left">
-                <div className="font-display text-lg font-bold text-text-main">Marcus R.</div>
-                <div className="font-mono text-xs font-bold uppercase tracking-wide text-accent-gold-dim">FOUNDER, TECHFLOW AUTOMATION</div>
+                <div className="font-display text-lg font-bold text-text-main">James Wolf</div>
+                <div className="font-mono text-xs font-bold uppercase tracking-wide text-accent-gold-dim">FOUNDER @ YOKEBOT</div>
               </div>
             </div>
           </div>
@@ -452,6 +453,30 @@ export function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* CTA Section */}
+        <section className="relative px-6 py-24 xl:px-12 bg-forest-green">
+          <div className="mx-auto max-w-3xl text-center">
+            <h2 className="font-display text-4xl font-bold tracking-tight text-white md:text-5xl">
+              Meet Your New Team Members
+            </h2>
+            <p className="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-white/80">
+              Deploy an entire AI workforce in under 5 minutes. No credit card required — just results.
+            </p>
+            <div className="mt-8">
+              <button
+                onClick={goToLogin}
+                className="inline-flex items-center gap-2 rounded-xl bg-accent-gold px-8 py-4 text-lg font-bold text-white shadow-lg hover:bg-accent-gold-dim transition-colors"
+              >
+                Start Free
+                <span className="material-symbols-outlined text-[22px]">arrow_forward</span>
+              </button>
+            </div>
+            <p className="mt-4 text-sm text-white/60">
+              Every new hosted account at yokebot.com gets 1,250 credits free to start.
+            </p>
+          </div>
+        </section>
       </main>
 
       {/* Footer */}
@@ -472,14 +497,14 @@ export function HomePage() {
                 { label: 'API Reference', href: '/docs/api-reference' },
               ]},
               { title: 'Company', links: [
-                { label: 'Contact', href: '#contact' },
+                { label: 'Contact Us', href: '#contact' },
                 { label: 'Discord', href: 'https://discord.gg/kqfFr87KqV', external: true },
                 { label: 'X (Twitter)', href: 'https://x.com/yokebots', external: true },
                 { label: 'GitHub', href: 'https://github.com/yokebots/yokebot', external: true },
               ]},
               { title: 'Get Started', links: [
+                { label: 'Start Now Free', href: '/login' },
                 { label: 'Log In', href: '/login' },
-                { label: 'Sign Up Free', href: '/login' },
                 { label: 'Self-Host Guide', href: '/docs/self-hosting' },
               ]},
             ].map((col) => (

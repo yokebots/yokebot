@@ -10,10 +10,10 @@ YokeBot is an open-source AI agent workforce platform. Deploy a team of AI agent
 - Visual dashboard for non-developers
 - Built-in team chat + task management (Mission Control)
 - Universal credit system for all usage (LLM, media, skills)
-- Star-rated model catalog (12+ models across 7 providers)
+- Star-rated model catalog (12+ models)
 - Skills marketplace with SKILL.md format
 - Container isolation (Docker per agent)
-- Model-agnostic (Ollama, DeepInfra, OpenAI, xAI, Fireworks, Together, fal.ai)
+- Model-agnostic — bring your own keys or use YokeBot credits
 - Proactive agents that think, suggest, and initiate
 - Approval queue for high-risk agent actions
 - Billing & subscription system with Stripe integration
