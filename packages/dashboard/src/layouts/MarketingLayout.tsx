@@ -17,9 +17,9 @@ export function MarketingLayout({ children }: { children: ReactNode }) {
           </div>
           <nav className="hidden items-center gap-8 md:flex">
             <FeaturesMegaMenu />
-            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/#pricing">Pricing</a>
+            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/pricing">Pricing</a>
             <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/docs">Docs</a>
-            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/#contact">Contact Us</a>
+            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/contact">Contact</a>
           </nav>
           <div className="flex items-center gap-4">
             <button onClick={goToLogin} className="hidden text-sm font-bold text-text-main hover:text-forest-green transition-colors sm:block">
@@ -37,9 +37,9 @@ export function MarketingLayout({ children }: { children: ReactNode }) {
           <div className="md:hidden border-t border-border-subtle bg-white/95 backdrop-blur-md px-6 py-4 space-y-3">
             {[
               { label: 'Features', href: '/#features' },
-              { label: 'Pricing', href: '/#pricing' },
+              { label: 'Pricing', href: '/pricing' },
               { label: 'Docs', href: '/docs' },
-              { label: 'Contact Us', href: '/#contact' },
+              { label: 'Contact', href: '/contact' },
             ].map((item) => (
               <a key={item.label} href={item.href} onClick={() => setMobileNav(false)} className="block text-base font-medium text-text-muted hover:text-forest-green transition-colors">{item.label}</a>
             ))}
@@ -68,12 +68,12 @@ export function MarketingLayout({ children }: { children: ReactNode }) {
             {[
               { title: 'Product', links: [
                 { label: 'Features', href: '/#features' },
-                { label: 'Pricing', href: '/#pricing' },
+                { label: 'Pricing', href: '/pricing' },
                 { label: 'Documentation', href: '/docs' },
                 { label: 'API Reference', href: '/docs/api-reference' },
               ]},
               { title: 'Company', links: [
-                { label: 'Contact Us', href: '/#contact' },
+                { label: 'Contact Us', href: '/contact' },
                 { label: 'Discord', href: 'https://discord.gg/kqfFr87KqV', external: true },
                 { label: 'X (Twitter)', href: 'https://x.com/yokebots', external: true },
                 { label: 'GitHub', href: 'https://github.com/yokebots/yokebot', external: true },

@@ -28,6 +28,8 @@ import { DocsLayout } from '@/layouts/DocsLayout'
 import { DocsPage } from '@/pages/docs/DocsPage'
 import { TermsPage } from '@/pages/TermsPage'
 import { PrivacyPage } from '@/pages/PrivacyPage'
+import { PricingPage } from '@/pages/PricingPage'
+import { ContactPage } from '@/pages/ContactPage'
 import { FeaturesIndexPage } from '@/pages/features/FeaturesIndexPage'
 import { AgentsFeaturePage } from '@/pages/features/AgentsFeaturePage'
 import { TasksFeaturePage } from '@/pages/features/TasksFeaturePage'
@@ -116,6 +118,8 @@ function AppRoutes() {
       <Route path="onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
       <Route path="terms" element={<TermsPage />} />
       <Route path="privacy" element={<PrivacyPage />} />
+      <Route path="pricing" element={<PricingPage />} />
+      <Route path="contact" element={<ContactPage />} />
       <Route path="features" element={<FeaturesIndexPage />} />
       <Route path="features/agents" element={<AgentsFeaturePage />} />
       <Route path="features/tasks" element={<TasksFeaturePage />} />

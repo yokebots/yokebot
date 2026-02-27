@@ -62,9 +62,9 @@ export function HomePage() {
           </div>
           <nav className="hidden items-center gap-8 md:flex">
             <FeaturesMegaMenu />
-            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="#pricing">Pricing</a>
+            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/pricing">Pricing</a>
             <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/docs">Docs</a>
-            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="#contact">Contact Us</a>
+            <a className="text-base font-medium text-text-muted hover:text-forest-green transition-colors" href="/contact">Contact</a>
           </nav>
           <div className="flex items-center gap-4">
             <button onClick={goToLogin} className="hidden text-sm font-bold text-text-main hover:text-forest-green transition-colors sm:block">
@@ -84,9 +84,9 @@ export function HomePage() {
           <div className="md:hidden border-t border-border-subtle bg-white/95 backdrop-blur-md px-6 py-4 space-y-3">
             {[
               { label: 'Features', href: '#features' },
-              { label: 'Pricing', href: '#pricing' },
+              { label: 'Pricing', href: '/pricing' },
               { label: 'Docs', href: '/docs' },
-              { label: 'Contact Us', href: '#contact' },
+              { label: 'Contact', href: '/contact' },
             ].map((item) => (
               <a key={item.label} href={item.href} onClick={() => setMobileNav(false)} className="block text-base font-medium text-text-muted hover:text-forest-green transition-colors">{item.label}</a>
             ))}
@@ -101,11 +101,6 @@ export function HomePage() {
       <main className="relative z-10 flex-grow flex flex-col">
         {/* Hero — dark background */}
         <section className="relative px-6 pb-32 pt-20 xl:px-24 2xl:px-48 bg-gray-950">
-          {/* Dark dot grid */}
-          <div
-            className="absolute inset-0 z-0 pointer-events-none opacity-20"
-            style={{ backgroundImage: 'radial-gradient(#4B5563 1px, transparent 1px)', backgroundSize: '32px 32px' }}
-          />
           <ParticleConstellation />
           <div className="relative z-10 mx-auto grid max-w-7xl items-center gap-16 lg:grid-cols-2">
             <div className="flex max-w-2xl flex-col gap-8">
@@ -117,7 +112,7 @@ export function HomePage() {
                 <span className="font-mono text-xs font-medium uppercase tracking-wider text-green-400">24/7 Team Members</span>
               </div>
               <div className="space-y-4">
-                <h1 className="font-display text-6xl font-bold leading-[0.9] tracking-tight text-white md:text-8xl">
+                <h1 className="font-display text-6xl font-bold leading-[0.9] tracking-tight text-white md:text-7xl lg:text-8xl">
                   Build Your <br />
                   <span className="bg-gradient-to-r from-forest-green via-green-400 to-accent-gold bg-clip-text text-transparent">AI Workforce</span>
                 </h1>
@@ -492,12 +487,12 @@ export function HomePage() {
             {[
               { title: 'Product', links: [
                 { label: 'Features', href: '#features' },
-                { label: 'Pricing', href: '#pricing' },
+                { label: 'Pricing', href: '/pricing' },
                 { label: 'Documentation', href: '/docs' },
                 { label: 'API Reference', href: '/docs/api-reference' },
               ]},
               { title: 'Company', links: [
-                { label: 'Contact Us', href: '#contact' },
+                { label: 'Contact Us', href: '/contact' },
                 { label: 'Discord', href: 'https://discord.gg/kqfFr87KqV', external: true },
                 { label: 'X (Twitter)', href: 'https://x.com/yokebots', external: true },
                 { label: 'GitHub', href: 'https://github.com/yokebots/yokebot', external: true },

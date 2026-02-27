@@ -11,6 +11,7 @@ export function DashboardPage() {
   const [recentActivity, setRecentActivity] = useState<ActivityLogEntry[]>([])
   const [tasks, setTasks] = useState<engine.EngineTask[]>([])
   const [projects, setProjects] = useState<engine.Goal[]>([])
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null)
   const [stats, setStats] = useState({
     activeAgents: 0,
     totalAgents: 0,
@@ -21,13 +22,16 @@ export function DashboardPage() {
 
   const loadData = async () => {
     try {
-      const [agentList, approvalData, taskList, activity, projectList] = await Promise.all([
+      const [agentList, approvalData, taskList, activity, projectList, billing] = await Promise.all([
         engine.listAgents(),
         engine.approvalCount(),
         engine.listTasks(),
         engine.listActivityLog({ limit: 8 }),
         engine.listGoals().catch(() => [] as engine.Goal[]),
+        engine.getBillingStatus().catch(() => null),
       ])
+
+      setSubscriptionStatus(billing?.subscription?.status ?? null)
 
       setAgents(agentList)
       setTasks(taskList)
@@ -74,6 +78,23 @@ export function DashboardPage() {
         totalTasks={stats.totalTasks}
         connected={true}
       />
+
+      {/* Canceled subscription banner */}
+      {(subscriptionStatus === 'canceled' || subscriptionStatus === 'inactive') && (
+        <div className="mb-8">
+          <Link
+            to="/settings/billing"
+            className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 hover:bg-amber-100 transition-colors"
+          >
+            <span className="material-symbols-outlined text-amber-600">credit_card_off</span>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-800">Your subscription has ended</p>
+              <p className="text-xs text-amber-600">Re-subscribe to keep your agents running. Your data is safe.</p>
+            </div>
+            <span className="material-symbols-outlined text-amber-600">arrow_forward</span>
+          </Link>
+        </div>
+      )}
 
       {/* Two-column grid: Agents + Tasks */}
       <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -193,7 +214,7 @@ export function DashboardPage() {
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-forest-green" />
                 <p className="flex-1 truncate text-sm text-text-main">{entry.description}</p>
                 <span className="shrink-0 text-xs text-text-muted">
-                  {new Date(entry.createdAt + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
             ))}
