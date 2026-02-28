@@ -170,6 +170,7 @@ export function OnboardingPage() {
   const narrationWordsRef = useRef<string[]>([]) // flat word list for timing
   const narrationDurationRef = useRef(0)
   const prefetchedNarrationRef = useRef<{ text: string; audioBase64: string; audioDurationMs: number } | null>(null)
+  const step1PlayedRef = useRef(false)
 
   // Step 4 state
   const [deployedAgents, setDeployedAgents] = useState<engine.EngineAgent[]>([])
@@ -338,13 +339,17 @@ export function OnboardingPage() {
     if (prefetchedNarrationRef.current) {
       const { text, audioBase64, audioDurationMs } = prefetchedNarrationRef.current
       prefetchedNarrationRef.current = null
+      step1PlayedRef.current = true
       playNarration(text, audioBase64, audioDurationMs)
     }
+    // If prefetch isn't ready yet, the fallback useEffect below will catch it
   }, [playNarration])
 
-  // For steps 2-4: fetch and play narration after step change
+  // Fetch and play narration for any step (including step 1 as fallback if prefetch missed)
   useEffect(() => {
-    if (!activeTeam || !audioUnlocked || step === 1) return
+    if (!activeTeam || !audioUnlocked) return
+    // For step 1: skip if prefetch already played it via handleAudioUnlock
+    if (step === 1 && step1PlayedRef.current) return
     let cancelled = false
     cleanupNarration()
     setNarrationScreens([])
@@ -355,6 +360,7 @@ export function OnboardingPage() {
 
     engine.getAdvisorNarration(activeTeam.id, step, firstName).then((data) => {
       if (cancelled) return
+      if (step === 1) step1PlayedRef.current = true
       playNarration(data.text, data.audioBase64, data.audioDurationMs)
     }).catch((err) => {
       console.error('[onboarding] Narration fetch failed for step', step, ':', err)
