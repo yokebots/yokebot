@@ -772,6 +772,12 @@ export const scanWebsite = (teamId: string, url: string) =>
     method: 'POST', body: JSON.stringify({ url }),
   })
 
+export const getAdvisorNarration = (teamId: string, step: number, firstName: string) =>
+  request<{ text: string; audioBase64: string; audioDurationMs: number }>(
+    `/api/teams/${teamId}/advisor-narration`,
+    { method: 'POST', body: JSON.stringify({ step, firstName }) },
+  )
+
 export const setupAdvisor = (teamId: string) =>
   request<{ agentId: string; alreadyExists: boolean }>(`/api/teams/${teamId}/setup-advisor`, {
     method: 'POST',
@@ -1012,3 +1018,19 @@ export interface MentionCompletionData {
 
 export const getMentionCompletions = () =>
   request<MentionCompletionData>('/api/chat/mentions')
+
+// ===== Chat Search =====
+
+export interface ChatSearchResult {
+  id: number
+  channelId: string
+  channelName: string
+  channelType: 'dm' | 'group' | 'task_thread'
+  senderType: 'human' | 'agent' | 'system'
+  senderId: string
+  content: string
+  createdAt: string
+}
+
+export const searchChatMessages = (q: string, limit = 20) =>
+  request<ChatSearchResult[]>(`/api/chat/search?q=${encodeURIComponent(q)}&limit=${limit}`)

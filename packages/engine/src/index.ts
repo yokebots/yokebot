@@ -18,7 +18,7 @@ import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
-import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions } from './chat.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages } from './chat.ts'
 import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
@@ -37,6 +37,7 @@ import { listServices } from './services.ts'
 import { listTemplates, getTemplate } from './templates.ts'
 import { listMcpServers, addMcpServer, removeMcpServer, connectMcpServer } from './mcp-client.ts'
 import { addCredits } from './billing.ts'
+import { generateSpeech } from './cloud/tts.ts'
 
 const PORT = Number(process.env.PORT ?? process.env.YOKEBOT_PORT ?? 3001)
 const DATA_DIR = process.env.YOKEBOT_DATA_DIR ?? join(homedir(), '.yokebot')
@@ -477,6 +478,17 @@ async function main() {
       users: members.map((m) => ({ userId: m.userId, email: m.email })),
       documents: documents.map((d) => ({ id: d.id, title: d.title, fileType: d.fileType })),
     })
+  })
+
+  // ===== Chat Search =====
+
+  app.get('/api/chat/search', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const q = (req.query.q as string ?? '').trim()
+    if (!q || q.length < 2) return res.json([])
+    const limit = Math.min(Number(req.query.limit) || 20, 50)
+    const results = await searchMessages(db, teamId, q, limit)
+    res.json(results)
   })
 
   // ===== Workspace =====
@@ -1241,6 +1253,71 @@ ${truncated}`,
     } catch (err) {
       console.error('[scan] Website scan error:', (err as Error).message)
       res.json({ companyName: null, industry: null, businessSummary: null, targetMarket: null })
+    }
+  })
+
+  // ===== AdvisorBot Narration (onboarding voice guidance) =====
+
+  const ADVISOR_NARRATION_SCRIPTS: Record<number, string> = {
+    1: `Hey {firstName}! Welcome to YokeBot. I'm AdvisorBot, your strategic advisor and personal guide to building your AI workforce. Here's how this works. First, tell me a bit about your business so I can understand your goals. Then I'll recommend the perfect team of AI agents, tailored just for you. Go ahead and fill in your details below, and I'll take it from here.`,
+    2: `Nice work, {firstName}! Now let me give you a quick tour of what you're working with. YokeBot gives you a full team of AI agents, each one specialized for a different job. You'll manage them from Mission Control, where you can assign tasks, review their work, and approve important actions. And the best part? You can chat with any agent, just like messaging a coworker. They collaborate with each other too. Click through these slides and I'll meet you on the other side.`,
+    3: `Alright {firstName}, this is where it gets exciting. Based on your business profile, I've got some agent recommendations that I think will be perfect for you. Take a look at what I'm suggesting, and when you're ready, just hit Deploy and I'll set everything up. Your agents will be online and ready to work in seconds. Let's build your dream team!`,
+    4: `And just like that, you're all set, {firstName}! Your AI workforce is deployed and ready to go. You can find them in the Agents tab, chat with them anytime, or assign them tasks from the dashboard. If you ever need help, I'm always here. Just open a chat with me and I'll guide you through anything. Welcome to the future of work. Let's make some magic happen!`,
+  }
+
+  const ADVISOR_VOICE_ID = '701a96e1-7fdd-4a6c-a81e-a4a450403599' // Rowan - Team Leader
+
+  app.post('/api/teams/:id/advisor-narration', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Only available in hosted mode' })
+    }
+    const team = await getTeam(db, req.params.id)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
+
+    const { step, firstName } = req.body as { step: number; firstName: string }
+    if (!step || step < 1 || step > 4 || !firstName) {
+      return res.status(400).json({ error: 'step (1-4) and firstName are required' })
+    }
+
+    const template = ADVISOR_NARRATION_SCRIPTS[step]
+    const text = template.replace(/\{firstName\}/g, firstName)
+
+    // Persist narration as a chat message in AdvisorBot's DM thread (searchable history)
+    const persistNarration = async () => {
+      try {
+        const agents = await listAgents(db, req.params.id)
+        const advisor = agents.find((a) => a.templateId === 'advisor-bot')
+        if (advisor) {
+          const dmChannel = await getDmChannel(db, advisor.id, req.params.id)
+          await sendMessage(db, dmChannel.id, 'agent', advisor.id, text, undefined, req.params.id)
+        }
+      } catch (e) {
+        console.error('[narration] Failed to persist chat message:', (e as Error).message)
+      }
+    }
+
+    try {
+      const tts = await generateSpeech({
+        voiceId: ADVISOR_VOICE_ID,
+        text,
+        speed: 'normal',
+        emotion: ['positivity:high', 'curiosity'],
+      })
+      // Fire-and-forget — don't block the response on DB write
+      persistNarration()
+      res.json({
+        text,
+        audioBase64: tts.audioBase64,
+        audioDurationMs: tts.durationMs,
+      })
+    } catch (err) {
+      console.error('[narration] TTS error:', (err as Error).message)
+      persistNarration()
+      // Return text-only fallback so onboarding isn't blocked
+      res.json({ text, audioBase64: '', audioDurationMs: 0 })
     }
   })
 

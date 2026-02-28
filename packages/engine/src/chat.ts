@@ -98,6 +98,42 @@ export async function getChannelMessages(db: Db, channelId: string, limit = 50, 
   return rows.map(rowToMessage).reverse()
 }
 
+// ---- Search ----
+
+export interface ChatSearchResult {
+  id: number
+  channelId: string
+  channelName: string
+  channelType: ChannelType
+  senderType: SenderType
+  senderId: string
+  content: string
+  createdAt: string
+}
+
+export async function searchMessages(db: Db, teamId: string, query: string, limit = 20): Promise<ChatSearchResult[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT m.id, m.channel_id, c.name AS channel_name, c.type AS channel_type,
+            m.sender_type, m.sender_id, m.content, m.created_at
+     FROM chat_messages m
+     JOIN chat_channels c ON c.id = m.channel_id
+     WHERE m.team_id = $1 AND m.content ILIKE $2
+     ORDER BY m.created_at DESC
+     LIMIT $3`,
+    [teamId, `%${query}%`, limit],
+  )
+  return rows.map((r) => ({
+    id: r.id as number,
+    channelId: r.channel_id as string,
+    channelName: r.channel_name as string,
+    channelType: r.channel_type as ChannelType,
+    senderType: r.sender_type as SenderType,
+    senderId: r.sender_id as string,
+    content: r.content as string,
+    createdAt: r.created_at as string,
+  }))
+}
+
 // ---- Mention Processing ----
 
 const MENTION_REGEX = /@\[([^\]]+)\]\((agent|user|file):([^)]+)\)/g

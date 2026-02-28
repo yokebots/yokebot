@@ -856,9 +856,10 @@ registerHandler('eventbrite_manage', async (args, creds) => {
 // ============================================================
 
 import { listTemplates, getTemplate } from './templates.ts'
-import { createAgent, listAgents, type AgentConfig } from './agent.ts'
+import { createAgent, listAgents, setAgentStatus, type AgentConfig } from './agent.ts'
 import { loadSkillsFromDir, installSkill, getAgentSkills } from './skills.ts'
 import { resolveModelConfig, getAvailableModels } from './model.ts'
+import { scheduleAgent } from './scheduler.ts'
 import { listCredentials } from './credentials.ts'
 
 const ADVISOR_HOSTED_GUARD = 'This feature requires YokeBot Cloud. AdvisorBot and its tools are not available in self-hosted mode.'
@@ -935,6 +936,10 @@ registerHandler('deploy_agent', async (args, _creds, ctx) => {
     }
   }
 
+  // Auto-start the agent so it's immediately running
+  await setAgentStatus(ctx.db, agent.id, 'running')
+  scheduleAgent(ctx.db, { ...agent, status: 'running' })
+
   return `Agent deployed successfully!\n\n` +
     `Name: ${agent.name}\n` +
     `ID: ${agent.id}\n` +
@@ -943,7 +948,7 @@ registerHandler('deploy_agent', async (args, _creds, ctx) => {
     `Department: ${template.department}\n` +
     `Skills installed: ${installed.join(', ') || 'none'}` +
     (failed.length > 0 ? `\nSkills failed to install: ${failed.join(', ')}` : '') +
-    `\n\nThe agent is now ready. It will start working on its next heartbeat cycle.`
+    `\n\nThe agent is now running and ready to work!`
 })
 
 // ---- List My Agents ----

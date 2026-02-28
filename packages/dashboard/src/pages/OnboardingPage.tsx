@@ -154,10 +154,79 @@ export function OnboardingPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
 
+  // AdvisorBot narration state
+  const [narrationText, setNarrationText] = useState('')
+  const [narrationPlaying, setNarrationPlaying] = useState(false)
+  const [revealedWords, setRevealedWords] = useState(0)
+  const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
+  const narrationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Step 4 state
   const [deployedAgents, setDeployedAgents] = useState<engine.EngineAgent[]>([])
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0] ?? 'there'
+
+  // AdvisorBot narration — fetch and play on each step change
+  useEffect(() => {
+    if (!activeTeam) {
+      console.warn('[onboarding] Narration skipped: activeTeam not yet available (step', step, ')')
+      return
+    }
+    let cancelled = false
+
+    // Clean up previous narration
+    if (narrationAudioRef.current) {
+      narrationAudioRef.current.pause()
+      narrationAudioRef.current = null
+    }
+    if (narrationTimerRef.current) {
+      clearInterval(narrationTimerRef.current)
+      narrationTimerRef.current = null
+    }
+    setNarrationText('')
+    setRevealedWords(0)
+    setNarrationPlaying(false)
+
+    engine.getAdvisorNarration(activeTeam.id, step, firstName).then(({ text, audioBase64, audioDurationMs }) => {
+      if (cancelled) return
+      setNarrationText(text)
+      const words = text.split(/\s+/)
+
+      if (audioBase64 && audioEnabled) {
+        const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
+        narrationAudioRef.current = audio
+        setNarrationPlaying(true)
+
+        // Animate captions word-by-word synced to audio duration
+        const msPerWord = audioDurationMs / words.length
+        let i = 0
+        narrationTimerRef.current = setInterval(() => {
+          if (++i <= words.length) setRevealedWords(i)
+          else { clearInterval(narrationTimerRef.current!); narrationTimerRef.current = null }
+        }, msPerWord)
+
+        audio.onended = () => {
+          setNarrationPlaying(false)
+          setRevealedWords(words.length)
+          if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
+        }
+        audio.play().catch(() => {
+          setNarrationPlaying(false)
+          setRevealedWords(words.length)
+        })
+      } else {
+        // No audio — reveal all text immediately
+        setRevealedWords(words.length)
+      }
+    }).catch((err) => {
+      console.error('[onboarding] Narration fetch failed for step', step, ':', err)
+    })
+
+    return () => {
+      cancelled = true
+      if (narrationTimerRef.current) clearInterval(narrationTimerRef.current)
+    }
+  }, [step, activeTeam?.id])
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -547,7 +616,55 @@ export function OnboardingPage() {
       </header>
 
       {/* Content */}
-      <main className="flex flex-1 justify-center overflow-y-auto p-6">
+      <main className="flex flex-1 flex-col items-center overflow-y-auto p-6">
+        {/* AdvisorBot Narration Banner */}
+        {narrationText && (
+          <div className="mb-6 w-full max-w-2xl">
+            <div className="flex items-start gap-4 rounded-2xl bg-gray-900 px-5 py-4 shadow-lg">
+              {/* Avatar */}
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20">
+                <span className="material-symbols-outlined text-[22px] text-amber-400">lightbulb</span>
+              </div>
+              {/* Caption text */}
+              <div className="min-w-0 flex-1">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-amber-400">AdvisorBot</p>
+                <p className="text-sm leading-relaxed">
+                  {narrationText.split(/\s+/).map((word, i) => (
+                    <span
+                      key={i}
+                      className={`transition-colors duration-200 ${
+                        i < revealedWords ? 'text-white' : 'text-white/15'
+                      }`}
+                    >
+                      {i > 0 ? ' ' : ''}{word}
+                    </span>
+                  ))}
+                </p>
+              </div>
+              {/* Speaker icon + mute */}
+              <div className="flex shrink-0 items-center gap-2">
+                {narrationPlaying && (
+                  <span className="material-symbols-outlined animate-pulse text-[18px] text-amber-400">graphic_eq</span>
+                )}
+                <button
+                  onClick={() => {
+                    setAudioEnabled((prev) => {
+                      if (prev && narrationAudioRef.current) narrationAudioRef.current.pause()
+                      return !prev
+                    })
+                  }}
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                  title={audioEnabled ? 'Mute' : 'Unmute'}
+                >
+                  <span className="material-symbols-outlined text-[16px] text-white/70">
+                    {audioEnabled ? 'volume_up' : 'volume_off'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Step 1: Welcome & Business Context */}
         {step === 1 && (
           <div className="w-full max-w-2xl">
