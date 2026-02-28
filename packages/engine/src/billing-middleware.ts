@@ -8,7 +8,7 @@
 
 import type { Request, Response, NextFunction } from 'express'
 import type { Db } from './db/types.ts'
-import { getSubscription, isSubscriptionActive, type TeamSubscription } from './billing.ts'
+import { getSubscription, isTeamActive, getCreditBalance, type TeamSubscription } from './billing.ts'
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
@@ -57,8 +57,9 @@ export function createBillingMiddleware(db: Db) {
     if (!teamId) { next(); return }
 
     const sub = await getSubscription(db, teamId)
+    const creditBalance = await getCreditBalance(db, teamId)
 
-    if (!isSubscriptionActive(sub)) {
+    if (!isTeamActive(sub, creditBalance)) {
       res.status(402).json({
         error: 'Active subscription required',
         code: 'SUBSCRIPTION_REQUIRED',

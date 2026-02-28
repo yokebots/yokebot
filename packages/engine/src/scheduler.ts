@@ -17,7 +17,7 @@ import { resolveModelConfig } from './model.ts'
 import { getDmChannel, sendMessage } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
-import { getSubscription, isSubscriptionActive, getCreditBalance, getModelCreditCost } from './billing.ts'
+import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost } from './billing.ts'
 // import { listTasks } from './tasks.ts' // Reserved for future staleness detection
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
@@ -192,11 +192,12 @@ export function unscheduleAgent(agentId: string): void {
  * Single heartbeat cycle for an agent.
  */
 async function heartbeat(db: Db, agent: Agent): Promise<void> {
-  // In hosted mode, skip heartbeat if team has no active subscription
+  // In hosted mode, skip heartbeat if team has no active subscription and no credits
   if (HOSTED_MODE) {
     const sub = await getSubscription(db, agent.teamId)
-    if (!sub || !isSubscriptionActive(sub)) {
-      console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — no active subscription`)
+    const creditBalance = await getCreditBalance(db, agent.teamId)
+    if (!isTeamActive(sub, creditBalance)) {
+      console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — no active subscription or credits`)
       return
     }
   }

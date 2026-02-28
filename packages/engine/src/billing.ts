@@ -121,6 +121,11 @@ export function isSubscriptionActive(sub: TeamSubscription | null): boolean {
   return sub?.status === 'active' || sub?.status === 'past_due'
 }
 
+/** Team can use the platform if they have an active subscription OR have credits. */
+export function isTeamActive(sub: TeamSubscription | null, creditBalance: number): boolean {
+  return isSubscriptionActive(sub) || creditBalance > 0
+}
+
 // ---- Credits ----
 
 export async function getCreditBalance(db: Db, teamId: string): Promise<number> {
