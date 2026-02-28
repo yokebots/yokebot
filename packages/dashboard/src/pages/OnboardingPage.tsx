@@ -154,6 +154,10 @@ export function OnboardingPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
 
+  // Audio unlock: browsers block autoplay without a user gesture.
+  // We show a quick splash screen; clicking it unlocks audio permanently.
+  const [audioUnlocked, setAudioUnlocked] = useState(false)
+
   // AdvisorBot narration state — line-by-line captions like YouTube shorts
   const [narrationLines, setNarrationLines] = useState<string[]>([])
   const [currentLine, setCurrentLine] = useState(0)
@@ -161,6 +165,8 @@ export function OnboardingPage() {
   const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
   const narrationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const narrationAudioUrlRef = useRef<string | null>(null)
+  // Prefetch: store fetched narration data so it plays instantly after unlock
+  const prefetchedNarrationRef = useRef<{ text: string; audioBase64: string; audioDurationMs: number } | null>(null)
 
   // Step 4 state
   const [deployedAgents, setDeployedAgents] = useState<engine.EngineAgent[]>([])
@@ -176,7 +182,6 @@ export function OnboardingPage() {
       if (words.length <= 12) {
         lines.push(sentence)
       } else {
-        // Break long sentences at ~8 word boundaries
         for (let i = 0; i < words.length; i += 8) {
           lines.push(words.slice(i, i + 8).join(' '))
         }
@@ -185,82 +190,99 @@ export function OnboardingPage() {
     return lines
   }
 
-  // AdvisorBot narration — fetch and autoplay on each step change
-  useEffect(() => {
-    if (!activeTeam) {
-      console.warn('[onboarding] Narration skipped: activeTeam not yet available (step', step, ')')
-      return
+  // Play narration audio with line-by-line caption sync
+  const playNarration = useCallback((text: string, audioBase64: string, audioDurationMs: number) => {
+    // Clean up previous
+    if (narrationAudioRef.current) { narrationAudioRef.current.pause(); narrationAudioRef.current = null }
+    if (narrationAudioUrlRef.current) { URL.revokeObjectURL(narrationAudioUrlRef.current); narrationAudioUrlRef.current = null }
+    if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
+
+    const lines = splitIntoLines(text)
+    setNarrationLines(lines)
+    setCurrentLine(0)
+
+    if (audioBase64) {
+      const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))
+      const blob = new Blob([bytes], { type: 'audio/mpeg' })
+      const url = URL.createObjectURL(blob)
+      narrationAudioUrlRef.current = url
+
+      const audio = new Audio(url)
+      narrationAudioRef.current = audio
+      audio.muted = !audioEnabled
+
+      // Advance lines evenly across audio duration
+      const msPerLine = audioDurationMs / lines.length
+      let lineIdx = 0
+      narrationTimerRef.current = setInterval(() => {
+        lineIdx++
+        if (lineIdx < lines.length) setCurrentLine(lineIdx)
+        else { clearInterval(narrationTimerRef.current!); narrationTimerRef.current = null }
+      }, msPerLine)
+
+      setNarrationPlaying(true)
+      audio.onended = () => {
+        setNarrationPlaying(false)
+        setCurrentLine(lines.length - 1)
+        if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
+      }
+      audio.play().catch(() => {
+        // If play still blocked somehow, show all captions
+        setNarrationPlaying(false)
+        setCurrentLine(lines.length - 1)
+      })
+    } else {
+      setCurrentLine(lines.length - 1)
     }
+  }, [audioEnabled])
+
+  // Prefetch step 1 narration while splash is showing
+  useEffect(() => {
+    if (!activeTeam || audioUnlocked) return
+    engine.getAdvisorNarration(activeTeam.id, 1, firstName).then((data) => {
+      prefetchedNarrationRef.current = data
+    }).catch((err) => {
+      console.error('[onboarding] Narration prefetch failed:', err)
+    })
+  }, [activeTeam?.id, audioUnlocked, firstName])
+
+  // User clicks "Let's Go" → unlock audio and play prefetched narration instantly
+  const handleAudioUnlock = useCallback(() => {
+    // Create + resume AudioContext to unlock audio playback permanently
+    const ctx = new AudioContext()
+    if (ctx.state === 'suspended') ctx.resume()
+    setAudioUnlocked(true)
+
+    // Play the prefetched step 1 narration immediately
+    if (prefetchedNarrationRef.current) {
+      const { text, audioBase64, audioDurationMs } = prefetchedNarrationRef.current
+      prefetchedNarrationRef.current = null
+      playNarration(text, audioBase64, audioDurationMs)
+    }
+  }, [playNarration])
+
+  // For steps 2-4: fetch and play narration after step change (audio already unlocked)
+  useEffect(() => {
+    if (!activeTeam || !audioUnlocked || step === 1) return
     let cancelled = false
 
-    // Clean up previous narration
-    if (narrationAudioRef.current) {
-      narrationAudioRef.current.pause()
-      narrationAudioRef.current = null
-    }
-    if (narrationAudioUrlRef.current) {
-      URL.revokeObjectURL(narrationAudioUrlRef.current)
-      narrationAudioUrlRef.current = null
-    }
-    if (narrationTimerRef.current) {
-      clearInterval(narrationTimerRef.current)
-      narrationTimerRef.current = null
-    }
+    // Clean up
+    if (narrationAudioRef.current) { narrationAudioRef.current.pause(); narrationAudioRef.current = null }
+    if (narrationAudioUrlRef.current) { URL.revokeObjectURL(narrationAudioUrlRef.current); narrationAudioUrlRef.current = null }
+    if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
     setNarrationLines([])
     setCurrentLine(0)
     setNarrationPlaying(false)
 
-    engine.getAdvisorNarration(activeTeam.id, step, firstName).then(({ text, audioBase64, audioDurationMs }) => {
+    engine.getAdvisorNarration(activeTeam.id, step, firstName).then((data) => {
       if (cancelled) return
-      const lines = splitIntoLines(text)
-      setNarrationLines(lines)
-      setCurrentLine(0)
-
-      if (audioBase64) {
-        // Convert base64 to blob URL for better browser handling
-        const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))
-        const blob = new Blob([bytes], { type: 'audio/mpeg' })
-        const url = URL.createObjectURL(blob)
-        narrationAudioUrlRef.current = url
-
-        const audio = new Audio(url)
-        narrationAudioRef.current = audio
-        audio.muted = !audioEnabled
-
-        // Advance lines evenly across audio duration
-        const msPerLine = audioDurationMs / lines.length
-        let lineIdx = 0
-        narrationTimerRef.current = setInterval(() => {
-          lineIdx++
-          if (lineIdx < lines.length) setCurrentLine(lineIdx)
-          else { clearInterval(narrationTimerRef.current!); narrationTimerRef.current = null }
-        }, msPerLine)
-
-        setNarrationPlaying(true)
-        audio.onended = () => {
-          setNarrationPlaying(false)
-          setCurrentLine(lines.length - 1)
-          if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
-        }
-        // Autoplay immediately — no user interaction required
-        audio.play().catch(() => {
-          // Browser blocked autoplay — still show captions
-          setNarrationPlaying(false)
-          setCurrentLine(lines.length - 1)
-        })
-      } else {
-        // No audio — show all lines immediately
-        setCurrentLine(lines.length - 1)
-      }
+      playNarration(data.text, data.audioBase64, data.audioDurationMs)
     }).catch((err) => {
       console.error('[onboarding] Narration fetch failed for step', step, ':', err)
     })
 
-    return () => {
-      cancelled = true
-      if (narrationTimerRef.current) clearInterval(narrationTimerRef.current)
-    }
-  }, [step, activeTeam?.id])
+    return () => { cancelled = true; if (narrationTimerRef.current) clearInterval(narrationTimerRef.current) }
+  }, [step, activeTeam?.id, audioUnlocked, firstName, playNarration])
 
   // Sync mute/unmute with current audio element
   useEffect(() => {
@@ -626,6 +648,40 @@ export function OnboardingPage() {
   // Helper to update a single scan field
   const updateField = (key: keyof ScanFields, value: string) => {
     setScanFields((prev) => ({ ...prev, [key]: value }))
+  }
+
+  // Audio unlock splash — shown before onboarding starts
+  if (!audioUnlocked) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-gray-900">
+        <div className="flex flex-col items-center gap-8 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-amber-500/20">
+            <span className="material-symbols-outlined text-[44px] text-amber-400">lightbulb</span>
+          </div>
+          <div>
+            <h1 className="font-display text-3xl font-bold text-white">
+              Hey {firstName}!
+            </h1>
+            <p className="mt-3 text-lg text-gray-400">
+              Your AI advisor is ready to walk you through setup.
+            </p>
+          </div>
+          <button
+            onClick={handleAudioUnlock}
+            className="flex items-center gap-2 rounded-xl bg-forest-green px-8 py-4 text-lg font-semibold text-white shadow-lg hover:bg-forest-green-hover transition-colors"
+          >
+            <span className="material-symbols-outlined text-[22px]">play_circle</span>
+            Let's Go
+          </button>
+          <button
+            onClick={() => { setAudioUnlocked(true); setAudioEnabled(false) }}
+            className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            Continue without audio
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
