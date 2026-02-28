@@ -158,14 +158,17 @@ export function OnboardingPage() {
   // We show a quick splash screen; clicking it unlocks audio permanently.
   const [audioUnlocked, setAudioUnlocked] = useState(false)
 
-  // AdvisorBot narration state — line-by-line captions like YouTube shorts
-  const [narrationLines, setNarrationLines] = useState<string[]>([])
-  const [currentLine, setCurrentLine] = useState(0)
+  // Narration state: screens of text with word-level highlighting
+  const [narrationScreens, setNarrationScreens] = useState<string[][]>([]) // each screen = array of words
+  const [currentScreen, setCurrentScreen] = useState(0)
+  const [highlightedWord, setHighlightedWord] = useState(0) // global word index across all screens
   const [narrationPlaying, setNarrationPlaying] = useState(false)
+  const [narrationPaused, setNarrationPaused] = useState(false)
   const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
   const narrationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const narrationAudioUrlRef = useRef<string | null>(null)
-  // Prefetch: store fetched narration data so it plays instantly after unlock
+  const narrationWordsRef = useRef<string[]>([]) // flat word list for timing
+  const narrationDurationRef = useRef(0)
   const prefetchedNarrationRef = useRef<{ text: string; audioBase64: string; audioDurationMs: number } | null>(null)
 
   // Step 4 state
@@ -173,33 +176,76 @@ export function OnboardingPage() {
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0] ?? 'there'
 
-  // Split narration text into short lines (~8-12 words each)
-  const splitIntoLines = (text: string): string[] => {
+  // Split text into screens (~2-3 sentences, ~20-30 words each)
+  const buildScreens = (text: string): string[][] => {
     const sentences = text.split(/(?<=[.!?])\s+/)
-    const lines: string[] = []
+    const screens: string[][] = []
+    let currentWords: string[] = []
     for (const sentence of sentences) {
       const words = sentence.split(/\s+/)
-      if (words.length <= 12) {
-        lines.push(sentence)
-      } else {
-        for (let i = 0; i < words.length; i += 8) {
-          lines.push(words.slice(i, i + 8).join(' '))
-        }
+      currentWords.push(...words)
+      // Start a new screen every 2-3 sentences or ~25 words
+      if (currentWords.length >= 20) {
+        screens.push([...currentWords])
+        currentWords = []
       }
     }
-    return lines
+    if (currentWords.length > 0) screens.push(currentWords)
+    return screens
   }
 
-  // Play narration audio with line-by-line caption sync
-  const playNarration = useCallback((text: string, audioBase64: string, audioDurationMs: number) => {
-    // Clean up previous
+  // Get the global word index where a given screen starts
+  const screenStartWord = (screenIdx: number): number => {
+    let count = 0
+    for (let i = 0; i < screenIdx; i++) count += (narrationScreens[i]?.length ?? 0)
+    return count
+  }
+
+  // Clean up narration resources
+  const cleanupNarration = () => {
     if (narrationAudioRef.current) { narrationAudioRef.current.pause(); narrationAudioRef.current = null }
     if (narrationAudioUrlRef.current) { URL.revokeObjectURL(narrationAudioUrlRef.current); narrationAudioUrlRef.current = null }
     if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
+  }
 
-    const lines = splitIntoLines(text)
-    setNarrationLines(lines)
-    setCurrentLine(0)
+  // Start word-level highlight timer from a given word index
+  const startWordTimer = (fromWord: number, totalWords: number, durationMs: number) => {
+    if (narrationTimerRef.current) clearInterval(narrationTimerRef.current)
+    const msPerWord = durationMs / totalWords
+    let wordIdx = fromWord
+    setHighlightedWord(wordIdx)
+
+    narrationTimerRef.current = setInterval(() => {
+      wordIdx++
+      if (wordIdx < totalWords) {
+        setHighlightedWord(wordIdx)
+        // Auto-advance screen when highlighted word enters next screen
+        setCurrentScreen((prev) => {
+          let count = 0
+          for (let s = 0; s < narrationScreens.length; s++) {
+            count += narrationScreens[s].length
+            if (wordIdx < count) return s
+          }
+          return prev
+        })
+      } else {
+        clearInterval(narrationTimerRef.current!)
+        narrationTimerRef.current = null
+      }
+    }, msPerWord)
+  }
+
+  // Play narration from data
+  const playNarration = useCallback((text: string, audioBase64: string, audioDurationMs: number) => {
+    cleanupNarration()
+    const screens = buildScreens(text)
+    const allWords = screens.flat()
+    narrationWordsRef.current = allWords
+    narrationDurationRef.current = audioDurationMs
+    setNarrationScreens(screens)
+    setCurrentScreen(0)
+    setHighlightedWord(0)
+    setNarrationPaused(false)
 
     if (audioBase64) {
       const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))
@@ -211,30 +257,68 @@ export function OnboardingPage() {
       narrationAudioRef.current = audio
       audio.muted = !audioEnabled
 
-      // Advance lines evenly across audio duration
-      const msPerLine = audioDurationMs / lines.length
-      let lineIdx = 0
-      narrationTimerRef.current = setInterval(() => {
-        lineIdx++
-        if (lineIdx < lines.length) setCurrentLine(lineIdx)
-        else { clearInterval(narrationTimerRef.current!); narrationTimerRef.current = null }
-      }, msPerLine)
+      startWordTimer(0, allWords.length, audioDurationMs)
 
       setNarrationPlaying(true)
       audio.onended = () => {
         setNarrationPlaying(false)
-        setCurrentLine(lines.length - 1)
+        setHighlightedWord(allWords.length - 1)
+        setCurrentScreen(screens.length - 1)
         if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
       }
       audio.play().catch(() => {
-        // If play still blocked somehow, show all captions
         setNarrationPlaying(false)
-        setCurrentLine(lines.length - 1)
+        setHighlightedWord(allWords.length - 1)
+        setCurrentScreen(screens.length - 1)
+        if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
       })
     } else {
-      setCurrentLine(lines.length - 1)
+      setHighlightedWord(allWords.length - 1)
+      setCurrentScreen(screens.length - 1)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioEnabled])
+
+  // Pause / resume narration
+  const toggleNarrationPause = useCallback(() => {
+    const audio = narrationAudioRef.current
+    if (!audio) return
+    if (narrationPaused) {
+      audio.play()
+      // Restart word timer from current position
+      const totalWords = narrationWordsRef.current.length
+      const fraction = audio.currentTime / audio.duration
+      const fromWord = Math.floor(fraction * totalWords)
+      const remainingMs = narrationDurationRef.current * (1 - fraction)
+      startWordTimer(fromWord, totalWords, narrationDurationRef.current)
+      setNarrationPaused(false)
+    } else {
+      audio.pause()
+      if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
+      setNarrationPaused(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrationPaused])
+
+  // Navigate to a specific screen (prev/next arrows)
+  const goToScreen = useCallback((screenIdx: number) => {
+    if (screenIdx < 0 || screenIdx >= narrationScreens.length) return
+    setCurrentScreen(screenIdx)
+    const wordIdx = screenStartWord(screenIdx)
+    setHighlightedWord(wordIdx)
+
+    // Seek audio to match
+    const audio = narrationAudioRef.current
+    if (audio && audio.duration) {
+      const totalWords = narrationWordsRef.current.length
+      const fraction = wordIdx / totalWords
+      audio.currentTime = fraction * audio.duration
+      if (!narrationPaused) {
+        startWordTimer(wordIdx, totalWords, narrationDurationRef.current)
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrationScreens, narrationPaused])
 
   // Prefetch step 1 narration while splash is showing
   useEffect(() => {
@@ -248,12 +332,10 @@ export function OnboardingPage() {
 
   // User clicks "Let's Go" → unlock audio and play prefetched narration instantly
   const handleAudioUnlock = useCallback(() => {
-    // Create + resume AudioContext to unlock audio playback permanently
     const ctx = new AudioContext()
     if (ctx.state === 'suspended') ctx.resume()
     setAudioUnlocked(true)
 
-    // Play the prefetched step 1 narration immediately
     if (prefetchedNarrationRef.current) {
       const { text, audioBase64, audioDurationMs } = prefetchedNarrationRef.current
       prefetchedNarrationRef.current = null
@@ -261,18 +343,16 @@ export function OnboardingPage() {
     }
   }, [playNarration])
 
-  // For steps 2-4: fetch and play narration after step change (audio already unlocked)
+  // For steps 2-4: fetch and play narration after step change
   useEffect(() => {
     if (!activeTeam || !audioUnlocked || step === 1) return
     let cancelled = false
-
-    // Clean up
-    if (narrationAudioRef.current) { narrationAudioRef.current.pause(); narrationAudioRef.current = null }
-    if (narrationAudioUrlRef.current) { URL.revokeObjectURL(narrationAudioUrlRef.current); narrationAudioUrlRef.current = null }
-    if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
-    setNarrationLines([])
-    setCurrentLine(0)
+    cleanupNarration()
+    setNarrationScreens([])
+    setCurrentScreen(0)
+    setHighlightedWord(0)
     setNarrationPlaying(false)
+    setNarrationPaused(false)
 
     engine.getAdvisorNarration(activeTeam.id, step, firstName).then((data) => {
       if (cancelled) return
@@ -714,36 +794,95 @@ export function OnboardingPage() {
 
       {/* Content */}
       <main className="flex flex-1 flex-col items-center overflow-y-auto p-6">
-        {/* AdvisorBot Narration — line-by-line captions */}
-        {narrationLines.length > 0 && (
+        {/* AdvisorBot Narration — screen-based captions with word highlighting */}
+        {narrationScreens.length > 0 && (
           <div className="mb-6 w-full max-w-2xl">
-            <div className="flex items-center gap-4 rounded-2xl bg-gray-900 px-5 py-4 shadow-lg">
-              {/* Avatar */}
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20">
-                <span className="material-symbols-outlined text-[22px] text-amber-400">lightbulb</span>
+            <div className="rounded-2xl bg-gray-900 shadow-lg">
+              {/* Header row */}
+              <div className="flex items-center gap-3 px-5 pt-4 pb-2">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500/20">
+                  <span className="material-symbols-outlined text-[20px] text-amber-400">lightbulb</span>
+                </div>
+                <p className="flex-1 text-xs font-semibold uppercase tracking-wider text-amber-400">AdvisorBot</p>
+                {/* Controls */}
+                <div className="flex items-center gap-1">
+                  {narrationPlaying && (
+                    <span className="material-symbols-outlined animate-pulse text-[16px] text-amber-400 mr-1">graphic_eq</span>
+                  )}
+                  {/* Pause / Play */}
+                  {narrationPlaying && (
+                    <button
+                      onClick={toggleNarrationPause}
+                      className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                      title={narrationPaused ? 'Resume' : 'Pause'}
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-white/70">
+                        {narrationPaused ? 'play_arrow' : 'pause'}
+                      </span>
+                    </button>
+                  )}
+                  {/* Mute */}
+                  <button
+                    onClick={() => setAudioEnabled((prev) => !prev)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                    title={audioEnabled ? 'Mute' : 'Unmute'}
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-white/70">
+                      {audioEnabled ? 'volume_up' : 'volume_off'}
+                    </span>
+                  </button>
+                </div>
               </div>
-              {/* Current caption line */}
-              <div className="min-w-0 flex-1">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-amber-400">AdvisorBot</p>
-                <p className="text-base font-medium leading-relaxed text-white transition-all duration-300">
-                  {narrationLines[currentLine]}
+
+              {/* Caption text with word highlighting */}
+              <div className="px-5 pb-3">
+                <p className="text-[15px] leading-relaxed">
+                  {narrationScreens[currentScreen]?.map((word, i) => {
+                    const globalIdx = screenStartWord(currentScreen) + i
+                    const isActive = globalIdx === highlightedWord
+                    const isSpoken = globalIdx < highlightedWord
+                    return (
+                      <span
+                        key={i}
+                        className={`transition-colors duration-150 ${
+                          isActive
+                            ? 'text-amber-400 font-semibold'
+                            : isSpoken
+                              ? 'text-white'
+                              : 'text-white/30'
+                        }`}
+                      >
+                        {i > 0 ? ' ' : ''}{word}
+                      </span>
+                    )
+                  })}
                 </p>
               </div>
-              {/* Speaker icon + mute toggle */}
-              <div className="flex shrink-0 items-center gap-2">
-                {narrationPlaying && (
-                  <span className="material-symbols-outlined animate-pulse text-[18px] text-amber-400">graphic_eq</span>
-                )}
-                <button
-                  onClick={() => setAudioEnabled((prev) => !prev)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-                  title={audioEnabled ? 'Mute' : 'Unmute'}
-                >
-                  <span className="material-symbols-outlined text-[16px] text-white/70">
-                    {audioEnabled ? 'volume_up' : 'volume_off'}
+
+              {/* Screen navigation */}
+              {narrationScreens.length > 1 && (
+                <div className="flex items-center justify-between border-t border-white/10 px-5 py-2">
+                  <button
+                    onClick={() => goToScreen(currentScreen - 1)}
+                    disabled={currentScreen === 0}
+                    className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 transition-colors disabled:opacity-30 disabled:cursor-default"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+                    Previous
+                  </button>
+                  <span className="text-[11px] text-white/30">
+                    {currentScreen + 1} / {narrationScreens.length}
                   </span>
-                </button>
-              </div>
+                  <button
+                    onClick={() => goToScreen(currentScreen + 1)}
+                    disabled={currentScreen === narrationScreens.length - 1}
+                    className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 transition-colors disabled:opacity-30 disabled:cursor-default"
+                  >
+                    Next
+                    <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
