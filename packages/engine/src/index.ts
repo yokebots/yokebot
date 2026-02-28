@@ -1265,7 +1265,7 @@ ${truncated}`,
     4: `And just like that, you're all set, {firstName}! Your AI workforce is deployed and ready to go. You can find them in the Agents tab, chat with them anytime, or assign them tasks from the dashboard. If you ever need help, I'm always here. Just open a chat with me and I'll guide you through anything. Welcome to the future of work. Let's make some magic happen!`,
   }
 
-  const ADVISOR_VOICE_ID = '701a96e1-7fdd-4a6c-a81e-a4a450403599' // Rowan - Team Leader
+  const ADVISOR_VOICE_ID = 'a167e0f3-df7e-4d52-a9c3-f949145efdab' // Blake - Helpful Agent
 
   app.post('/api/teams/:id/advisor-narration', async (req, res) => {
     if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {

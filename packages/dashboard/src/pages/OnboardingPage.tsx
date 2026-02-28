@@ -154,19 +154,38 @@ export function OnboardingPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
 
-  // AdvisorBot narration state
-  const [narrationText, setNarrationText] = useState('')
+  // AdvisorBot narration state — line-by-line captions like YouTube shorts
+  const [narrationLines, setNarrationLines] = useState<string[]>([])
+  const [currentLine, setCurrentLine] = useState(0)
   const [narrationPlaying, setNarrationPlaying] = useState(false)
-  const [revealedWords, setRevealedWords] = useState(0)
   const narrationAudioRef = useRef<HTMLAudioElement | null>(null)
   const narrationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const narrationAudioUrlRef = useRef<string | null>(null)
 
   // Step 4 state
   const [deployedAgents, setDeployedAgents] = useState<engine.EngineAgent[]>([])
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0] ?? 'there'
 
-  // AdvisorBot narration — fetch and play on each step change
+  // Split narration text into short lines (~8-12 words each)
+  const splitIntoLines = (text: string): string[] => {
+    const sentences = text.split(/(?<=[.!?])\s+/)
+    const lines: string[] = []
+    for (const sentence of sentences) {
+      const words = sentence.split(/\s+/)
+      if (words.length <= 12) {
+        lines.push(sentence)
+      } else {
+        // Break long sentences at ~8 word boundaries
+        for (let i = 0; i < words.length; i += 8) {
+          lines.push(words.slice(i, i + 8).join(' '))
+        }
+      }
+    }
+    return lines
+  }
+
+  // AdvisorBot narration — fetch and autoplay on each step change
   useEffect(() => {
     if (!activeTeam) {
       console.warn('[onboarding] Narration skipped: activeTeam not yet available (step', step, ')')
@@ -179,44 +198,59 @@ export function OnboardingPage() {
       narrationAudioRef.current.pause()
       narrationAudioRef.current = null
     }
+    if (narrationAudioUrlRef.current) {
+      URL.revokeObjectURL(narrationAudioUrlRef.current)
+      narrationAudioUrlRef.current = null
+    }
     if (narrationTimerRef.current) {
       clearInterval(narrationTimerRef.current)
       narrationTimerRef.current = null
     }
-    setNarrationText('')
-    setRevealedWords(0)
+    setNarrationLines([])
+    setCurrentLine(0)
     setNarrationPlaying(false)
 
     engine.getAdvisorNarration(activeTeam.id, step, firstName).then(({ text, audioBase64, audioDurationMs }) => {
       if (cancelled) return
-      setNarrationText(text)
-      const words = text.split(/\s+/)
+      const lines = splitIntoLines(text)
+      setNarrationLines(lines)
+      setCurrentLine(0)
 
-      if (audioBase64 && audioEnabled) {
-        const audio = new Audio(`data:audio/mpeg;base64,${audioBase64}`)
+      if (audioBase64) {
+        // Convert base64 to blob URL for better browser handling
+        const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))
+        const blob = new Blob([bytes], { type: 'audio/mpeg' })
+        const url = URL.createObjectURL(blob)
+        narrationAudioUrlRef.current = url
+
+        const audio = new Audio(url)
         narrationAudioRef.current = audio
-        setNarrationPlaying(true)
+        audio.muted = !audioEnabled
 
-        // Animate captions word-by-word synced to audio duration
-        const msPerWord = audioDurationMs / words.length
-        let i = 0
+        // Advance lines evenly across audio duration
+        const msPerLine = audioDurationMs / lines.length
+        let lineIdx = 0
         narrationTimerRef.current = setInterval(() => {
-          if (++i <= words.length) setRevealedWords(i)
+          lineIdx++
+          if (lineIdx < lines.length) setCurrentLine(lineIdx)
           else { clearInterval(narrationTimerRef.current!); narrationTimerRef.current = null }
-        }, msPerWord)
+        }, msPerLine)
 
+        setNarrationPlaying(true)
         audio.onended = () => {
           setNarrationPlaying(false)
-          setRevealedWords(words.length)
+          setCurrentLine(lines.length - 1)
           if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
         }
+        // Autoplay immediately — no user interaction required
         audio.play().catch(() => {
+          // Browser blocked autoplay — still show captions
           setNarrationPlaying(false)
-          setRevealedWords(words.length)
+          setCurrentLine(lines.length - 1)
         })
       } else {
-        // No audio — reveal all text immediately
-        setRevealedWords(words.length)
+        // No audio — show all lines immediately
+        setCurrentLine(lines.length - 1)
       }
     }).catch((err) => {
       console.error('[onboarding] Narration fetch failed for step', step, ':', err)
@@ -227,6 +261,13 @@ export function OnboardingPage() {
       if (narrationTimerRef.current) clearInterval(narrationTimerRef.current)
     }
   }, [step, activeTeam?.id])
+
+  // Sync mute/unmute with current audio element
+  useEffect(() => {
+    if (narrationAudioRef.current) {
+      narrationAudioRef.current.muted = !audioEnabled
+    }
+  }, [audioEnabled])
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -617,42 +658,28 @@ export function OnboardingPage() {
 
       {/* Content */}
       <main className="flex flex-1 flex-col items-center overflow-y-auto p-6">
-        {/* AdvisorBot Narration Banner */}
-        {narrationText && (
+        {/* AdvisorBot Narration — line-by-line captions */}
+        {narrationLines.length > 0 && (
           <div className="mb-6 w-full max-w-2xl">
-            <div className="flex items-start gap-4 rounded-2xl bg-gray-900 px-5 py-4 shadow-lg">
+            <div className="flex items-center gap-4 rounded-2xl bg-gray-900 px-5 py-4 shadow-lg">
               {/* Avatar */}
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20">
                 <span className="material-symbols-outlined text-[22px] text-amber-400">lightbulb</span>
               </div>
-              {/* Caption text */}
+              {/* Current caption line */}
               <div className="min-w-0 flex-1">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-amber-400">AdvisorBot</p>
-                <p className="text-sm leading-relaxed">
-                  {narrationText.split(/\s+/).map((word, i) => (
-                    <span
-                      key={i}
-                      className={`transition-colors duration-200 ${
-                        i < revealedWords ? 'text-white' : 'text-white/15'
-                      }`}
-                    >
-                      {i > 0 ? ' ' : ''}{word}
-                    </span>
-                  ))}
+                <p className="text-base font-medium leading-relaxed text-white transition-all duration-300">
+                  {narrationLines[currentLine]}
                 </p>
               </div>
-              {/* Speaker icon + mute */}
+              {/* Speaker icon + mute toggle */}
               <div className="flex shrink-0 items-center gap-2">
                 {narrationPlaying && (
                   <span className="material-symbols-outlined animate-pulse text-[18px] text-amber-400">graphic_eq</span>
                 )}
                 <button
-                  onClick={() => {
-                    setAudioEnabled((prev) => {
-                      if (prev && narrationAudioRef.current) narrationAudioRef.current.pause()
-                      return !prev
-                    })
-                  }}
+                  onClick={() => setAudioEnabled((prev) => !prev)}
                   className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
                   title={audioEnabled ? 'Mute' : 'Unmute'}
                 >
