@@ -289,7 +289,6 @@ export function OnboardingPage() {
       const totalWords = narrationWordsRef.current.length
       const fraction = audio.currentTime / audio.duration
       const fromWord = Math.floor(fraction * totalWords)
-      const remainingMs = narrationDurationRef.current * (1 - fraction)
       startWordTimer(fromWord, totalWords, narrationDurationRef.current)
       setNarrationPaused(false)
     } else {
