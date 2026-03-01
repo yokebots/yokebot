@@ -612,6 +612,12 @@ export async function chatCompletionWithFallback(
   try {
     return await chatCompletion(config, messages, tools)
   } catch (primaryErr) {
+    const errMsg = (primaryErr as Error).message ?? ''
+    // If model doesn't support tool calling (405), retry without tools
+    if (tools && tools.length > 0 && errMsg.includes('405')) {
+      console.log(`[model] Model doesn't support tool calling, retrying without tools`)
+      return await chatCompletion(config, messages)
+    }
     if (!fallbackConfig) throw primaryErr
     console.log(`[model] Primary model failed, trying fallback: ${fallbackConfig.endpoint}/${fallbackConfig.model}`)
     try {

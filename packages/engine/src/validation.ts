@@ -145,6 +145,10 @@ export const CreateTeamSchema = z.object({
   name: z.string().min(1).max(100),
 })
 
+export const UpdateTeamSchema = z.object({
+  name: z.string().min(1).max(100),
+})
+
 export const AddMemberSchema = z.object({
   userId: z.string().min(1).max(200),
   email: z.string().email().max(200),

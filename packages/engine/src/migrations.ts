@@ -680,6 +680,20 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 13,
+    name: 'add_additional_context_to_team_profiles',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run('ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS additional_context TEXT')
+      } else {
+        const cols = await db.query<{ name: string }>('PRAGMA table_info(team_profiles)')
+        if (!cols.some((c) => c.name === 'additional_context')) {
+          await db.run('ALTER TABLE team_profiles ADD COLUMN additional_context TEXT')
+        }
+      }
+    },
+  },
 ]
 
 /**

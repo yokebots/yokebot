@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router'
+import { NavLink, Link, useLocation } from 'react-router'
 import { useAuth } from '@/lib/auth'
 import { useEffect, useState } from 'react'
 import * as engine from '@/lib/engine'
@@ -275,7 +275,7 @@ export function Sidebar() {
         {/* User Profile */}
         {showLabels ? (
           <div className="border-t border-border-subtle p-4">
-            <div className="rounded-xl border border-border-subtle bg-light-surface-alt p-3">
+            <Link to="/profile" onClick={handleNavClick} className="block rounded-xl border border-border-subtle bg-light-surface-alt p-3 hover:border-forest-green/30 transition-colors">
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
                   <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
@@ -289,22 +289,24 @@ export function Sidebar() {
                   <p className="truncate text-xs text-text-muted">{activeTeam?.role ? activeTeam.role.charAt(0).toUpperCase() + activeTeam.role.slice(1) : 'Member'}</p>
                 </div>
                 <button
-                  onClick={signOut}
+                  onClick={(e) => { e.preventDefault(); signOut() }}
                   className="rounded-lg p-1.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
                   title="Log out"
                 >
                   <span className="material-symbols-outlined text-[18px]">logout</span>
                 </button>
               </div>
-            </div>
+            </Link>
           </div>
         ) : (
           <div className="border-t border-border-subtle p-2 flex flex-col items-center gap-2">
-            <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
-              <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
-                {user?.email?.[0]?.toUpperCase() ?? 'U'}
+            <Link to="/profile" onClick={handleNavClick} title="Profile">
+              <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px] hover:ring-2 hover:ring-forest-green/30 transition-all">
+                <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
+                  {user?.email?.[0]?.toUpperCase() ?? 'U'}
+                </div>
               </div>
-            </div>
+            </Link>
             <button
               onClick={signOut}
               className="rounded-lg p-1.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors"

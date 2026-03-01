@@ -18,6 +18,7 @@ import { SettingsPage } from '@/pages/SettingsPage'
 import { IntegrationsPage } from '@/pages/IntegrationsPage'
 import { BillingPage } from '@/pages/BillingPage'
 import { TeamPage } from '@/pages/TeamPage'
+import { ProfilePage } from '@/pages/ProfilePage'
 import { ActivityPage } from '@/pages/ActivityPage'
 import { MeetingsPage } from '@/pages/MeetingsPage'
 import { MeetingReplayPage } from '@/pages/MeetingReplayPage'
@@ -166,6 +167,7 @@ function AppRoutes() {
         <Route path="settings/billing" element={<BillingPage />} />
         <Route path="settings/integrations" element={<IntegrationsPage />} />
         <Route path="team" element={<TeamPage />} />
+        <Route path="profile" element={<ProfilePage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

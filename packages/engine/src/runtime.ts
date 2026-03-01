@@ -100,6 +100,7 @@ function getBuiltinTools(): ToolDef[] {
       title: { type: 'string', description: 'Task title' },
       description: { type: 'string', description: 'Task description' },
       priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Task priority' },
+      deadline: { type: 'string', description: 'Deadline in ISO 8601 format (e.g. 2026-03-15). Set a reasonable deadline based on task complexity and urgency.' },
     }, ['title']),
 
     toolDef('update_task', 'Update an existing task (status, priority, description).', {
@@ -213,8 +214,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         description: args.description as string | undefined,
         priority: (args.priority as 'low' | 'medium' | 'high' | 'urgent') ?? 'medium',
         assignedAgentId: ctx.agentId,
+        deadline: args.deadline as string | undefined,
       })
-      return `Task created: "${task.title}" (id: ${task.id}, priority: ${task.priority})`
+      return `Task created: "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''})`
     }
 
     case 'update_task': {

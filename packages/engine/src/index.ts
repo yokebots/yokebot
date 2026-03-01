@@ -30,7 +30,7 @@ import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
 import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
 import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
-import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema } from './validation.ts'
+import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema } from './validation.ts'
 import { uploadDocument, listDocuments, getDocument, deleteDocument, getDocumentChunks, searchKb } from './knowledge-base.ts'
 import { listCredentials, setCredential, deleteCredential } from './credentials.ts'
 import { listServices } from './services.ts'
@@ -1163,6 +1163,17 @@ async function main() {
     res.status(204).end()
   })
 
+  app.patch('/api/teams/:id', async (req, res) => {
+    const team = await getTeam(db, req.params.id)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller || caller.role !== 'admin') return res.status(403).json({ error: 'Only team admins can update team settings' })
+    const { name } = validate(UpdateTeamSchema, req.body)
+    await db.run('UPDATE teams SET name = $1 WHERE id = $2', [name, req.params.id])
+    res.json({ success: true, name })
+  })
+
   app.get('/api/teams/:id/members', async (req, res) => {
     const team = await getTeam(db, req.params.id)
     if (!team) return res.status(404).json({ error: 'Team not found' })
@@ -1268,6 +1279,7 @@ async function main() {
     const targetMarket = body.targetMarket ?? null
     const primaryGoal = body.primaryGoal ?? null
     const onboardedAt = body.onboardedAt ?? null
+    const additionalContext = body.additionalContext ?? null
 
     const existing = await db.queryOne<Record<string, unknown>>(
       'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
@@ -1284,15 +1296,16 @@ async function main() {
           target_market = COALESCE($6, target_market),
           primary_goal = COALESCE($7, primary_goal),
           onboarded_at = COALESCE($8, onboarded_at),
+          additional_context = COALESCE($9, additional_context),
           updated_at = ${db.now()}
-        WHERE team_id = $9`,
-        [companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, req.params.id],
+        WHERE team_id = $10`,
+        [companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext, req.params.id],
       )
     } else {
       await db.run(
-        `INSERT INTO team_profiles (team_id, company_name, company_url, industry, company_size, business_summary, target_market, primary_goal, onboarded_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [req.params.id, companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt],
+        `INSERT INTO team_profiles (team_id, company_name, company_url, industry, company_size, business_summary, target_market, primary_goal, onboarded_at, additional_context)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [req.params.id, companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext],
       )
     }
     res.json({ success: true })

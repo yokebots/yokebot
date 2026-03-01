@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { ProviderConfig } from '@/lib/engine'
+import type { ProviderConfig, TeamProfile } from '@/lib/engine'
 import { useTeam } from '@/lib/team-context'
 
 interface AlertRow {
@@ -24,14 +24,25 @@ const DEFAULT_ALERTS: AlertRow[] = [
 
 export function SettingsPage() {
   const navigate = useNavigate()
-  const { activeTeam } = useTeam()
-  const [tab, setTab] = useState<'notifications' | 'providers'>('providers')
+  const { activeTeam, refresh: refreshTeams } = useTeam()
+  const [tab, setTab] = useState<'team' | 'notifications' | 'providers'>('team')
   const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [keyInput, setKeyInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [savingNotifs, setSavingNotifs] = useState(false)
   const [notifSaved, setNotifSaved] = useState(false)
+
+  // Team settings state
+  const [teamName, setTeamName] = useState('')
+  const [, setTeamProfile] = useState<TeamProfile | null>(null)
+  const [profileFields, setProfileFields] = useState({
+    companyName: '', companyUrl: '', industry: '', companySize: '',
+    targetMarket: '', primaryGoal: '', businessSummary: '',
+  })
+  const [additionalContext, setAdditionalContext] = useState('')
+  const [savingTeam, setSavingTeam] = useState(false)
+  const [teamSaved, setTeamSaved] = useState(false)
 
   // Notification state
   const [globalEnabled, setGlobalEnabled] = useState(true)
@@ -69,7 +80,69 @@ export function SettingsPage() {
     } catch { /* offline */ }
   }, [activeTeam?.id])
 
+  const loadTeamProfile = useCallback(async () => {
+    if (!activeTeam) return
+    setTeamName(activeTeam.name)
+    try {
+      const profile = await engine.getTeamProfile(activeTeam.id)
+      setTeamProfile(profile)
+      setProfileFields({
+        companyName: profile.companyName ?? '',
+        companyUrl: profile.companyUrl ?? '',
+        industry: profile.industry ?? '',
+        companySize: profile.companySize ?? '',
+        targetMarket: profile.targetMarket ?? '',
+        primaryGoal: profile.primaryGoal ?? '',
+        businessSummary: profile.businessSummary ?? '',
+      })
+      setAdditionalContext(profile.additionalContext ?? '')
+    } catch { /* no profile yet */ }
+  }, [activeTeam?.id, activeTeam?.name])
+
+  const saveTeamName = async () => {
+    if (!activeTeam || !teamName.trim()) return
+    setSavingTeam(true)
+    try {
+      await engine.updateTeam(activeTeam.id, { name: teamName.trim() })
+      await refreshTeams()
+      setTeamSaved(true)
+      setTimeout(() => setTeamSaved(false), 2000)
+    } catch { /* error */ }
+    setSavingTeam(false)
+  }
+
+  const saveBusinessContext = async () => {
+    if (!activeTeam) return
+    setSavingTeam(true)
+    try {
+      await engine.updateTeamProfile(activeTeam.id, {
+        companyName: profileFields.companyName || null,
+        companyUrl: profileFields.companyUrl || null,
+        industry: profileFields.industry || null,
+        companySize: profileFields.companySize || null,
+        targetMarket: profileFields.targetMarket || null,
+        primaryGoal: profileFields.primaryGoal || null,
+        businessSummary: profileFields.businessSummary || null,
+      })
+      setTeamSaved(true)
+      setTimeout(() => setTeamSaved(false), 2000)
+    } catch { /* error */ }
+    setSavingTeam(false)
+  }
+
+  const saveAdditionalContext = async () => {
+    if (!activeTeam) return
+    setSavingTeam(true)
+    try {
+      await engine.updateTeamProfile(activeTeam.id, { additionalContext: additionalContext || null })
+      setTeamSaved(true)
+      setTimeout(() => setTeamSaved(false), 2000)
+    } catch { /* error */ }
+    setSavingTeam(false)
+  }
+
   useEffect(() => { loadProviders() }, [])
+  useEffect(() => { loadTeamProfile() }, [loadTeamProfile])
   useEffect(() => { loadNotificationPrefs() }, [loadNotificationPrefs])
 
   const toggleAlert = async (idx: number, field: 'inApp' | 'email' | 'slack' | 'telegram') => {
@@ -146,10 +219,10 @@ export function SettingsPage() {
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 border-b border-border-subtle">
-        {([{ id: 'providers', label: 'Model Providers' }, { id: 'integrations', label: 'Integrations' }, { id: 'notifications', label: 'Notifications' }, { id: 'billing', label: 'Billing' }] as const).map((t) => (
+        {([{ id: 'team', label: 'Team' }, { id: 'providers', label: 'Model Providers' }, { id: 'integrations', label: 'Integrations' }, { id: 'notifications', label: 'Notifications' }, { id: 'billing', label: 'Billing' }] as const).map((t) => (
           <button
             key={t.id}
-            onClick={() => t.id === 'billing' ? navigate('/settings/billing') : t.id === 'integrations' ? navigate('/settings/integrations') : setTab(t.id as 'providers' | 'notifications')}
+            onClick={() => t.id === 'billing' ? navigate('/settings/billing') : t.id === 'integrations' ? navigate('/settings/integrations') : setTab(t.id as 'team' | 'providers' | 'notifications')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors ${
               tab === t.id
                 ? 'border-b-2 border-forest-green text-forest-green'
@@ -160,6 +233,118 @@ export function SettingsPage() {
           </button>
         ))}
       </div>
+
+      {/* Team Tab */}
+      {tab === 'team' && (
+        <div className="space-y-6">
+          {teamSaved && (
+            <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">
+              <span className="material-symbols-outlined text-[16px]">check_circle</span>
+              Saved successfully
+            </div>
+          )}
+
+          {/* Team Identity */}
+          <div className="rounded-lg border border-border-subtle bg-white p-5">
+            <h3 className="mb-4 text-sm font-bold text-text-main">Team Identity</h3>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-text-secondary">Team Name</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={teamName}
+                  onChange={(e) => setTeamName(e.target.value)}
+                  className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+                  placeholder="My Team"
+                />
+                <button
+                  onClick={saveTeamName}
+                  disabled={savingTeam || teamName === activeTeam?.name}
+                  className="rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green/90 disabled:opacity-50"
+                >
+                  {savingTeam ? 'Saving...' : 'Rename'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Business Context */}
+          <div className="rounded-lg border border-border-subtle bg-white p-5">
+            <h3 className="mb-1 text-sm font-bold text-text-main">Business Context</h3>
+            <p className="mb-4 text-xs text-text-muted">This information helps your agents understand your business.</p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Company Name</label>
+                  <input type="text" value={profileFields.companyName} onChange={(e) => setProfileFields(p => ({ ...p, companyName: e.target.value }))}
+                    className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none" placeholder="Acme Inc." />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Website</label>
+                  <input type="text" value={profileFields.companyUrl} onChange={(e) => setProfileFields(p => ({ ...p, companyUrl: e.target.value }))}
+                    className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none" placeholder="https://example.com" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Industry</label>
+                  <input type="text" value={profileFields.industry} onChange={(e) => setProfileFields(p => ({ ...p, industry: e.target.value }))}
+                    className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none" placeholder="SaaS, E-commerce, etc." />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Company Size</label>
+                  <input type="text" value={profileFields.companySize} onChange={(e) => setProfileFields(p => ({ ...p, companySize: e.target.value }))}
+                    className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none" placeholder="1-10, 11-50, etc." />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Target Market</label>
+                <input type="text" value={profileFields.targetMarket} onChange={(e) => setProfileFields(p => ({ ...p, targetMarket: e.target.value }))}
+                  className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none" placeholder="Who are your customers?" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Primary Goal</label>
+                <input type="text" value={profileFields.primaryGoal} onChange={(e) => setProfileFields(p => ({ ...p, primaryGoal: e.target.value }))}
+                  className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none" placeholder="What's your #1 business objective?" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Business Summary</label>
+                <textarea value={profileFields.businessSummary} onChange={(e) => setProfileFields(p => ({ ...p, businessSummary: e.target.value }))}
+                  rows={3} className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none" placeholder="Describe what your company does..." />
+              </div>
+            </div>
+            <button
+              onClick={saveBusinessContext}
+              disabled={savingTeam}
+              className="mt-4 rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green/90 disabled:opacity-50"
+            >
+              {savingTeam ? 'Saving...' : 'Save Business Context'}
+            </button>
+          </div>
+
+          {/* Additional Context (Memories) */}
+          <div className="rounded-lg border border-border-subtle bg-white p-5">
+            <h3 className="mb-1 text-sm font-bold text-text-main">Additional Context</h3>
+            <p className="mb-4 text-xs text-text-muted">
+              Add notes your agents should always know about. Think of these like memories — ongoing context that stays relevant across all conversations.
+            </p>
+            <textarea
+              value={additionalContext}
+              onChange={(e) => setAdditionalContext(e.target.value)}
+              rows={6}
+              className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+              placeholder={"e.g.\n- We just hired 3 new salespeople starting March 1\n- Our Q2 focus is enterprise deals over $50K\n- We're rebranding from OldName to NewName in April\n- Key competitor launched a new feature last week"}
+            />
+            <button
+              onClick={saveAdditionalContext}
+              disabled={savingTeam}
+              className="mt-4 rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green/90 disabled:opacity-50"
+            >
+              {savingTeam ? 'Saving...' : 'Save Context'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Model Providers Tab */}
       {tab === 'providers' && (

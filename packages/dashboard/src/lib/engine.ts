@@ -422,6 +422,11 @@ export const listTeams = () => request<Team[]>('/api/teams')
 export const createTeam = (name: string) =>
   request<Team>('/api/teams', { method: 'POST', body: JSON.stringify({ name }) })
 
+export const updateTeam = (id: string, data: { name: string }) =>
+  request<{ success: boolean; name: string }>(`/api/teams/${id}`, {
+    method: 'PATCH', body: JSON.stringify(data),
+  })
+
 export const deleteTeam = (id: string) =>
   request<void>(`/api/teams/${id}`, { method: 'DELETE' })
 
@@ -753,6 +758,7 @@ export interface TeamProfile {
   targetMarket: string | null
   primaryGoal: string | null
   onboardedAt: string | null
+  additionalContext: string | null
 }
 
 export interface WebsiteScanResult {

@@ -119,20 +119,13 @@ export function ChatPage() {
 
   const sendMsg = async () => {
     if (!newMessage.trim() || !activeChannelId) return
-    const ch = channels.find((c) => c.id === activeChannelId)
-    if (ch?.type === 'dm') {
-      const agentId = ch.name.replace('dm:', '')
-      try {
-        await engine.chatWithAgent(agentId, newMessage.trim())
-      } catch { /* model not available */ }
-    } else {
-      await engine.sendMessage(activeChannelId, {
-        senderType: 'human',
-        senderId: 'user',
-        content: newMessage.trim(),
-      })
-    }
-    setNewMessage('')
+    const msg = newMessage.trim()
+    setNewMessage('') // Clear input immediately (optimistic)
+    await engine.sendMessage(activeChannelId, {
+      senderType: 'human',
+      senderId: 'user',
+      content: msg,
+    })
     loadMessages()
   }
 
