@@ -86,7 +86,7 @@ export function TemplatesPage() {
       {/* Template Grid */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {filtered.map((template) => (
-          <div key={template.id} className="rounded-xl border border-border-subtle bg-white p-5 shadow-card">
+          <div key={template.id} className="flex flex-col rounded-xl border border-border-subtle bg-white p-5 shadow-card">
             <div className="mb-3 flex items-start gap-3">
               <div
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm"
@@ -119,7 +119,7 @@ export function TemplatesPage() {
             </div>
 
             {/* Skills count + model */}
-            <div className="mb-3 flex items-center gap-3 text-[10px] text-text-muted">
+            <div className="mb-3 mt-auto flex items-center gap-3 text-[10px] text-text-muted">
               {template.defaultSkills.length > 0 && (
                 <span className="flex items-center gap-1">
                   <span className="material-symbols-outlined text-[12px]">extension</span>

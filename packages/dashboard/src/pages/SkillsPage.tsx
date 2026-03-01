@@ -174,7 +174,7 @@ export function SkillsPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {rest.map((skill) => (
-              <div key={skill.name} className="rounded-xl border border-border-subtle bg-white p-5 shadow-card transition-all hover:shadow-lg">
+              <div key={skill.name} className="flex flex-col rounded-xl border border-border-subtle bg-white p-5 shadow-card transition-all hover:shadow-lg">
                 <div className="mb-3 flex items-start justify-between">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest-green/10 text-forest-green">
                     <span className="material-symbols-outlined">{skill.icon}</span>
@@ -190,7 +190,7 @@ export function SkillsPage() {
                 </div>
                 <h3 className="mb-1 text-sm font-bold text-text-main">{skill.name}</h3>
                 <p className="mb-4 text-xs text-text-muted line-clamp-2">{skill.description}</p>
-                <div className="relative">
+                <div className="relative mt-auto">
                   <button
                     onClick={() => setInstallTarget(installTarget === skill.skillId ? null : skill.skillId)}
                     className="block w-full rounded-lg bg-forest-green py-2 text-center text-sm font-medium text-white hover:bg-forest-green/90 transition-colors"
