@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { KbDocument, KbSearchResult, KbChunk } from '@/lib/engine'
 
-// ---- File tree types (for Workspace tab) ----
+// ---- File tree types ----
 
 interface FileNode {
   path: string
@@ -26,59 +26,21 @@ const FILE_TYPE_ICONS: Record<string, string> = {
   csv: 'table_chart',
 }
 
+// ---- Selection types ----
+
+type Selection =
+  | { type: 'document'; doc: KbDocument }
+  | { type: 'file'; path: string }
+  | null
+
 // ---- Main Component ----
 
-export function KnowledgeBasePage() {
+export function FilesPage() {
   const [searchParams] = useSearchParams()
-  // If ?file= is present (from agent file mention), default to workspace tab
   const fileParam = searchParams.get('file') || searchParams.get('doc')
-  const [activeTab, setActiveTab] = useState<'documents' | 'workspace'>(fileParam ? 'workspace' : 'documents')
 
-  return (
-    <div className="flex h-[calc(100vh-8rem)] -m-6 flex-col">
-      {/* Tab Bar */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-border-subtle bg-white px-6">
-        <button
-          onClick={() => setActiveTab('documents')}
-          className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-            activeTab === 'documents'
-              ? 'border-forest-green text-forest-green'
-              : 'border-transparent text-text-muted hover:text-text-secondary'
-          }`}
-        >
-          <span className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px]">upload_file</span>
-            Documents
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveTab('workspace')}
-          className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-            activeTab === 'workspace'
-              ? 'border-forest-green text-forest-green'
-              : 'border-transparent text-text-muted hover:text-text-secondary'
-          }`}
-        >
-          <span className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px]">folder</span>
-            Workspace Files
-          </span>
-        </button>
-      </div>
-
-      {/* Tab Content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'documents' ? <DocumentsTab /> : <WorkspaceTab />}
-      </div>
-    </div>
-  )
-}
-
-// ---- Documents Tab ----
-
-function DocumentsTab() {
+  // KB Documents state
   const [documents, setDocuments] = useState<KbDocument[]>([])
-  const [selectedDoc, setSelectedDoc] = useState<KbDocument | null>(null)
   const [chunks, setChunks] = useState<KbChunk[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<KbSearchResult[] | null>(null)
@@ -87,6 +49,19 @@ function DocumentsTab() {
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Workspace files state
+  const [files, setFiles] = useState<FileNode[]>([])
+  const [fileContent, setFileContent] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [editContent, setEditContent] = useState('')
+  const [newFileName, setNewFileName] = useState('')
+  const [showNewFile, setShowNewFile] = useState(false)
+
+  // Unified selection
+  const [selection, setSelection] = useState<Selection>(null)
+
+  // ---- Data loading ----
+
   const loadDocuments = useCallback(async () => {
     try {
       const docs = await engine.listKbDocuments()
@@ -94,7 +69,16 @@ function DocumentsTab() {
     } catch { /* offline */ }
   }, [])
 
+  const loadFiles = async (dir = '') => {
+    try {
+      return await engine.listFiles(dir)
+    } catch {
+      return []
+    }
+  }
+
   useEffect(() => { loadDocuments() }, [loadDocuments])
+  useEffect(() => { loadFiles().then(setFiles) }, [])
 
   // Poll for processing documents
   useEffect(() => {
@@ -104,10 +88,28 @@ function DocumentsTab() {
     return () => clearInterval(interval)
   }, [documents, loadDocuments])
 
-  const handleUpload = async (files: FileList | File[]) => {
+  // Handle URL param to auto-select a file
+  useEffect(() => {
+    if (!fileParam) return
+    // Check if it matches a workspace file path
+    const matchFile = flattenFiles(files).find((f) => f.path === fileParam)
+    if (matchFile) {
+      selectWorkspaceFile(matchFile.path)
+      return
+    }
+    // Check if it matches a KB document id
+    const matchDoc = documents.find((d) => d.id === fileParam)
+    if (matchDoc) {
+      selectDocument(matchDoc)
+    }
+  }, [fileParam, files.length, documents.length])
+
+  // ---- KB Document handlers ----
+
+  const handleUpload = async (fileList: FileList | File[]) => {
     setUploading(true)
     try {
-      for (const file of files) {
+      for (const file of fileList) {
         const ext = '.' + (file.name.split('.').pop()?.toLowerCase() ?? '')
         if (!ALLOWED_EXTENSIONS.includes(ext)) {
           alert(`Unsupported file type: ${ext}\nAllowed: ${ALLOWED_EXTENSIONS.join(', ')}`)
@@ -151,19 +153,85 @@ function DocumentsTab() {
   const handleDeleteDoc = async (id: string) => {
     if (!confirm('Delete this document and all its chunks?')) return
     await engine.deleteKbDocument(id)
-    if (selectedDoc?.id === id) { setSelectedDoc(null); setChunks([]) }
+    if (selection?.type === 'document' && selection.doc.id === id) {
+      setSelection(null)
+      setChunks([])
+    }
     loadDocuments()
   }
 
   const selectDocument = async (doc: KbDocument) => {
-    setSelectedDoc(doc)
+    setSelection({ type: 'document', doc })
     setSearchResults(null)
+    setEditing(false)
     if (doc.status === 'ready') {
       try {
         const data = await engine.getKbDocumentChunks(doc.id)
         setChunks(data.chunks)
       } catch { setChunks([]) }
+    } else {
+      setChunks([])
     }
+  }
+
+  // ---- Workspace file handlers ----
+
+  const selectWorkspaceFile = async (path: string) => {
+    setSelection({ type: 'file', path })
+    setSearchResults(null)
+    setEditing(false)
+    try {
+      const data = await engine.readFile(path)
+      setFileContent(data.content)
+      setEditContent(data.content)
+    } catch { /* offline */ }
+  }
+
+  const toggleDir = async (node: FileNode) => {
+    if (!node.isDirectory) {
+      selectWorkspaceFile(node.path)
+      return
+    }
+    if (node.expanded) {
+      node.expanded = false
+      node.children = undefined
+      setFiles([...files])
+    } else {
+      const children = await loadFiles(node.path)
+      node.expanded = true
+      node.children = children.map((c) => ({ ...c, expanded: false }))
+      setFiles([...files])
+    }
+  }
+
+  const saveFile = async () => {
+    if (selection?.type !== 'file') return
+    await engine.writeFile(selection.path, editContent, 'user')
+    setFileContent(editContent)
+    setEditing(false)
+  }
+
+  const handleCreateFile = async () => {
+    const name = newFileName.trim()
+    if (!name) return
+    const path = name.endsWith('.md') ? name : `${name}.md`
+    await engine.writeFile(path, `# ${name.replace('.md', '')}\n\n`, 'user')
+    setNewFileName('')
+    setShowNewFile(false)
+    await loadFiles().then(setFiles)
+    selectWorkspaceFile(path)
+    setEditing(true)
+  }
+
+  // ---- Helpers ----
+
+  const flattenFiles = (nodes: FileNode[]): FileNode[] => {
+    const result: FileNode[] = []
+    for (const n of nodes) {
+      result.push(n)
+      if (n.children) result.push(...flattenFiles(n.children))
+    }
+    return result
   }
 
   const formatSize = (bytes: number) => {
@@ -189,9 +257,60 @@ function DocumentsTab() {
     )
   }
 
+  const filterFiles = (nodes: FileNode[], query: string): FileNode[] => {
+    if (!query) return nodes
+    const q = query.toLowerCase()
+    return nodes.reduce<FileNode[]>((acc, node) => {
+      if (node.isDirectory) {
+        const filteredChildren = node.children ? filterFiles(node.children, query) : []
+        if (filteredChildren.length > 0 || node.name.toLowerCase().includes(q)) {
+          acc.push({ ...node, children: filteredChildren, expanded: true })
+        }
+      } else if (node.name.toLowerCase().includes(q)) {
+        acc.push(node)
+      }
+      return acc
+    }, [])
+  }
+
+  const renderTree = (nodes: FileNode[], depth = 0) => (
+    <div>
+      {nodes.map((node) => (
+        <div key={node.path}>
+          <button
+            onClick={() => toggleDir(node)}
+            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors ${
+              selection?.type === 'file' && selection.path === node.path
+                ? 'bg-forest-green/10 text-forest-green font-medium'
+                : 'text-text-secondary hover:bg-light-surface-alt'
+            }`}
+            style={{ paddingLeft: `${depth * 16 + 8}px` }}
+          >
+            <span className="material-symbols-outlined text-[16px] text-text-muted">
+              {node.isDirectory
+                ? node.expanded ? 'folder_open' : 'folder'
+                : 'description'
+              }
+            </span>
+            <span className="truncate">{node.name}</span>
+          </button>
+          {node.expanded && node.children && renderTree(node.children, depth + 1)}
+        </div>
+      ))}
+    </div>
+  )
+
+  const filteredDocs = searchQuery
+    ? documents.filter((d) => d.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : documents
+
+  const filteredFiles = searchQuery ? filterFiles(files, searchQuery) : files
+
+  // ---- Render ----
+
   return (
-    <div className="flex h-full">
-      {/* Left Panel — Upload + Document List */}
+    <div className="flex h-[calc(100vh-8rem)] -m-6">
+      {/* Left Sidebar */}
       <div className="w-80 shrink-0 border-r border-border-subtle bg-light-surface flex flex-col overflow-hidden">
         {/* Upload Drop Zone */}
         <div
@@ -229,7 +348,7 @@ function DocumentsTab() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="Semantic search..."
+              placeholder="Search files..."
               className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-text-muted/50"
             />
             {searchQuery && (
@@ -240,48 +359,103 @@ function DocumentsTab() {
           </div>
         </div>
 
-        {/* Document List */}
+        {/* Unified File List */}
         <div className="flex-1 overflow-y-auto px-4 pb-4">
-          {documents.length === 0 ? (
-            <p className="py-8 text-center text-xs text-text-muted">
-              No documents yet. Upload files to build your knowledge base.
-            </p>
-          ) : (
-            <div className="space-y-1">
-              {documents.map((doc) => (
-                <div
-                  key={doc.id}
-                  onClick={() => selectDocument(doc)}
-                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${
-                    selectedDoc?.id === doc.id
-                      ? 'bg-forest-green/10 text-forest-green'
-                      : 'text-text-secondary hover:bg-light-surface-alt'
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-[18px] text-text-muted shrink-0">
-                    {FILE_TYPE_ICONS[doc.fileType] ?? 'description'}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate font-medium">{doc.title}</p>
-                    <p className="text-xs text-text-muted">{formatSize(doc.fileSize)}</p>
+          {/* Uploaded Documents Section */}
+          {filteredDocs.length > 0 && (
+            <>
+              <h4 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                Uploaded Documents
+              </h4>
+              <div className="space-y-0.5 mb-4">
+                {filteredDocs.map((doc) => (
+                  <div
+                    key={doc.id}
+                    onClick={() => selectDocument(doc)}
+                    className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${
+                      selection?.type === 'document' && selection.doc.id === doc.id
+                        ? 'bg-forest-green/10 text-forest-green'
+                        : 'text-text-secondary hover:bg-light-surface-alt'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[18px] text-text-muted shrink-0">
+                      {FILE_TYPE_ICONS[doc.fileType] ?? 'description'}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="truncate font-medium">{doc.title}</p>
+                      <p className="text-xs text-text-muted">{formatSize(doc.fileSize)}</p>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-1">
+                      {statusBadge(doc.status)}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id) }}
+                        className="rounded p-0.5 text-text-muted hover:text-red-500 hover:bg-red-50"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">delete</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="shrink-0 flex items-center gap-1">
-                    {statusBadge(doc.status)}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id) }}
-                      className="rounded p-0.5 text-text-muted hover:text-red-500 hover:bg-red-50"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">delete</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Workspace Files Section */}
+          <div className="flex items-center justify-between mb-1.5">
+            <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+              Workspace Files
+            </h4>
+            <button
+              onClick={() => setShowNewFile(!showNewFile)}
+              className="text-text-muted hover:text-forest-green"
+              title="New file"
+            >
+              <span className="material-symbols-outlined text-[16px]">note_add</span>
+            </button>
+          </div>
+
+          {showNewFile && (
+            <div className="mb-3 flex items-center gap-1 rounded-lg border border-forest-green bg-white px-2 py-1.5">
+              <input
+                type="text"
+                value={newFileName}
+                onChange={(e) => setNewFileName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateFile()
+                  if (e.key === 'Escape') { setShowNewFile(false); setNewFileName('') }
+                }}
+                placeholder="filename.md"
+                className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-text-muted/50"
+                autoFocus
+              />
+              <button
+                onClick={handleCreateFile}
+                disabled={!newFileName.trim()}
+                className="rounded p-0.5 text-forest-green hover:bg-forest-green/10 disabled:opacity-40"
+              >
+                <span className="material-symbols-outlined text-[16px]">check</span>
+              </button>
             </div>
+          )}
+
+          {filteredFiles.length > 0 ? (
+            renderTree(filteredFiles)
+          ) : (
+            <p className="py-4 text-center text-xs text-text-muted">
+              {files.length === 0 ? 'No workspace files yet.' : 'No matching files.'}
+            </p>
+          )}
+
+          {/* Empty state when nothing exists at all */}
+          {documents.length === 0 && files.length === 0 && (
+            <p className="py-4 text-center text-xs text-text-muted">
+              Upload documents or create workspace files to get started.
+            </p>
           )}
         </div>
       </div>
 
-      {/* Right Panel — Detail / Search Results */}
+      {/* Right Panel */}
       <div className="flex-1 overflow-y-auto">
         {searchResults !== null ? (
           /* Search Results View */
@@ -318,40 +492,40 @@ function DocumentsTab() {
               </div>
             )}
           </div>
-        ) : selectedDoc ? (
+        ) : selection?.type === 'document' ? (
           /* Document Detail View */
           <div className="p-6">
             <div className="mb-6">
               <div className="flex items-center gap-3 mb-2">
                 <span className="material-symbols-outlined text-2xl text-text-muted">
-                  {FILE_TYPE_ICONS[selectedDoc.fileType] ?? 'description'}
+                  {FILE_TYPE_ICONS[selection.doc.fileType] ?? 'description'}
                 </span>
                 <div>
-                  <h3 className="font-display text-lg font-bold text-text-main">{selectedDoc.title}</h3>
+                  <h3 className="font-display text-lg font-bold text-text-main">{selection.doc.title}</h3>
                   <p className="text-xs text-text-muted">
-                    {selectedDoc.fileName} &middot; {formatSize(selectedDoc.fileSize)} &middot; {statusBadge(selectedDoc.status)}
-                    {selectedDoc.chunkCount > 0 && ` · ${selectedDoc.chunkCount} chunks`}
+                    {selection.doc.fileName} &middot; {formatSize(selection.doc.fileSize)} &middot; {statusBadge(selection.doc.status)}
+                    {selection.doc.chunkCount > 0 && ` · ${selection.doc.chunkCount} chunks`}
                   </p>
                 </div>
               </div>
 
-              {selectedDoc.error && (
+              {selection.doc.error && (
                 <div className="mt-3 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-                  <strong>Error:</strong> {selectedDoc.error}
+                  <strong>Error:</strong> {selection.doc.error}
                 </div>
               )}
 
-              {selectedDoc.l0Summary && (
+              {selection.doc.l0Summary && (
                 <div className="mt-4 rounded-xl bg-light-surface p-4">
                   <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-1">Summary</h4>
-                  <p className="text-sm text-text-main">{selectedDoc.l0Summary}</p>
+                  <p className="text-sm text-text-main">{selection.doc.l0Summary}</p>
                 </div>
               )}
 
-              {selectedDoc.l1Overview && (
+              {selection.doc.l1Overview && (
                 <div className="mt-3 rounded-xl bg-light-surface p-4">
                   <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-1">Overview</h4>
-                  <p className="text-sm text-text-main whitespace-pre-wrap">{selectedDoc.l1Overview}</p>
+                  <p className="text-sm text-text-main whitespace-pre-wrap">{selection.doc.l1Overview}</p>
                 </div>
               )}
             </div>
@@ -376,197 +550,12 @@ function DocumentsTab() {
               </div>
             )}
           </div>
-        ) : (
-          /* Empty State */
-          <div className="flex flex-1 h-full flex-col items-center justify-center text-center p-6">
-            <span className="material-symbols-outlined mb-4 text-5xl text-text-muted">menu_book</span>
-            <h2 className="font-display text-xl font-bold text-text-main">Knowledge Base</h2>
-            <p className="mt-2 max-w-md text-sm text-text-muted">
-              Upload documents to build your team's knowledge base. Agents can search these documents
-              for relevant information during conversations.
-            </p>
-            <p className="mt-1 text-xs text-text-muted">Supported: PDF, DOCX, TXT, Markdown, CSV</p>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ---- Workspace Tab (existing file tree) ----
-
-function WorkspaceTab() {
-  const [files, setFiles] = useState<FileNode[]>([])
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [fileContent, setFileContent] = useState('')
-  const [editing, setEditing] = useState(false)
-  const [editContent, setEditContent] = useState('')
-  const [search, setSearch] = useState('')
-  const [newFileName, setNewFileName] = useState('')
-  const [showNewFile, setShowNewFile] = useState(false)
-
-  const loadFiles = async (dir = '') => {
-    try {
-      return await engine.listFiles(dir)
-    } catch {
-      return []
-    }
-  }
-
-  useEffect(() => { loadFiles().then(setFiles) }, [])
-
-  const toggleDir = async (node: FileNode) => {
-    if (!node.isDirectory) {
-      setSelectedFile(node.path)
-      try {
-        const data = await engine.readFile(node.path)
-        setFileContent(data.content)
-        setEditContent(data.content)
-        setEditing(false)
-      } catch { /* offline */ }
-      return
-    }
-    if (node.expanded) {
-      node.expanded = false
-      node.children = undefined
-      setFiles([...files])
-    } else {
-      const children = await loadFiles(node.path)
-      node.expanded = true
-      node.children = children.map((c) => ({ ...c, expanded: false }))
-      setFiles([...files])
-    }
-  }
-
-  const saveFile = async () => {
-    if (!selectedFile) return
-    await engine.writeFile(selectedFile, editContent, 'user')
-    setFileContent(editContent)
-    setEditing(false)
-  }
-
-  const handleCreateFile = async () => {
-    const name = newFileName.trim()
-    if (!name) return
-    const path = name.endsWith('.md') ? name : `${name}.md`
-    await engine.writeFile(path, `# ${name.replace('.md', '')}\n\n`, 'user')
-    setNewFileName('')
-    setShowNewFile(false)
-    await loadFiles().then(setFiles)
-    setSelectedFile(path)
-    const data = await engine.readFile(path)
-    setFileContent(data.content)
-    setEditContent(data.content)
-    setEditing(true)
-  }
-
-  const filterNodes = (nodes: FileNode[], query: string): FileNode[] => {
-    if (!query) return nodes
-    const q = query.toLowerCase()
-    return nodes.reduce<FileNode[]>((acc, node) => {
-      if (node.isDirectory) {
-        const filteredChildren = node.children ? filterNodes(node.children, query) : []
-        if (filteredChildren.length > 0 || node.name.toLowerCase().includes(q)) {
-          acc.push({ ...node, children: filteredChildren, expanded: true })
-        }
-      } else if (node.name.toLowerCase().includes(q)) {
-        acc.push(node)
-      }
-      return acc
-    }, [])
-  }
-
-  const displayFiles = search ? filterNodes(files, search) : files
-
-  const renderTree = (nodes: FileNode[], depth = 0) => (
-    <div>
-      {nodes.map((node) => (
-        <div key={node.path}>
-          <button
-            onClick={() => toggleDir(node)}
-            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors ${
-              selectedFile === node.path
-                ? 'bg-forest-green/10 text-forest-green font-medium'
-                : 'text-text-secondary hover:bg-light-surface-alt'
-            }`}
-            style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          >
-            <span className="material-symbols-outlined text-[16px] text-text-muted">
-              {node.isDirectory
-                ? node.expanded ? 'folder_open' : 'folder'
-                : 'description'
-              }
-            </span>
-            <span className="truncate">{node.name}</span>
-          </button>
-          {node.expanded && node.children && renderTree(node.children, depth + 1)}
-        </div>
-      ))}
-    </div>
-  )
-
-  return (
-    <div className="flex h-full">
-      {/* File Tree */}
-      <div className="w-72 shrink-0 border-r border-border-subtle bg-light-surface overflow-y-auto p-4">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold text-text-main">Workspace Files</h2>
-          <button
-            onClick={() => setShowNewFile(!showNewFile)}
-            className="text-text-muted hover:text-forest-green"
-            title="New file"
-          >
-            <span className="material-symbols-outlined text-[20px]">note_add</span>
-          </button>
-        </div>
-
-        {showNewFile && (
-          <div className="mb-3 flex items-center gap-1 rounded-lg border border-forest-green bg-white px-2 py-1.5">
-            <input
-              type="text"
-              value={newFileName}
-              onChange={(e) => setNewFileName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreateFile()
-                if (e.key === 'Escape') { setShowNewFile(false); setNewFileName('') }
-              }}
-              placeholder="filename.md"
-              className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-text-muted/50"
-              autoFocus
-            />
-            <button
-              onClick={handleCreateFile}
-              disabled={!newFileName.trim()}
-              className="rounded p-0.5 text-forest-green hover:bg-forest-green/10 disabled:opacity-40"
-            >
-              <span className="material-symbols-outlined text-[16px]">check</span>
-            </button>
-          </div>
-        )}
-
-        <div className="mb-3">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search files..."
-            className="w-full rounded-lg border border-border-subtle px-3 py-1.5 text-sm focus:border-forest-green focus:outline-none"
-          />
-        </div>
-        {displayFiles.length > 0 ? (
-          renderTree(displayFiles)
-        ) : (
-          <p className="py-8 text-center text-xs text-text-muted">No files yet. Create workspace files from the engine.</p>
-        )}
-      </div>
-
-      {/* Editor */}
-      <div className="flex flex-1 flex-col">
-        {selectedFile ? (
-          <>
+        ) : selection?.type === 'file' ? (
+          /* Workspace File Editor */
+          <div className="flex flex-1 h-full flex-col">
             <div className="flex items-center justify-between border-b border-border-subtle bg-white px-6 py-3">
               <div className="flex items-center gap-2 text-sm">
-                <span className="font-mono text-text-muted">{selectedFile}</span>
+                <span className="font-mono text-text-muted">{selection.path}</span>
               </div>
               <div className="flex gap-2">
                 {editing ? (
@@ -603,12 +592,17 @@ function WorkspaceTab() {
                 <pre className="whitespace-pre-wrap font-mono text-sm text-text-main">{fileContent}</pre>
               )}
             </div>
-          </>
+          </div>
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <span className="material-symbols-outlined mb-4 text-5xl text-text-muted">folder</span>
-            <h2 className="font-display text-xl font-bold text-text-main">Workspace Files</h2>
-            <p className="mt-2 text-sm text-text-muted">Select a file to view or edit. SOPs, strategy docs, and agent notes live here.</p>
+          /* Empty State */
+          <div className="flex flex-1 h-full flex-col items-center justify-center text-center p-6">
+            <span className="material-symbols-outlined mb-4 text-5xl text-text-muted">folder_open</span>
+            <h2 className="font-display text-xl font-bold text-text-main">Files</h2>
+            <p className="mt-2 max-w-md text-sm text-text-muted">
+              Upload documents to build your knowledge base, or browse workspace files created by your agents.
+              Agents can search uploaded documents for relevant information during conversations.
+            </p>
+            <p className="mt-1 text-xs text-text-muted">Supported uploads: PDF, DOCX, TXT, Markdown, CSV</p>
           </div>
         )}
       </div>

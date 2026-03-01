@@ -31,8 +31,11 @@ export function TeamProvider({ children }: { children: ReactNode }) {
     try {
       const userTeams = await listTeams()
 
-      // If user has no teams, auto-create one
-      if (userTeams.length === 0) {
+      // Auto-create a team only for truly new users who have never had one.
+      // Check localStorage — if we've ever stored a team ID, the user is not new;
+      // the API might just be returning empty due to a transient issue.
+      const stored = localStorage.getItem(STORAGE_KEY)
+      if (userTeams.length === 0 && !stored) {
         const { data: { user } } = await supabase.auth.getUser()
         const name = user?.user_metadata?.full_name
           ? `${user.user_metadata.full_name}'s Team`
@@ -41,15 +44,20 @@ export function TeamProvider({ children }: { children: ReactNode }) {
         userTeams.push({ ...newTeam, role: 'admin' })
       }
 
+      if (userTeams.length === 0) {
+        // Existing user but API returned empty — don't create, just wait for retry
+        return
+      }
+
       setTeams(userTeams)
 
       // Restore active team from localStorage
-      const stored = localStorage.getItem(STORAGE_KEY)
       const match = userTeams.find((t) => t.id === stored)
       const team = match ?? userTeams[0]
 
       setActiveTeam(team)
       setActiveTeamId(team.id)
+      localStorage.setItem(STORAGE_KEY, team.id)
     } catch (err) {
       console.error('[team-context] Failed to load teams:', err)
     } finally {

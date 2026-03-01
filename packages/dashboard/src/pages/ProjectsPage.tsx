@@ -246,6 +246,7 @@ export function ProjectsPage() {
                 <input
                   type="date"
                   value={newDate}
+                  min={new Date().toISOString().split('T')[0]}
                   onChange={(e) => setNewDate(e.target.value)}
                   className="rounded-lg border border-border-subtle px-3 py-1.5 text-sm focus:border-forest-green focus:outline-none"
                 />

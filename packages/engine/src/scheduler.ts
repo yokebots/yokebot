@@ -14,7 +14,7 @@ import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
-import { getDmChannel, sendMessage } from './chat.ts'
+import { getDmChannel, sendMessage, listChannels, createChannel } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
 import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost } from './billing.ts'
@@ -201,7 +201,13 @@ export async function respondToMention(
 
   if (!state.workspaceConfig) return
 
-  const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
+  let modelConfig
+  try {
+    modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
+  } catch (err) {
+    console.error(`[scheduler] Cannot resolve model for "${agent.name}":`, (err as Error).message)
+    return
+  }
   const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
 
   // Get recent channel messages for context
@@ -228,8 +234,9 @@ export async function respondToMention(
     ``,
     `Respond naturally to the conversation. Be helpful, concise, and on-topic.`,
     `If asked a question, answer it. If given a task, acknowledge it and take action.`,
-    `When referencing knowledge base documents, use the @[title](file:id) mention syntax.`,
+    ...(kbContext ? [`When referencing knowledge base documents, use the @[title](file:id) mention syntax.`] : []),
     `Keep your response under 500 characters unless a detailed answer is needed.`,
+    `IMPORTANT: Never invent or fabricate file references. Only reference documents that are explicitly listed below.`,
     kbContext,
   ].join('\n')
 
@@ -280,6 +287,34 @@ export function unscheduleAgent(agentId: string): void {
 //   }
 //   return lines.join('\n')
 // }
+
+/**
+ * Pick the best group channel for an agent's message based on department match.
+ * Falls back to #general or first group channel if no match found.
+ */
+async function pickBestChannel(db: Db, agent: { teamId: string; department: string | null; name: string }) {
+  const { listChannels, createChannel } = await import('./chat.ts')
+  const channels = await listChannels(db, agent.teamId)
+  const groupChannels = channels.filter(c => c.type === 'group')
+
+  if (groupChannels.length > 0 && agent.department) {
+    const dept = agent.department.toLowerCase()
+    // Exact match first (e.g., department "marketing" → channel "marketing")
+    const exact = groupChannels.find(c => c.name === dept)
+    if (exact) return exact
+    // Partial match (e.g., department "Sales" → channel "sales-team")
+    const partial = groupChannels.find(c => c.name.includes(dept) || dept.includes(c.name))
+    if (partial) return partial
+  }
+
+  // Fall back to #general or first group channel
+  const general = groupChannels.find(c => c.name === 'general')
+  if (general) return general
+  if (groupChannels.length > 0) return groupChannels[0]
+
+  // No group channels at all — create #general
+  return await createChannel(db, agent.teamId, 'general', 'group')
+}
 
 /**
  * Single heartbeat cycle for an agent.
@@ -337,12 +372,15 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
       ? { maxIterations: 10, skipCredits: true }
       : undefined
     const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
-    if (result.response && !result.response.includes('[no-op]')) {
-      // Route proactive messages to the agent's DM channel
-      const dmChannel = await getDmChannel(db, agent.id, agent.teamId)
-      await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response, undefined, agent.teamId)
+    // Skip no-ops and iteration-limit fallback messages — don't spam channels
+    const isNoOp = result.response?.includes('[no-op]')
+    const isIterationLimit = result.response?.includes('unable to complete the task within the iteration limit')
+    if (result.response && !isNoOp && !isIterationLimit) {
+      // Route proactive messages to the best-matching group channel
+      const groupChannel = await pickBestChannel(db, agent)
+      await sendMessage(db, groupChannel.id, 'agent', agent.id, result.response, undefined, agent.teamId)
       await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`, undefined, agent.teamId)
-      console.log(`[scheduler] Proactive message from "${agent.name}" posted to DM`)
+      console.log(`[scheduler] Proactive message from "${agent.name}" posted to #${groupChannel.name}`)
     }
   } catch (err) {
     console.error(`[scheduler] Heartbeat error for "${agent.name}":`, err)

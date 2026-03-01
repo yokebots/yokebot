@@ -49,13 +49,24 @@ export const ChatWithAgentSchema = z.object({
 
 // ---- Tasks ----
 
+const futureDeadline = z.string().max(100).refine(
+  (val) => {
+    const d = new Date(val)
+    if (isNaN(d.getTime())) return false
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return d >= today
+  },
+  { message: 'Deadline cannot be in the past' },
+)
+
 export const CreateTaskSchema = z.object({
   title: z.string().min(1).max(500),
   description: z.string().max(5000).optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   assignedAgentId: z.string().max(200).optional(),
   parentTaskId: z.string().max(200).optional(),
-  deadline: z.string().max(100).optional(),
+  deadline: futureDeadline.optional(),
 })
 
 export const UpdateTaskSchema = z.object({
@@ -64,7 +75,7 @@ export const UpdateTaskSchema = z.object({
   status: z.enum(['backlog', 'todo', 'in_progress', 'review', 'done']).optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   assignedAgentId: z.string().max(200).nullable().optional(),
-  deadline: z.string().max(100).nullable().optional(),
+  deadline: futureDeadline.nullable().optional(),
 })
 
 // ---- Chat ----
@@ -180,8 +191,9 @@ export const CreateWorkflowSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(5000).optional(),
   goalId: z.string().max(200).optional(),
-  triggerType: z.enum(['manual', 'scheduled']).optional(),
+  triggerType: z.enum(['manual', 'scheduled', 'row_added', 'row_updated']).optional(),
   scheduleCron: z.string().max(100).optional(),
+  triggerTableId: z.string().max(200).optional(),
   steps: z.array(z.object({
     title: z.string().min(1).max(500),
     description: z.string().max(5000).optional(),
@@ -196,8 +208,9 @@ export const UpdateWorkflowSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).optional(),
   goalId: z.string().max(200).nullable().optional(),
-  triggerType: z.enum(['manual', 'scheduled']).optional(),
+  triggerType: z.enum(['manual', 'scheduled', 'row_added', 'row_updated']).optional(),
   scheduleCron: z.string().max(100).nullable().optional(),
+  triggerTableId: z.string().max(200).nullable().optional(),
   status: z.enum(['active', 'archived']).optional(),
 })
 

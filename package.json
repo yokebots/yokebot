@@ -11,6 +11,9 @@
     "build:engine": "pnpm --filter @yokebot/engine build",
     "lint": "pnpm -r lint"
   },
+  "dependencies": {
+    "stripe": "^20.3.1"
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",

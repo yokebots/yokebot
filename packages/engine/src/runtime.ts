@@ -10,13 +10,13 @@
 
 import type { Db } from './db/types.ts'
 import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCall, type ModelConfig } from './model.ts'
-import { getMessages, addMessage } from './agent.ts'
+import { getMessages, addMessage, getAgent } from './agent.ts'
 import { listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { createTask, listTasks, updateTask } from './tasks.ts'
-import { getDmChannel, sendMessage, getTaskThread } from './chat.ts'
+import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel } from './chat.ts'
 import { createApproval } from './approval.ts'
-import { listSorTables, listSorRows, updateSorRow, getSorTableByName, checkSorPermission } from './sor.ts'
-import { getAgentSkills, getSkillTools } from './skills.ts'
+import { listSorTables, listSorRows, addSorRow, updateSorRow, getSorTableByName, checkSorPermission } from './sor.ts'
+import { getAgentSkills, getSkillTools, loadSkillsFromDir, installSkill } from './skills.ts'
 import { executeSkillHandler } from './skill-handlers.ts'
 import { executeBrowserTool, isBrowserTool } from './browser.ts'
 import { loadMcpTools, callMcpTool, isMcpTool } from './mcp-client.ts'
@@ -146,6 +146,11 @@ function getBuiltinTools(): ToolDef[] {
       tableName: { type: 'string', description: 'The table name to query' },
     }, ['tableName']),
 
+    toolDef('add_source_of_record_row', 'Add a new row to a Source of Record data table.', {
+      tableName: { type: 'string', description: 'The table name to add the row to' },
+      data: { type: 'object', description: 'Key-value pairs for the new row (keys should match table column names)' },
+    }, ['tableName', 'data']),
+
     toolDef('update_source_of_record', 'Update a row in a Source of Record data table.', {
       tableName: { type: 'string', description: 'The table name' },
       rowId: { type: 'string', description: 'The row ID to update' },
@@ -198,6 +203,13 @@ function getBuiltinTools(): ToolDef[] {
 
     toolDef('list_workflows', 'List available workflows for the current team.', {}, []),
 
+    // Skills self-install
+    toolDef('list_available_skills', 'List all available skills with their install status. Use this to discover skills you can install to gain new capabilities.', {}, []),
+
+    toolDef('install_skill', 'Install a skill to gain its tools and capabilities. The skill\'s tools become available on your next action cycle.', {
+      skillName: { type: 'string', description: 'The name of the skill to install (from list_available_skills)' },
+    }, ['skillName']),
+
   ]
 }
 
@@ -243,6 +255,14 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Tasks ----
     case 'create_task': {
+      // Validate deadline is not in the past
+      if (args.deadline) {
+        const dl = new Date(args.deadline as string)
+        const today = new Date(); today.setHours(0, 0, 0, 0)
+        if (!isNaN(dl.getTime()) && dl < today) {
+          return `Error: Deadline "${args.deadline}" is in the past. Today is ${today.toISOString().split('T')[0]}. Please set a future deadline.`
+        }
+      }
       const task = await createTask(ctx.db, ctx.teamId, args.title as string, {
         description: args.description as string | undefined,
         priority: (args.priority as 'low' | 'medium' | 'high' | 'urgent') ?? 'medium',
@@ -263,6 +283,14 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'update_task': {
+      // Validate deadline is not in the past
+      if (args.deadline) {
+        const dl = new Date(args.deadline as string)
+        const today = new Date(); today.setHours(0, 0, 0, 0)
+        if (!isNaN(dl.getTime()) && dl < today) {
+          return `Error: Deadline "${args.deadline}" is in the past. Today is ${today.toISOString().split('T')[0]}. Please set a future deadline.`
+        }
+      }
       // Verify task belongs to this agent's team before updating
       const existingTask = await listTasks(ctx.db, { teamId: ctx.teamId })
       const targetTask = existingTask.find((t) => t.id === (args.taskId as string))
@@ -325,12 +353,32 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Chat ----
     case 'send_chat_message': {
-      const dmChannel = await getDmChannel(ctx.db, ctx.agentId, ctx.teamId)
-      const channelId = (args.channelId as string) === 'dm'
-        ? dmChannel.id
-        : args.channelId as string
-      const msg = await sendMessage(ctx.db, channelId, 'agent', ctx.agentId, args.content as string)
-      return `Message sent (id: ${msg.id})`
+      let channelId = args.channelId as string
+      const isDmRequest = channelId === 'dm'
+      if (!isDmRequest) {
+        const targetChannel = await getChannel(ctx.db, channelId)
+        if (targetChannel?.type === 'dm') {
+          // Trying to send to a DM channel by ID — treat same as 'dm'
+        } else {
+          // Valid non-DM channel — send normally
+          const msg = await sendMessage(ctx.db, channelId, 'agent', ctx.agentId, args.content as string)
+          return `Message sent (id: ${msg.id})`
+        }
+      }
+      // DM blocked — route to the best-matching group channel for this agent
+      const agent = await getAgent(ctx.db, ctx.agentId)
+      const channels = await listChannels(ctx.db, ctx.teamId)
+      const groupChannels = channels.filter(c => c.type === 'group')
+      let bestChannel = groupChannels.find(c => c.name === 'general')
+      if (agent?.department && groupChannels.length > 0) {
+        const dept = agent.department.toLowerCase()
+        const exact = groupChannels.find(c => c.name === dept)
+        const partial = groupChannels.find(c => c.name.includes(dept) || dept.includes(c.name))
+        bestChannel = exact || partial || bestChannel
+      }
+      const fallback = bestChannel || groupChannels[0] || await createChannel(ctx.db, ctx.teamId, 'general', 'group')
+      const msg = await sendMessage(ctx.db, fallback.id, 'agent', ctx.agentId, args.content as string)
+      return `Message sent to #${fallback.name} (id: ${msg.id}). Note: Direct messages are not allowed — use group channels or task threads instead.`
     }
 
     // ---- Approvals ----
@@ -357,6 +405,27 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const rows = await listSorRows(ctx.db, table.id)
       if (rows.length === 0) return `Table "${table.name}" has no rows.`
       return JSON.stringify(rows, null, 2)
+    }
+
+    case 'add_source_of_record_row': {
+      const table = await getSorTableByName(ctx.db, args.tableName as string, ctx.teamId)
+      if (!table) return `Table not found: "${args.tableName as string}"`
+      const addPerm = await checkSorPermission(ctx.db, ctx.agentId, table.id)
+      if (addPerm && !addPerm.canWrite) return `Access denied: you do not have write permission on table "${table.name}".`
+      const newRow = await addSorRow(ctx.db, table.id, args.data as Record<string, unknown>)
+      // Fire row_added workflows (best-effort, don't block agent)
+      try {
+        const { findWorkflowsByTableTrigger, startRun, listRuns } = await import('./workflows.ts')
+        const { advanceWorkflow } = await import('./workflow-executor.ts')
+        const triggered = await findWorkflowsByTableTrigger(ctx.db, ctx.teamId, table.id, 'row_added')
+        for (const wf of triggered) {
+          const active = await listRuns(ctx.db, { workflowId: wf.id, status: 'running' as const })
+          if (active.length > 0) continue
+          const run = await startRun(ctx.db, ctx.teamId, wf.id, 'table_trigger', { tableName: table.name, row: newRow.data, triggerType: 'row_added' })
+          await advanceWorkflow(ctx.db, run.id)
+        }
+      } catch { /* best-effort */ }
+      return `Row added to "${table.name}" (id: ${newRow.id}): ${JSON.stringify(newRow.data)}`
     }
 
     case 'update_source_of_record': {
@@ -526,6 +595,28 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       return workflows.map((w) => `- "${w.name}" (id: ${w.id}, status: ${w.status}, trigger: ${w.triggerType})`).join('\n')
     }
 
+    // ---- Skills Self-Install ----
+    case 'list_available_skills': {
+      const allSkills = loadSkillsFromDir(ctx.skillsDir)
+      const installed = (await getAgentSkills(ctx.db, ctx.agentId)).map(s => s.skillName)
+      if (allSkills.length === 0) return 'No skills available in the skills directory.'
+      return allSkills.map(s => {
+        const status = installed.includes(s.metadata.name) ? ' (installed)' : ''
+        return `- ${s.metadata.name}${status}: ${s.metadata.description}`
+      }).join('\n')
+    }
+
+    case 'install_skill': {
+      const skillName = args.skillName as string
+      const allSkills = loadSkillsFromDir(ctx.skillsDir)
+      const skill = allSkills.find(s => s.metadata.name === skillName)
+      if (!skill) return `Skill not found: "${skillName}". Use list_available_skills to see available skills.`
+      const installed = (await getAgentSkills(ctx.db, ctx.agentId)).map(s => s.skillName)
+      if (installed.includes(skillName)) return `Skill "${skillName}" is already installed.`
+      await installSkill(ctx.db, ctx.agentId, skillName)
+      return `Skill "${skillName}" installed successfully. Its tools will be available on your next action cycle.`
+    }
+
     default: {
       // Deduct skill credits before executing (hosted mode only, skip for free agents like AdvisorBot)
       if (HOSTED_MODE && !ctx.skipCredits) {
@@ -580,7 +671,13 @@ export function buildAgentSystemPrompt(agentName: string, customPrompt?: string 
     ? customPrompt.trim()
     : `You are ${agentName}, a proactive AI agent.`
 
+  const today = new Date().toISOString().split('T')[0] // e.g. "2026-03-01"
+
   return `${identity}
+
+## Current Date
+
+Today is ${today}. Always use this when setting deadlines, scheduling, or reasoning about time. Never set deadlines in the past.
 
 ## How you work
 
@@ -606,6 +703,9 @@ This applies to ALL actions: responding to messages, updating tasks, searching t
 - If a task is blocked or unclear, ask for clarification via the respond tool.
 - If an action could have significant consequences, use request_approval to get human sign-off first.
 - When collaborating with other agents via channels, be specific about what you need from them.
+- When you need guidance, direction, or collaboration, @mention the relevant agent in a group channel. Do NOT message the human directly unless they specifically asked you something.
+- All your communication should happen in group channels or task threads — never send direct messages proactively.
+- If you're unsure what to do, ask your team lead or AdvisorBot via @mention in a group channel.
 - If there is nothing meaningful to do, respond with "[no-op]" — do not take actions just to appear busy.
 
 `

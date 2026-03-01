@@ -3,8 +3,9 @@
  */
 
 import { useState, useRef, useEffect } from 'react'
+import { Link } from 'react-router'
 import { useTeam } from '../lib/team-context'
-import { getTeamLogoUrl } from '../lib/engine'
+import { getTeamLogoUrl, getBillingStatus } from '../lib/engine'
 
 function TeamIcon({ teamId, name, size = 6 }: { teamId: string; name: string; size?: number }) {
   const [hasLogo, setHasLogo] = useState(true)
@@ -36,7 +37,16 @@ export default function TeamSwitcher() {
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const [hasPaidSub, setHasPaidSub] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+
+  // Check subscription status
+  useEffect(() => {
+    getBillingStatus().then((s) => {
+      const sub = s.subscription
+      setHasPaidSub(!!sub && (sub.status === 'active' || sub.status === 'past_due') && sub.tier !== 'none')
+    }).catch(() => {})
+  }, [])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -88,29 +98,40 @@ export default function TeamSwitcher() {
           ))}
 
           <div className="border-t border-border-subtle">
-            {creating ? (
-              <div className="p-2 flex gap-2">
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-                  placeholder="Team name..."
-                  className="flex-1 px-2 py-1 text-sm bg-light-surface-alt border border-border-subtle rounded text-text-main focus:outline-none focus:border-forest-green"
-                  autoFocus
-                />
-                <button onClick={handleCreate} className="px-2 py-1 text-xs bg-forest-green text-white rounded hover:bg-forest-green/90">
-                  Create
+            {hasPaidSub ? (
+              creating ? (
+                <div className="p-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                    placeholder="Team name..."
+                    className="flex-1 px-2 py-1 text-sm bg-light-surface-alt border border-border-subtle rounded text-text-main focus:outline-none focus:border-forest-green"
+                    autoFocus
+                  />
+                  <button onClick={handleCreate} className="px-2 py-1 text-xs bg-forest-green text-white rounded hover:bg-forest-green/90">
+                    Create
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setCreating(true)}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
+                >
+                  <span className="w-5 h-5 rounded border border-dashed border-border-subtle flex items-center justify-center text-xs">+</span>
+                  Create Team
                 </button>
-              </div>
+              )
             ) : (
-              <button
-                onClick={() => setCreating(true)}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
+              <Link
+                to="/settings/billing"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-muted hover:bg-light-surface-alt transition-colors"
               >
-                <span className="w-5 h-5 rounded border border-dashed border-border-subtle flex items-center justify-center text-xs">+</span>
-                Create Team
-              </button>
+                <span className="material-symbols-outlined text-[14px]">lock</span>
+                <span>Upgrade to add teams</span>
+              </Link>
             )}
           </div>
         </div>

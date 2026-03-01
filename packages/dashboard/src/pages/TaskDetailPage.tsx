@@ -426,6 +426,7 @@ export function TaskDetailPage() {
                 <input
                   type="date"
                   value={task.deadline?.split('T')[0] ?? ''}
+                  min={new Date().toISOString().split('T')[0]}
                   onChange={(e) => updateField('deadline', e.target.value || null)}
                   className="w-full rounded border border-border-subtle px-2 py-1.5 text-sm"
                 />

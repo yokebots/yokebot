@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { EngineAgent, WorkflowStep, AgentSkill } from '@/lib/engine'
+import type { EngineAgent, WorkflowStep, AgentSkill, SorTable } from '@/lib/engine'
 
 interface StepForm {
   id?: string
@@ -32,8 +32,10 @@ export function WorkflowBuilderPage() {
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [triggerType, setTriggerType] = useState<'manual' | 'scheduled'>('manual')
+  const [triggerType, setTriggerType] = useState<'manual' | 'scheduled' | 'row_added' | 'row_updated'>('manual')
   const [scheduleCron, setScheduleCron] = useState('')
+  const [triggerTableId, setTriggerTableId] = useState('')
+  const [sorTables, setSorTables] = useState<SorTable[]>([])
   const [steps, setSteps] = useState<StepForm[]>([emptyStep()])
   const [agents, setAgents] = useState<EngineAgent[]>([])
   const [allSkills, setAllSkills] = useState<SkillMeta[]>([])
@@ -44,12 +46,14 @@ export function WorkflowBuilderPage() {
   useEffect(() => {
     engine.listAgents().then(setAgents).catch(() => {})
     engine.listSkills().then(setAllSkills).catch(() => {})
+    engine.listSorTables().then(setSorTables).catch(() => {})
     if (isEditing) {
       engine.getWorkflow(id).then((wf) => {
         setName(wf.name)
         setDescription(wf.description)
         setTriggerType(wf.triggerType)
         setScheduleCron(wf.scheduleCron ?? '')
+        setTriggerTableId(wf.triggerTableId ?? '')
         if (wf.steps.length > 0) {
           setSteps(wf.steps.map((s: WorkflowStep) => {
             const cfg = safeParseConfig(s.config)
@@ -146,6 +150,7 @@ export function WorkflowBuilderPage() {
           description: description.trim(),
           triggerType,
           scheduleCron: triggerType === 'scheduled' ? scheduleCron : null,
+          triggerTableId: (triggerType === 'row_added' || triggerType === 'row_updated') ? triggerTableId || null : null,
         })
         // Delete old steps and re-create (simplest approach for reorder)
         const existing = await engine.getWorkflow(id)
@@ -162,6 +167,7 @@ export function WorkflowBuilderPage() {
           description: description.trim(),
           triggerType,
           scheduleCron: triggerType === 'scheduled' ? scheduleCron : undefined,
+          triggerTableId: (triggerType === 'row_added' || triggerType === 'row_updated') ? triggerTableId || undefined : undefined,
           steps: stepData,
         })
         navigate(`/workflows/${wf.id}`)
@@ -228,6 +234,24 @@ export function WorkflowBuilderPage() {
                 <span className="material-symbols-outlined text-[16px]">schedule</span>
                 Scheduled
               </button>
+              <button
+                onClick={() => setTriggerType('row_added')}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium border transition-colors ${
+                  triggerType === 'row_added' ? 'border-forest-green bg-forest-green/5 text-forest-green' : 'border-border-subtle text-text-secondary hover:border-forest-green/30'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                Row Added
+              </button>
+              <button
+                onClick={() => setTriggerType('row_updated')}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium border transition-colors ${
+                  triggerType === 'row_updated' ? 'border-forest-green bg-forest-green/5 text-forest-green' : 'border-border-subtle text-text-secondary hover:border-forest-green/30'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px]">edit_note</span>
+                Row Updated
+              </button>
             </div>
             {triggerType === 'scheduled' && (
               <div className="mt-3">
@@ -237,6 +261,27 @@ export function WorkflowBuilderPage() {
                   className="w-full rounded-lg border border-border-subtle bg-white px-3 py-2 text-sm focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
                 />
                 <p className="mt-1 text-xs text-text-muted">Format: daily:HH:MM or weekly:DAY:HH:MM</p>
+              </div>
+            )}
+            {(triggerType === 'row_added' || triggerType === 'row_updated') && (
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-text-muted mb-1">Data Table</label>
+                <select
+                  value={triggerTableId}
+                  onChange={(e) => setTriggerTableId(e.target.value)}
+                  className="w-full rounded-lg border border-border-subtle bg-white px-3 py-2 text-sm focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                >
+                  <option value="">Select a table...</option>
+                  {sorTables.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-text-muted">
+                  {triggerType === 'row_added'
+                    ? 'This workflow will run automatically when a new row is added to this table.'
+                    : 'This workflow will run automatically when a row is updated in this table.'}
+                  {' '}Use {'{{row.FieldName}}'} in step descriptions to reference row data.
+                </p>
               </div>
             )}
           </div>

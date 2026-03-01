@@ -396,6 +396,7 @@ const SQLITE_DDL = `
     goal_id TEXT,
     trigger_type TEXT NOT NULL DEFAULT 'manual',
     schedule_cron TEXT,
+    trigger_table_id TEXT,
     created_by TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -421,6 +422,7 @@ const SQLITE_DDL = `
     status TEXT NOT NULL DEFAULT 'running',
     current_step INTEGER NOT NULL DEFAULT 0,
     started_by TEXT NOT NULL DEFAULT '',
+    context TEXT NOT NULL DEFAULT '{}',
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     completed_at TEXT,
     error TEXT
@@ -886,6 +888,7 @@ const POSTGRES_DDL = `
     goal_id TEXT,
     trigger_type TEXT NOT NULL DEFAULT 'manual',
     schedule_cron TEXT,
+    trigger_table_id TEXT,
     created_by TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -911,6 +914,7 @@ const POSTGRES_DDL = `
     status TEXT NOT NULL DEFAULT 'running',
     current_step INTEGER NOT NULL DEFAULT 0,
     started_by TEXT NOT NULL DEFAULT '',
+    context TEXT NOT NULL DEFAULT '{}',
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
     error TEXT
@@ -973,6 +977,10 @@ const POSTGRES_DDL = `
   -- =====================================================================
   -- Row Level Security (RLS)
   --
+  -- Migrations: Add trigger_table_id to workflows, context to workflow_runs
+  ALTER TABLE workflows ADD COLUMN IF NOT EXISTS trigger_table_id TEXT;
+  ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS context TEXT NOT NULL DEFAULT '{}';
+
   -- All tables are accessed via the Express API using a service_role or
   -- direct Postgres connection (which bypasses RLS). We enable RLS and
   -- leave zero policies so the Supabase PostgREST anon/authenticated

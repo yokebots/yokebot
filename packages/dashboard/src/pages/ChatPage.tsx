@@ -47,6 +47,10 @@ export function ChatPage() {
   const [showReactionPicker, setShowReactionPicker] = useState<number | null>(null) // messageId with picker open
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const justSentRef = useRef(false)
+  const [hasNewMessages, setHasNewMessages] = useState(false)
   const channelInputRef = useRef<HTMLInputElement>(null)
   const [tasks, setTasks] = useState<EngineTask[]>([])
 
@@ -104,11 +108,22 @@ export function ChatPage() {
   useEffect(() => {
     // Mark channel as read when selecting it
     if (!activeChannelId) return
+    isNearBottomRef.current = true
+    setHasNewMessages(false)
     loadMessages()
     engine.markChannelRead(activeChannelId).catch(() => {})
     setUnreadCounts(prev => { const next = { ...prev }; delete next[activeChannelId]; return next })
   }, [activeChannelId])
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => {
+    if (justSentRef.current || isNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      justSentRef.current = false
+      setHasNewMessages(false)
+    } else if (messages.length > 0) {
+      // User is scrolled up and new messages arrived — show pill
+      setHasNewMessages(true)
+    }
+  }, [messages])
   useEffect(() => {
     if (showCreateChannel) channelInputRef.current?.focus()
   }, [showCreateChannel])
@@ -125,6 +140,7 @@ export function ChatPage() {
     if (!newMessage.trim() || !activeChannelId) return
     const msg = newMessage.trim()
     setNewMessage('') // Clear input immediately (optimistic)
+    justSentRef.current = true
     await engine.sendMessage(activeChannelId, {
       senderType: 'human',
       senderId: 'user',
@@ -755,7 +771,16 @@ export function ChatPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto p-6 space-y-4 relative"
+          onScroll={() => {
+            const el = scrollContainerRef.current
+            if (!el) return
+            isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 150
+            if (isNearBottomRef.current) setHasNewMessages(false)
+          }}
+        >
           {messages.length === 0 && activeChannelId && activeChannel?.type === 'group' && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-forest-green/10">
@@ -925,6 +950,18 @@ export function ChatPage() {
             </div>
           )}
           <div ref={messagesEndRef} />
+          {hasNewMessages && (
+            <button
+              onClick={() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+                setHasNewMessages(false)
+              }}
+              className="sticky bottom-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full bg-forest-green px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-forest-green/90 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
+              New messages
+            </button>
+          )}
         </div>
 
         {/* Input */}

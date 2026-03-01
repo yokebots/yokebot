@@ -11,7 +11,7 @@ import { randomUUID } from 'crypto'
 // ---- Types ----
 
 export type WorkflowStatus = 'active' | 'archived'
-export type TriggerType = 'manual' | 'scheduled'
+export type TriggerType = 'manual' | 'scheduled' | 'row_added' | 'row_updated'
 export type GateType = 'auto' | 'approval'
 export type RunStatus = 'running' | 'paused' | 'completed' | 'failed' | 'canceled'
 export type RunStepStatus = 'pending' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'skipped'
@@ -24,6 +24,7 @@ export interface Workflow {
   goalId: string | null
   triggerType: TriggerType
   scheduleCron: string | null
+  triggerTableId: string | null
   createdBy: string
   status: WorkflowStatus
   createdAt: string
@@ -49,6 +50,7 @@ export interface WorkflowRun {
   status: RunStatus
   currentStep: number
   startedBy: string
+  context: string
   startedAt: string
   completedAt: string | null
   error: string | null
@@ -71,12 +73,12 @@ export async function createWorkflow(
   db: Db,
   teamId: string,
   name: string,
-  opts?: { description?: string; goalId?: string; triggerType?: TriggerType; scheduleCron?: string; createdBy?: string },
+  opts?: { description?: string; goalId?: string; triggerType?: TriggerType; scheduleCron?: string; triggerTableId?: string; createdBy?: string },
 ): Promise<Workflow> {
   const id = randomUUID()
   await db.run(
-    'INSERT INTO workflows (id, team_id, name, description, goal_id, trigger_type, schedule_cron, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-    [id, teamId, name, opts?.description ?? '', opts?.goalId ?? null, opts?.triggerType ?? 'manual', opts?.scheduleCron ?? null, opts?.createdBy ?? ''],
+    'INSERT INTO workflows (id, team_id, name, description, goal_id, trigger_type, schedule_cron, trigger_table_id, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+    [id, teamId, name, opts?.description ?? '', opts?.goalId ?? null, opts?.triggerType ?? 'manual', opts?.scheduleCron ?? null, opts?.triggerTableId ?? null, opts?.createdBy ?? ''],
   )
   return (await getWorkflow(db, id))!
 }
@@ -102,7 +104,7 @@ export async function listWorkflows(db: Db, teamId: string, status?: WorkflowSta
 export async function updateWorkflow(
   db: Db,
   id: string,
-  updates: { name?: string; description?: string; goalId?: string | null; triggerType?: TriggerType; scheduleCron?: string | null; status?: WorkflowStatus },
+  updates: { name?: string; description?: string; goalId?: string | null; triggerType?: TriggerType; scheduleCron?: string | null; triggerTableId?: string | null; status?: WorkflowStatus },
 ): Promise<Workflow | null> {
   const fields: string[] = []
   const values: unknown[] = []
@@ -113,6 +115,7 @@ export async function updateWorkflow(
   if (updates.goalId !== undefined) { fields.push(`goal_id = $${paramIdx++}`); values.push(updates.goalId) }
   if (updates.triggerType !== undefined) { fields.push(`trigger_type = $${paramIdx++}`); values.push(updates.triggerType) }
   if (updates.scheduleCron !== undefined) { fields.push(`schedule_cron = $${paramIdx++}`); values.push(updates.scheduleCron) }
+  if (updates.triggerTableId !== undefined) { fields.push(`trigger_table_id = $${paramIdx++}`); values.push(updates.triggerTableId) }
   if (updates.status !== undefined) { fields.push(`status = $${paramIdx++}`); values.push(updates.status) }
 
   if (fields.length === 0) return getWorkflow(db, id)
@@ -209,11 +212,12 @@ export async function startRun(
   teamId: string,
   workflowId: string,
   startedBy: string,
+  context?: Record<string, unknown>,
 ): Promise<WorkflowRun> {
   const id = randomUUID()
   await db.run(
-    'INSERT INTO workflow_runs (id, team_id, workflow_id, started_by) VALUES ($1, $2, $3, $4)',
-    [id, teamId, workflowId, startedBy],
+    'INSERT INTO workflow_runs (id, team_id, workflow_id, started_by, context) VALUES ($1, $2, $3, $4, $5)',
+    [id, teamId, workflowId, startedBy, JSON.stringify(context ?? {})],
   )
 
   // Create run_step records for each workflow step
@@ -315,6 +319,21 @@ export async function captureWorkflow(
   return workflow
 }
 
+// ---- Table-triggered workflow lookup ----
+
+export async function findWorkflowsByTableTrigger(
+  db: Db,
+  teamId: string,
+  tableId: string,
+  triggerType: 'row_added' | 'row_updated',
+): Promise<Workflow[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM workflows WHERE team_id = $1 AND trigger_table_id = $2 AND trigger_type = $3 AND status = 'active'`,
+    [teamId, tableId, triggerType],
+  )
+  return rows.map(rowToWorkflow)
+}
+
 // ---- Row converters ----
 
 function rowToWorkflow(row: Record<string, unknown>): Workflow {
@@ -326,6 +345,7 @@ function rowToWorkflow(row: Record<string, unknown>): Workflow {
     goalId: row.goal_id as string | null,
     triggerType: (row.trigger_type as TriggerType) ?? 'manual',
     scheduleCron: row.schedule_cron as string | null,
+    triggerTableId: row.trigger_table_id as string | null,
     createdBy: (row.created_by as string) ?? '',
     status: (row.status as WorkflowStatus) ?? 'active',
     createdAt: row.created_at as string,
@@ -355,6 +375,7 @@ function rowToRun(row: Record<string, unknown>): WorkflowRun {
     status: (row.status as RunStatus) ?? 'running',
     currentStep: (row.current_step as number) ?? 0,
     startedBy: (row.started_by as string) ?? '',
+    context: (row.context as string) ?? '{}',
     startedAt: row.started_at as string,
     completedAt: row.completed_at as string | null,
     error: row.error as string | null,

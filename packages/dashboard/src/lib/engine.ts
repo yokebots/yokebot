@@ -322,6 +322,13 @@ export interface SorTable {
   columns: Array<{ id: string; name: string; colType: string; position: number }>
 }
 
+export interface SorColumn {
+  id: string
+  name: string
+  colType: string
+  position: number
+}
+
 export interface SorRow {
   id: string
   tableId: string
@@ -341,6 +348,9 @@ export const listSorTables = () => request<SorTable[]>('/api/sor/tables')
 
 export const createSorTable = (name: string, columns?: Array<{ name: string; colType?: string }>) =>
   request<SorTable>('/api/sor/tables', { method: 'POST', body: JSON.stringify({ name, columns }) })
+
+export const addSorColumn = (tableId: string, name: string, colType = 'text') =>
+  request<SorColumn>(`/api/sor/tables/${tableId}/columns`, { method: 'POST', body: JSON.stringify({ name, colType }) })
 
 export const listSorRows = (tableId: string) => request<SorRow[]>(`/api/sor/tables/${tableId}/rows`)
 
@@ -1175,8 +1185,9 @@ export interface Workflow {
   name: string
   description: string
   goalId: string | null
-  triggerType: 'manual' | 'scheduled'
+  triggerType: 'manual' | 'scheduled' | 'row_added' | 'row_updated'
   scheduleCron: string | null
+  triggerTableId: string | null
   createdBy: string
   status: 'active' | 'archived'
   createdAt: string
@@ -1206,6 +1217,7 @@ export interface WorkflowRun {
   status: 'running' | 'paused' | 'completed' | 'failed' | 'canceled'
   currentStep: number
   startedBy: string
+  context: string
   startedAt: string
   completedAt: string | null
   error: string | null
@@ -1235,7 +1247,7 @@ export const listWorkflows = (status?: string) => {
 
 export const createWorkflow = (data: {
   name: string; description?: string; goalId?: string;
-  triggerType?: string; scheduleCron?: string;
+  triggerType?: string; scheduleCron?: string; triggerTableId?: string;
   steps?: Array<{ title: string; description?: string; assignedAgentId?: string; gate?: string; timeoutMinutes?: number; config?: string }>
 }) =>
   request<Workflow>('/api/workflows', { method: 'POST', body: JSON.stringify(data) })
@@ -1261,8 +1273,8 @@ export const deleteWorkflowStep = (workflowId: string, stepId: string) =>
 export const reorderWorkflowSteps = (workflowId: string, stepIds: string[]) =>
   request<{ reordered: boolean }>(`/api/workflows/${workflowId}/steps/reorder`, { method: 'PUT', body: JSON.stringify({ stepIds }) })
 
-export const startWorkflowRun = (workflowId: string) =>
-  request<WorkflowRun>(`/api/workflows/${workflowId}/run`, { method: 'POST' })
+export const startWorkflowRun = (workflowId: string, context?: Record<string, unknown>) =>
+  request<WorkflowRun>(`/api/workflows/${workflowId}/run`, { method: 'POST', body: JSON.stringify(context ? { context } : {}) })
 
 export const listWorkflowRuns = (filters?: { workflowId?: string; status?: string }) => {
   const params = new URLSearchParams()

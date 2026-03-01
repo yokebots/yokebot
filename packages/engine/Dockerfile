@@ -43,6 +43,9 @@ COPY --from=base /app/packages/engine/package.json packages/engine/
 RUN pnpm install --frozen-lockfile --filter @yokebot/engine... --prod
 COPY --from=base /app/packages/engine/dist packages/engine/dist/
 COPY --from=base /app/ee ee/
+
+# ee/ modules need access to stripe — symlink to engine's node_modules
+RUN ln -s /app/packages/engine/node_modules /app/ee/node_modules
 COPY --from=base /app/skills skills/
 
 ENV NODE_ENV=production

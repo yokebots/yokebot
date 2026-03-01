@@ -163,6 +163,7 @@ export function GoalsPage() {
                 <input
                   type="date"
                   value={newDeadline}
+                  min={new Date().toISOString().split('T')[0]}
                   onChange={(e) => setNewDeadline(e.target.value)}
                   className="w-full rounded-lg border border-border-subtle px-4 py-2.5 text-sm focus:border-forest-green focus:outline-none"
                 />

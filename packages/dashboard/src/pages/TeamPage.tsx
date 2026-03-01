@@ -51,7 +51,8 @@ export function TeamPage() {
   useEffect(() => {
     loadTeams()
     engine.getBillingStatus().then((s) => {
-      setHasSubscription(!!s.subscription)
+      const sub = s.subscription
+      setHasSubscription(!!sub && (sub.status === 'active' || sub.status === 'past_due') && sub.tier !== 'none')
     }).catch(() => {})
   }, [])
   useEffect(() => { if (selectedTeam) loadMembers(selectedTeam.id) }, [selectedTeam?.id])

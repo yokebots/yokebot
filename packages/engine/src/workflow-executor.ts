@@ -81,6 +81,25 @@ export async function advanceWorkflow(db: Db, runId: string): Promise<void> {
       : stepConfig.instructions
   }
 
+  // Resolve {{row.Field}} references from run context (row-triggered data)
+  if (taskDescription.includes('{{')) {
+    try {
+      const runContext = JSON.parse(run.context || '{}')
+      if (runContext.row && typeof runContext.row === 'object') {
+        for (const [key, val] of Object.entries(runContext.row as Record<string, unknown>)) {
+          taskDescription = taskDescription.replace(
+            new RegExp(`\\{\\{row\\.${key}\\}\\}`, 'g'),
+            String(val ?? ''),
+          )
+        }
+      }
+      // Also resolve {{tableName}} from context
+      if (runContext.tableName) {
+        taskDescription = taskDescription.replace(/\{\{tableName\}\}/g, String(runContext.tableName))
+      }
+    } catch { /* ignore bad context JSON */ }
+  }
+
   // Resolve {{variable}} references in the description from prior step outputs
   if (taskDescription.includes('{{')) {
     const priorOutputs = await db.query<Record<string, unknown>>(

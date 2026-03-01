@@ -210,7 +210,7 @@ export async function getUnreadCounts(db: Db, userId: string, teamId: string): P
 
 // ---- Mention Processing ----
 
-const MENTION_REGEX = /@\[([^\]]+)\]\((agent|user|file|everyone):([^)]+)\)/g
+const MENTION_PATTERN = /@\[([^\]]+)\]\((agent|user|file|everyone):([^)]+)\)/g
 
 interface ParsedMention {
   displayName: string
@@ -220,8 +220,7 @@ interface ParsedMention {
 
 function parseMentions(content: string): ParsedMention[] {
   const mentions: ParsedMention[] = []
-  let match
-  while ((match = MENTION_REGEX.exec(content)) !== null) {
+  for (const match of content.matchAll(MENTION_PATTERN)) {
     mentions.push({
       displayName: match[1],
       type: match[2] as ParsedMention['type'],
@@ -311,40 +310,45 @@ export async function processMentions(
     return
   }
 
-  for (const mention of mentions) {
-    try {
-      switch (mention.type) {
-        case 'agent':
-          // Broadcast typing indicator for individual mention too
-          broadcastChatEvent(channelId, {
-            type: 'typing',
-            channelId,
-            agentId: mention.id,
-            agentName: mention.displayName,
-          })
-          // Have the agent read the message and reply in the same channel
-          await respondToMention(db, mention.id, teamId, channelId, message)
-          broadcastChatEvent(channelId, {
-            type: 'stop_typing',
-            channelId,
-            agentId: mention.id,
-          })
-          break
+  // Separate agent mentions from other types
+  const agentMentions = mentions.filter(m => m.type === 'agent')
+  const otherMentions = mentions.filter(m => m.type !== 'agent')
 
-        case 'user':
-          // Create a notification for the human user
-          await createNotification(
-            db, teamId, mention.id, 'mention',
-            `You were mentioned by ${message.senderType === 'agent' ? 'an agent' : 'a team member'}`,
-            message.content.slice(0, 200),
-            `/chat/channels/${channelId}`,
-          )
-          break
-
-        case 'file':
-          // File mentions are display-only — no notification needed
-          break
+  // Process agent mentions concurrently with per-agent timeout (60s)
+  if (agentMentions.length > 0) {
+    const AGENT_TIMEOUT_MS = 60_000
+    await Promise.allSettled(agentMentions.map(async (mention) => {
+      broadcastChatEvent(channelId, {
+        type: 'typing', channelId,
+        agentId: mention.id, agentName: mention.displayName,
+      })
+      try {
+        await Promise.race([
+          respondToMention(db, mention.id, teamId, channelId, message),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Agent mention response timed out')), AGENT_TIMEOUT_MS)),
+        ])
+      } catch (err) {
+        console.error(`[chat] Failed to process mention agent:${mention.id}:`, err)
+      } finally {
+        broadcastChatEvent(channelId, {
+          type: 'stop_typing', channelId, agentId: mention.id,
+        })
       }
+    }))
+  }
+
+  // Process user/file mentions
+  for (const mention of otherMentions) {
+    try {
+      if (mention.type === 'user') {
+        await createNotification(
+          db, teamId, mention.id, 'mention',
+          `You were mentioned by ${message.senderType === 'agent' ? 'an agent' : 'a team member'}`,
+          message.content.slice(0, 200),
+          `/chat/channels/${channelId}`,
+        )
+      }
+      // file mentions are display-only — no notification needed
     } catch (err) {
       console.error(`[chat] Failed to process mention ${mention.type}:${mention.id}:`, err)
     }

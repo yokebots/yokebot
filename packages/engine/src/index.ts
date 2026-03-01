@@ -31,20 +31,46 @@ import { listNotifications, countUnread, markRead, markAllRead, listPreferences,
 import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
 import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
 import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema, CreateWorkflowSchema, UpdateWorkflowSchema, CaptureWorkflowSchema, AddWorkflowStepSchema, UpdateWorkflowStepSchema, ReorderWorkflowStepsSchema } from './validation.ts'
-import { createWorkflow, getWorkflow, listWorkflows, updateWorkflow, deleteWorkflow, addStep, updateStep, deleteStep, listSteps, reorderSteps, startRun, getRun, listRuns, cancelRun, listRunSteps, captureWorkflow } from './workflows.ts'
+import { createWorkflow, getWorkflow, listWorkflows, updateWorkflow, deleteWorkflow, addStep, updateStep, deleteStep, listSteps, reorderSteps, startRun, getRun, listRuns, cancelRun, listRunSteps, captureWorkflow, findWorkflowsByTableTrigger } from './workflows.ts'
 import { advanceWorkflow, onTaskCompleted, approveWorkflowStep } from './workflow-executor.ts'
 import { uploadDocument, listDocuments, getDocument, deleteDocument, getDocumentChunks, searchKb } from './knowledge-base.ts'
 import { listCredentials, setCredential, deleteCredential } from './credentials.ts'
 import { listServices } from './services.ts'
 import { listTemplates, getTemplate } from './templates.ts'
 import { listMcpServers, addMcpServer, removeMcpServer, connectMcpServer } from './mcp-client.ts'
-import { addCredits } from './billing.ts'
+import { addCredits, getSubscription } from './billing.ts'
 import { generateSpeech } from './cloud/tts.ts'
 
 const PORT = Number(process.env.PORT ?? process.env.YOKEBOT_PORT ?? 3001)
 const DATA_DIR = process.env.YOKEBOT_DATA_DIR ?? join(homedir(), '.yokebot')
 const WORKSPACE_DIR = process.env.YOKEBOT_WORKSPACE_DIR ?? join(DATA_DIR, 'workspace')
 const SKILLS_DIR = process.env.YOKEBOT_SKILLS_DIR ?? join(process.cwd(), '..', '..', 'skills')
+
+/** Fire any workflows triggered by a table row event */
+async function fireTableWorkflows(
+  db: import('./db/types.ts').Db,
+  teamId: string,
+  tableId: string,
+  triggerType: 'row_added' | 'row_updated',
+  rowData: Record<string, unknown>,
+) {
+  const workflows = await findWorkflowsByTableTrigger(db, teamId, tableId, triggerType)
+  if (workflows.length === 0) return
+
+  // Look up table name for context
+  const table = await getSorTable(db, tableId)
+  const tableName = table?.name ?? tableId
+
+  for (const wf of workflows) {
+    // Don't fire if there's already an active run for this workflow
+    const activeRuns = await listRuns(db, { workflowId: wf.id, status: 'running' as const })
+    const pausedRuns = await listRuns(db, { workflowId: wf.id, status: 'paused' as const })
+    if (activeRuns.length > 0 || pausedRuns.length > 0) continue
+
+    const run = await startRun(db, teamId, wf.id, 'table_trigger', { tableName, row: rowData, triggerType })
+    await advanceWorkflow(db, run.id)
+  }
+}
 
 async function main() {
   // Initialize database (async — picks SQLite or Postgres based on DATABASE_URL)
@@ -922,6 +948,17 @@ async function main() {
     res.status(201).json({ ...table, columns: await listSorColumns(db, table.id) })
   })
 
+  // Add column to existing table
+  app.post('/api/sor/tables/:id/columns', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
+    const { name, colType } = req.body as { name: string; colType?: string }
+    if (!name || typeof name !== 'string' || name.trim().length === 0) return res.status(400).json({ error: 'Column name is required' })
+    const col = await addSorColumn(db, req.params.id, name.trim(), colType)
+    res.status(201).json(col)
+  })
+
   app.get('/api/sor/tables/:id/rows', async (req, res) => {
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
@@ -934,6 +971,9 @@ async function main() {
     if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
     const row = await addSorRow(db, req.params.id, req.body as Record<string, unknown>)
     res.status(201).json(row)
+
+    // Fire row_added workflows (async, don't block response)
+    fireTableWorkflows(db, teamId, req.params.id, 'row_added', row.data).catch(() => {})
   })
 
   app.patch('/api/sor/tables/:tableId/rows/:rowId', async (req, res) => {
@@ -946,6 +986,9 @@ async function main() {
     const row = await updateSorRow(db, req.params.rowId, req.body as Record<string, unknown>)
     if (!row) return res.status(404).json({ error: 'Row not found' })
     res.json(row)
+
+    // Fire row_updated workflows (async, don't block response)
+    fireTableWorkflows(db, teamId, req.params.tableId, 'row_updated', row.data).catch(() => {})
   })
 
   app.delete('/api/sor/tables/:tableId/rows/:rowId', async (req, res) => {
@@ -1279,11 +1322,23 @@ async function main() {
   app.post('/api/teams', async (req, res) => {
     const { name } = validate(CreateTeamSchema, req.body)
 
-    // Paid-only team creation: allow first team (onboarding) but require subscription for additional teams
+    // Paid-only team creation: first team is free (auto-created during onboarding).
+    // Additional teams require an active paid subscription on any existing team.
     if (req.user?.id) {
       const existingTeams = await getUserTeams(db, req.user.id)
-      if (existingTeams.length >= 1 && !req.subscription) {
-        return res.status(403).json({ error: 'An active subscription is required to create additional teams' })
+      if (existingTeams.length >= 1) {
+        // Check if user has at least one team with an active paid subscription
+        let hasPaidSub = false
+        for (const t of existingTeams) {
+          const sub = await getSubscription(db, t.id)
+          if (sub && (sub.status === 'active' || sub.status === 'past_due') && sub.tier !== 'none') {
+            hasPaidSub = true
+            break
+          }
+        }
+        if (!hasPaidSub) {
+          return res.status(403).json({ error: 'An active paid subscription is required to create additional teams. Upgrade at Settings → Billing.' })
+        }
       }
     }
 
@@ -1297,6 +1352,13 @@ async function main() {
     const orphanTables = ['agents', 'tasks', 'chat_channels', 'chat_messages', 'approvals', 'sor_tables', 'activity_log']
     for (const table of orphanTables) {
       await db.run(`UPDATE ${table} SET team_id = $1 WHERE team_id = '' OR team_id IS NULL`, [team.id])
+    }
+
+    // Auto-create #general channel so every team has a default group channel
+    try {
+      await createChannel(db, team.id, 'general', 'group')
+    } catch (err) {
+      console.error('[engine] Failed to create #general channel:', (err as Error).message)
     }
 
     // Auto-deploy AdvisorBot in hosted mode
@@ -2413,6 +2475,7 @@ ${truncated}`,
       goalId: body.goalId,
       triggerType: body.triggerType,
       scheduleCron: body.scheduleCron,
+      triggerTableId: body.triggerTableId,
       createdBy: req.user!.id,
     })
     // Create steps if provided inline
@@ -2508,7 +2571,8 @@ ${truncated}`,
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
     const wfForRun = await getWorkflow(db, req.params.id)
-    const run = await startRun(db, teamId, req.params.id, req.user!.id)
+    const runContext = req.body && typeof req.body === 'object' ? req.body.context : undefined
+    const run = await startRun(db, teamId, req.params.id, req.user!.id, runContext)
     await logActivity(db, 'workflow_run_started', null, `Workflow "${wfForRun?.name ?? req.params.id}" run started`, undefined, teamId)
     // Kick off the first step
     void advanceWorkflow(db, run.id).catch((err) => console.error('[workflows] advanceWorkflow error:', err))

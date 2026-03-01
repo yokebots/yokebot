@@ -57,7 +57,7 @@ const mainNav: NavItem[] = [
     { to: '/workflows', icon: 'account_tree', label: 'Workflows' },
     { to: '/approvals', icon: 'approval', label: 'Approvals', badgeKey: 'approvals' },
   ]},
-  { to: '/knowledge-base', icon: 'menu_book', label: 'Knowledge Base', children: [
+  { to: '/files', icon: 'folder_open', label: 'Files', children: [
     { to: '/data-tables', icon: 'table_chart', label: 'Data Tables' },
   ]},
   { to: '/meetings', icon: 'groups', label: 'Meetings' },

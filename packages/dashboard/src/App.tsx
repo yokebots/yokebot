@@ -11,7 +11,7 @@ import { AgentsPage } from '@/pages/AgentsPage'
 import { AgentDetailPage } from '@/pages/AgentDetailPage'
 import { ApprovalsPage } from '@/pages/ApprovalsPage'
 import { DataTablesPage } from '@/pages/DataTablesPage'
-import { KnowledgeBasePage } from '@/pages/KnowledgeBasePage'
+import { FilesPage } from '@/pages/FilesPage'
 import { SkillsPage } from '@/pages/SkillsPage'
 import { TemplatesPage } from '@/pages/TemplatesPage'
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -166,7 +166,8 @@ function AppRoutes() {
         <Route path="agents/:agentId" element={<AgentDetailPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
         <Route path="data-tables" element={<DataTablesPage />} />
-        <Route path="knowledge-base" element={<KnowledgeBasePage />} />
+        <Route path="files" element={<FilesPage />} />
+        <Route path="knowledge-base" element={<Navigate to="/files" replace />} />
         <Route path="skills" element={<SkillsPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="activity" element={<ActivityPage />} />

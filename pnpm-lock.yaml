@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      stripe:
+        specifier: ^20.3.1
+        version: 20.3.1(@types/node@24.10.13)
 
   packages/dashboard:
     dependencies:
