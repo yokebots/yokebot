@@ -19,8 +19,8 @@ const mainNav: NavItem[] = [
   { to: '/dashboard', icon: 'dashboard', label: 'Dashboard', end: true },
   { to: '/chat', icon: 'forum', label: 'Chat', badgeKey: 'chat' },
   { to: '/agents', icon: 'smart_toy', label: 'Agents', children: [
-    { to: '/skills', icon: 'extension', label: 'Skills' },
     { to: '/templates', icon: 'library_books', label: 'Pre-Built' },
+    { to: '/skills', icon: 'extension', label: 'Skills' },
   ]},
   { to: '/tasks', icon: 'task_alt', label: 'Tasks', children: [
     { to: '/goals', icon: 'flag', label: 'Goals' },
