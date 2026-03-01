@@ -91,6 +91,8 @@ const SQLITE_DDL = `
     sender_id TEXT NOT NULL,
     content TEXT NOT NULL,
     attachments TEXT,
+    audio_key TEXT,
+    audio_duration_ms INTEGER,
     task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -102,6 +104,16 @@ const SQLITE_DDL = `
     name TEXT NOT NULL,
     type TEXT NOT NULL DEFAULT 'group',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Chat reactions (emoji reactions on messages)
+  CREATE TABLE IF NOT EXISTS chat_reactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(message_id, user_id, emoji)
   );
 
   -- Approval queue
@@ -395,6 +407,7 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_servers(agent_id);
   CREATE INDEX IF NOT EXISTS idx_meetings_team ON team_meetings(team_id);
   CREATE INDEX IF NOT EXISTS idx_meetings_status ON team_meetings(status);
+  CREATE INDEX IF NOT EXISTS idx_chat_reactions_message ON chat_reactions(message_id);
 `
 
 const POSTGRES_DDL = `
@@ -478,6 +491,8 @@ const POSTGRES_DDL = `
     sender_id TEXT NOT NULL,
     content TEXT NOT NULL,
     attachments TEXT,
+    audio_key TEXT,
+    audio_duration_ms INTEGER,
     task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -489,6 +504,16 @@ const POSTGRES_DDL = `
     name TEXT NOT NULL,
     type TEXT NOT NULL DEFAULT 'group',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Chat reactions (emoji reactions on messages)
+  CREATE TABLE IF NOT EXISTS chat_reactions (
+    id BIGSERIAL PRIMARY KEY,
+    message_id BIGINT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(message_id, user_id, emoji)
   );
 
   -- Approval queue
@@ -770,6 +795,14 @@ const POSTGRES_DDL = `
   ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS business_summary TEXT;
   ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS target_market TEXT;
 
+  -- Migrations: Add audio columns to chat_messages for meeting recordings
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS audio_key TEXT;
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS audio_duration_ms INTEGER;
+
+  -- Migrations: Add summary + action items to team_meetings
+  ALTER TABLE team_meetings ADD COLUMN IF NOT EXISTS summary TEXT;
+  ALTER TABLE team_meetings ADD COLUMN IF NOT EXISTS action_items JSONB;
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -804,6 +837,7 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_agent_mcp_agent ON agent_mcp_servers(agent_id);
   CREATE INDEX IF NOT EXISTS idx_meetings_team ON team_meetings(team_id);
   CREATE INDEX IF NOT EXISTS idx_meetings_status ON team_meetings(status);
+  CREATE INDEX IF NOT EXISTS idx_chat_reactions_message ON chat_reactions(message_id);
 
   -- =====================================================================
   -- Row Level Security (RLS)
@@ -846,6 +880,7 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS agent_mcp_servers ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS team_profiles ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS team_meetings ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS chat_reactions ENABLE ROW LEVEL SECURITY;
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses

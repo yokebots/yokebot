@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, MentionCompletionData } from '@/lib/engine'
@@ -18,8 +18,12 @@ export function ChatPage() {
   const [newChannelName, setNewChannelName] = useState('')
   const [creating, setCreating] = useState(false)
   const [mentionCompletions, setMentionCompletions] = useState<MentionCompletionData | null>(null)
+  const [reactions, setReactions] = useState<Record<number, Record<string, string[]>>>({}) // messageId → { emoji → userIds[] }
+  const [showReactionPicker, setShowReactionPicker] = useState<number | null>(null) // messageId with picker open
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelInputRef = useRef<HTMLInputElement>(null)
+
+  const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀', '💯', '🙌']
 
   const loadChannels = async () => {
     try {
@@ -78,6 +82,17 @@ export function ChatPage() {
     loadMessages()
   }
 
+  const sendGif = async (gifUrl: string, title: string) => {
+    if (!activeChannelId) return
+    const content = `![${title}](${gifUrl})`
+    await engine.sendMessage(activeChannelId, {
+      senderType: 'human',
+      senderId: 'user',
+      content,
+    })
+    loadMessages()
+  }
+
   const openDm = async (agentId: string) => {
     const ch = await engine.getDmChannel(agentId)
     setActiveChannelId(ch.id)
@@ -125,6 +140,55 @@ export function ChatPage() {
     if (!ch.name.startsWith('dm:')) return null
     const agentId = ch.name.replace('dm:', '')
     return agents.find((a) => a.id === agentId) ?? null
+  }
+
+  // Build agent color/icon map for mention rendering
+  const agentColorMap = useMemo(() => {
+    const map = new Map<string, { color: string; icon: string }>()
+    for (const a of agents) {
+      map.set(a.id, { color: a.iconColor ?? '#0F4D26', icon: a.iconName ?? 'smart_toy' })
+    }
+    return map
+  }, [agents])
+
+  // Load reactions for visible messages
+  useEffect(() => {
+    if (messages.length === 0) return
+    const loadReactions = async () => {
+      const reactionMap: Record<number, Record<string, string[]>> = {}
+      await Promise.all(
+        messages.map(async (msg) => {
+          try {
+            const r = await engine.getReactions(msg.id)
+            if (Object.keys(r).length > 0) reactionMap[msg.id] = r
+          } catch { /* ignore */ }
+        }),
+      )
+      setReactions(reactionMap)
+    }
+    loadReactions()
+  }, [messages])
+
+  const handleToggleReaction = async (messageId: number, emoji: string) => {
+    try {
+      const result = await engine.toggleReaction(messageId, emoji)
+      // Optimistic update
+      setReactions((prev) => {
+        const msgReactions = { ...(prev[messageId] ?? {}) }
+        const userId = 'me' // placeholder — server handles actual user
+        if (result.action === 'added') {
+          msgReactions[emoji] = [...(msgReactions[emoji] ?? []), userId]
+        } else {
+          msgReactions[emoji] = (msgReactions[emoji] ?? []).filter((u) => u !== userId)
+          if (msgReactions[emoji].length === 0) delete msgReactions[emoji]
+        }
+        return { ...prev, [messageId]: msgReactions }
+      })
+      // Refresh from server for accuracy
+      const fresh = await engine.getReactions(messageId)
+      setReactions((prev) => ({ ...prev, [messageId]: fresh }))
+    } catch { /* ignore */ }
+    setShowReactionPicker(null)
   }
 
   const [showChannelsMobile, setShowChannelsMobile] = useState(false)
@@ -236,11 +300,17 @@ export function ChatPage() {
                   onClick={() => openDm(agent.id)}
                   className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
                     dmCh && dmCh.id === activeChannelId
-                      ? 'bg-forest-green/10 text-forest-green font-medium'
+                      ? 'font-medium'
                       : 'text-text-secondary hover:bg-light-surface-alt'
                   }`}
+                  style={dmCh && dmCh.id === activeChannelId ? { backgroundColor: (agent.iconColor ?? '#0F4D26') + '18', color: agent.iconColor ?? '#0F4D26' } : undefined}
                 >
-                  <span className={`h-2 w-2 rounded-full ${agent.status === 'running' ? 'bg-green-500' : 'bg-gray-300'}`} />
+                  <span
+                    className="material-symbols-outlined text-[16px]"
+                    style={{ color: agent.iconColor ?? '#0F4D26' }}
+                  >
+                    {agent.iconName ?? 'smart_toy'}
+                  </span>
                   {agent.name}
                 </button>
               )
@@ -349,12 +419,18 @@ export function ChatPage() {
               </p>
             </div>
           )}
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex gap-3 ${msg.senderType === 'human' ? 'justify-end' : ''}`}>
+          {messages.map((msg) => {
+            const msgAgent = msg.senderType === 'agent' ? agents.find((a) => a.id === msg.senderId) : null
+            const agentColor = msgAgent?.iconColor ?? '#0F4D26'
+            return (
+            <div key={msg.id} className={`group/msg flex gap-2 ${msg.senderType === 'human' ? 'justify-end' : ''}`}>
               {msg.senderType !== 'human' && (
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-forest-green/10 text-forest-green">
+                <div
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                  style={msg.senderType === 'agent' ? { backgroundColor: agentColor + '18', color: agentColor } : undefined}
+                >
                   <span className="material-symbols-outlined text-[16px]">
-                    {msg.senderType === 'agent' ? 'smart_toy' : 'info'}
+                    {msg.senderType === 'agent' ? (msgAgent?.iconName ?? 'smart_toy') : 'info'}
                   </span>
                 </div>
               )}
@@ -366,17 +442,41 @@ export function ChatPage() {
                     : 'bg-white border border-border-subtle text-text-main'
               }`}>
                 {msg.senderType === 'agent' && (
-                  <p className="mb-1 text-[11px] font-bold text-forest-green">
-                    {agents.find((a) => a.id === msg.senderId)?.name ?? 'Agent'}
+                  <p className="mb-1 text-[11px] font-bold" style={{ color: agentColor }}>
+                    {msgAgent?.name ?? 'Agent'}
                   </p>
                 )}
-                <p className="text-sm whitespace-pre-wrap">
-                  {renderMentionContent(
-                    msg.content,
-                    (agentId) => openDm(agentId),
-                    (docId) => navigate(`/knowledge-base?doc=${docId}`),
-                  )}
-                </p>
+                {/* Render text (minus any markdown images) */}
+                {(() => {
+                  const textOnly = msg.content.replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim()
+                  return textOnly ? (
+                    <p className="text-sm whitespace-pre-wrap">
+                      {renderMentionContent(
+                        textOnly,
+                        (agentId) => openDm(agentId),
+                        (docId) => navigate(`/knowledge-base?doc=${docId}`),
+                        agentColorMap,
+                      )}
+                    </p>
+                  ) : null
+                })()}
+
+                {/* Render inline images/GIFs from markdown syntax */}
+                {(() => {
+                  const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g
+                  const images: Array<{ alt: string; url: string }> = []
+                  let imgMatch
+                  while ((imgMatch = imgRegex.exec(msg.content)) !== null) {
+                    images.push({ alt: imgMatch[1], url: imgMatch[2] })
+                  }
+                  return images.length > 0 ? (
+                    <div className="mt-1.5 space-y-1">
+                      {images.map((img, idx) => (
+                        <img key={idx} src={img.url} alt={img.alt} className="max-w-full rounded-lg" style={{ maxHeight: '200px' }} loading="lazy" />
+                      ))}
+                    </div>
+                  ) : null
+                })()}
 
                 {/* Inline media attachments */}
                 {msg.attachments && msg.attachments.length > 0 && (
@@ -388,9 +488,50 @@ export function ChatPage() {
                 )}
 
                 <p className="mt-1 text-[10px] text-text-muted">{new Date(msg.createdAt).toLocaleTimeString()}</p>
+
+                {/* Existing reactions */}
+                {reactions[msg.id] && Object.keys(reactions[msg.id]).length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {Object.entries(reactions[msg.id]).map(([emoji, users]) => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleToggleReaction(msg.id, emoji)}
+                        className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-light-surface px-2 py-0.5 text-xs hover:bg-light-surface-alt transition-colors"
+                      >
+                        <span>{emoji}</span>
+                        <span className="text-text-muted">{users.length}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick react button (appears on hover) */}
+              <div className="relative shrink-0 self-start opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                <button
+                  onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)}
+                  className="rounded-md p-1 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
+                  title="Add reaction"
+                >
+                  <span className="material-symbols-outlined text-[16px]">add_reaction</span>
+                </button>
+                {showReactionPicker === msg.id && (
+                  <div className="absolute top-8 right-0 z-50 flex gap-1 rounded-xl border border-border-subtle bg-white p-2 shadow-lg">
+                    {QUICK_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleToggleReaction(msg.id, emoji)}
+                        className="rounded-md p-1 text-lg hover:bg-light-surface-alt transition-colors"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-          ))}
+            )
+          })}
           <div ref={messagesEndRef} />
         </div>
 
@@ -404,6 +545,7 @@ export function ChatPage() {
                 onSubmit={sendMsg}
                 placeholder={`Message ${activeChannel ? (activeChannel.type === 'dm' ? getAgentName(activeChannel) : '#' + activeChannel.name) : ''}...`}
                 completions={mentionCompletions}
+                onGifSelect={sendGif}
               />
               <button
                 onClick={sendMsg}

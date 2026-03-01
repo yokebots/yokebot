@@ -160,6 +160,84 @@ export async function triggerAgentNow(db: Db, agentId: string, teamId: string): 
 }
 
 /**
+ * Respond to an @mention in a specific channel.
+ * The agent reads recent context and replies in the same channel.
+ */
+export async function respondToMention(
+  db: Db, agentId: string, teamId: string, channelId: string,
+  triggerMessage: { senderId: string; content: string },
+): Promise<void> {
+  const { getAgent } = await import('./agent.ts')
+  const { getChannelMessages } = await import('./chat.ts')
+  const { listDocuments } = await import('./knowledge-base.ts')
+  const agent = await getAgent(db, agentId)
+  if (!agent || agent.status !== 'running') return
+  if (agent.teamId !== teamId) return
+
+  // Check credits in hosted mode
+  if (HOSTED_MODE && agent.modelId) {
+    const balance = await getCreditBalance(db, teamId)
+    const cost = await getModelCreditCost(db, agent.modelId)
+    if (cost > 0 && balance < cost) {
+      console.log(`[scheduler] Skipping mention response for "${agent.name}" — insufficient credits`)
+      return
+    }
+  }
+
+  if (!state.workspaceConfig) return
+
+  const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
+  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
+
+  // Get recent channel messages for context
+  const recentMessages = await getChannelMessages(db, channelId, 15)
+  const context = recentMessages
+    .map((m) => `[${m.senderType === 'human' ? 'User' : m.senderId === agentId ? agent.name : 'Other'}]: ${m.content}`)
+    .join('\n')
+
+  // Get KB documents so agent can reference them with @mentions
+  let kbContext = ''
+  try {
+    const docs = await listDocuments(db, teamId)
+    if (docs.length > 0) {
+      kbContext = `\n\nKnowledge base documents available (you can reference them using @[title](file:id) syntax):\n` +
+        docs.map((d) => `- @[${d.title}](file:${d.id}) (${d.fileType})`).join('\n')
+    }
+  } catch { /* no docs */ }
+
+  const mentionPrompt = [
+    `You were @mentioned in a group channel. Here is the recent conversation:`,
+    context,
+    ``,
+    `The user said: "${triggerMessage.content}"`,
+    ``,
+    `Respond naturally to the conversation. Be helpful, concise, and on-topic.`,
+    `If asked a question, answer it. If given a task, acknowledge it and take action.`,
+    `When referencing knowledge base documents, use the @[title](file:id) mention syntax.`,
+    `Keep your response under 500 characters unless a detailed answer is needed.`,
+    kbContext,
+  ].join('\n')
+
+  try {
+    const runtimeConfig = agent.templateId === 'advisor-bot'
+      ? { maxIterations: 10, skipCredits: true }
+      : undefined
+    const result = await runReactLoop(
+      db, agent.id, teamId, mentionPrompt, modelConfig, systemPrompt,
+      state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined,
+    )
+    if (result.response && !result.response.includes('[no-op]')) {
+      // Reply in the SAME channel where the mention happened
+      await sendMessage(db, channelId, 'agent', agent.id, result.response, undefined, teamId)
+      await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${result.response.slice(0, 150)}`, undefined, teamId)
+      console.log(`[scheduler] "${agent.name}" replied to @mention in channel ${channelId}`)
+    }
+  } catch (err) {
+    console.error(`[scheduler] Mention response error for "${agent.name}":`, err)
+  }
+}
+
+/**
  * Remove the heartbeat timer for an agent.
  */
 export function unscheduleAgent(agentId: string): void {

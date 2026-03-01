@@ -491,6 +491,51 @@ async function main() {
     res.json(results)
   })
 
+  // ===== Emoji Reactions =====
+
+  // Toggle a reaction (add if not exists, remove if exists)
+  app.post('/api/chat/messages/:messageId/reactions', async (req, res) => {
+    const userId = req.user!.id
+    const messageId = Number(req.params.messageId)
+    const { emoji } = req.body as { emoji: string }
+    if (!emoji || typeof emoji !== 'string') return res.status(400).json({ error: 'emoji required' })
+
+    // Check if reaction already exists
+    const existing = await db.queryOne<{ id: number }>(
+      'SELECT id FROM chat_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3',
+      [messageId, userId, emoji],
+    )
+
+    if (existing) {
+      // Remove the reaction
+      await db.run('DELETE FROM chat_reactions WHERE id = $1', [existing.id])
+      res.json({ action: 'removed', emoji })
+    } else {
+      // Add the reaction
+      await db.run(
+        'INSERT INTO chat_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)',
+        [messageId, userId, emoji],
+      )
+      res.json({ action: 'added', emoji })
+    }
+  })
+
+  // Get reactions for a message
+  app.get('/api/chat/messages/:messageId/reactions', async (req, res) => {
+    const messageId = Number(req.params.messageId)
+    const reactions = await db.query<{ emoji: string; user_id: string; created_at: string }>(
+      'SELECT emoji, user_id, created_at FROM chat_reactions WHERE message_id = $1 ORDER BY created_at',
+      [messageId],
+    )
+    // Group by emoji
+    const grouped: Record<string, string[]> = {}
+    for (const r of reactions) {
+      if (!grouped[r.emoji]) grouped[r.emoji] = []
+      grouped[r.emoji].push(r.user_id)
+    }
+    res.json(grouped)
+  })
+
   // ===== Workspace =====
 
   app.get('/api/workspace/files', (req, res) => {
@@ -1372,7 +1417,7 @@ ${truncated}`,
     if (!requireRole(req, res, 'admin')) return
 
     try {
-      const cloudPath = './cloud/orchestrator.ts'
+      const cloudPath = './cloud/orchestrator.js'
       const { startMeetAndGreet } = await import(/* @vite-ignore */ cloudPath)
       const teamId = req.user!.activeTeamId!
 
@@ -1415,7 +1460,7 @@ ${truncated}`,
     }
 
     try {
-      const cloudPath2 = './cloud/orchestrator.ts'
+      const cloudPath2 = './cloud/orchestrator.js'
       const { addSseClient, getMeeting } = await import(/* @vite-ignore */ cloudPath2)
 
       // Verify meeting exists and belongs to this team
@@ -1460,7 +1505,7 @@ ${truncated}`,
     }
 
     try {
-      const cloudPath3 = './cloud/orchestrator.ts'
+      const cloudPath3 = './cloud/orchestrator.js'
       const { injectHumanMessage, getMeeting } = await import(/* @vite-ignore */ cloudPath3)
 
       // Verify meeting belongs to this team
@@ -1488,7 +1533,7 @@ ${truncated}`,
     }
 
     try {
-      const cloudPath4 = './cloud/orchestrator.ts'
+      const cloudPath4 = './cloud/orchestrator.js'
       const { injectHumanMessage, getMeeting } = await import(/* @vite-ignore */ cloudPath4)
 
       const meeting = getMeeting(req.params.meetingId)
@@ -1548,7 +1593,7 @@ ${truncated}`,
     }
 
     try {
-      const cloudPath5 = './cloud/orchestrator.ts'
+      const cloudPath5 = './cloud/orchestrator.js'
       const { raiseHand, getMeeting } = await import(/* @vite-ignore */ cloudPath5)
 
       const meeting = getMeeting(req.params.meetingId)
@@ -1561,6 +1606,102 @@ ${truncated}`,
     } catch (err) {
       console.error('[meetings] Raise hand error:', err)
       res.status(500).json({ error: 'Failed to raise hand' })
+    }
+  })
+
+  // List meetings for a team
+  app.get('/api/teams/:id/meetings', async (req, res) => {
+    try {
+      const teamId = req.user!.activeTeamId!
+      const rows = await db.query<Record<string, unknown>>(
+        `SELECT id, team_id, channel_id, type, title, status, summary, action_items, started_at, ended_at, created_at
+         FROM team_meetings WHERE team_id = $1 ORDER BY created_at DESC`, [teamId],
+      )
+      const meetings = rows.map(r => ({
+        id: r.id as string,
+        teamId: r.team_id as string,
+        channelId: r.channel_id as string,
+        type: r.type as string,
+        title: r.title as string,
+        status: r.status as string,
+        summary: (r.summary as string) ?? null,
+        actionItems: r.action_items ? (typeof r.action_items === 'string' ? JSON.parse(r.action_items as string) : r.action_items) : null,
+        startedAt: (r.started_at as string) ?? null,
+        endedAt: (r.ended_at as string) ?? null,
+        createdAt: r.created_at as string,
+      }))
+      res.json(meetings)
+    } catch (err) {
+      console.error('[meetings] List error:', err)
+      res.status(500).json({ error: 'Failed to list meetings' })
+    }
+  })
+
+  // Get meeting detail (metadata + participant agents)
+  app.get('/api/teams/:id/meetings/:meetingId', async (req, res) => {
+    try {
+      const teamId = req.user!.activeTeamId!
+      const row = await db.queryOne<Record<string, unknown>>(
+        `SELECT id, team_id, channel_id, type, title, status, summary, action_items, started_at, ended_at, created_at
+         FROM team_meetings WHERE id = $1 AND team_id = $2`, [req.params.meetingId, teamId],
+      )
+      if (!row) return res.status(404).json({ error: 'Meeting not found' })
+
+      // Get participant agents from meeting messages
+      const agentRows = await db.query<Record<string, unknown>>(
+        `SELECT DISTINCT m.sender_id, a.name, a.icon_name, a.icon_color, a.department, a.template_id
+         FROM chat_messages m
+         LEFT JOIN agents a ON a.id = m.sender_id
+         WHERE m.channel_id = $1 AND m.sender_type = 'agent'`, [row.channel_id as string],
+      )
+
+      res.json({
+        id: row.id as string,
+        teamId: row.team_id as string,
+        channelId: row.channel_id as string,
+        type: row.type as string,
+        title: row.title as string,
+        status: row.status as string,
+        summary: (row.summary as string) ?? null,
+        actionItems: row.action_items ? (typeof row.action_items === 'string' ? JSON.parse(row.action_items as string) : row.action_items) : null,
+        startedAt: (row.started_at as string) ?? null,
+        endedAt: (row.ended_at as string) ?? null,
+        createdAt: row.created_at as string,
+        participants: agentRows.map(a => ({
+          id: a.sender_id as string,
+          name: (a.name as string) ?? 'Unknown Agent',
+          iconName: (a.icon_name as string) ?? 'smart_toy',
+          iconColor: (a.icon_color as string) ?? '#0F4D26',
+          department: (a.department as string) ?? null,
+          templateId: (a.template_id as string) ?? null,
+        })),
+      })
+    } catch (err) {
+      console.error('[meetings] Detail error:', err)
+      res.status(500).json({ error: 'Failed to get meeting' })
+    }
+  })
+
+  // Serve meeting audio from R2 (proxied through engine for auth)
+  app.get('/api/audio/*key', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Not available' })
+    }
+    try {
+      const storagePath = './cloud/storage.js'
+      const { getMeetingAudio } = await import(/* @vite-ignore */ storagePath)
+      const keyParam = (req.params as Record<string, unknown>).key
+      const audioKey = Array.isArray(keyParam) ? keyParam.join('/') : String(keyParam)
+      const result = await getMeetingAudio(audioKey)
+      if (!result) return res.status(404).json({ error: 'Audio not found' })
+
+      res.setHeader('Content-Type', result.contentType)
+      if (result.contentLength) res.setHeader('Content-Length', result.contentLength)
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      result.stream.pipe(res)
+    } catch (err) {
+      console.error('[audio] Serve error:', err)
+      res.status(500).json({ error: 'Failed to serve audio' })
     }
   })
 

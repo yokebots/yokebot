@@ -19,6 +19,8 @@ import { IntegrationsPage } from '@/pages/IntegrationsPage'
 import { BillingPage } from '@/pages/BillingPage'
 import { TeamPage } from '@/pages/TeamPage'
 import { ActivityPage } from '@/pages/ActivityPage'
+import { MeetingsPage } from '@/pages/MeetingsPage'
+import { MeetingReplayPage } from '@/pages/MeetingReplayPage'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { GoalsPage } from '@/pages/GoalsPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
@@ -150,6 +152,8 @@ function AppRoutes() {
         <Route path="goals" element={<GoalsPage />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:channelId" element={<ChatPage />} />
+        <Route path="meetings" element={<MeetingsPage />} />
+        <Route path="meetings/:meetingId" element={<MeetingReplayPage />} />
         <Route path="agents" element={<AgentsPage />} />
         <Route path="agents/:agentId" element={<AgentDetailPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />

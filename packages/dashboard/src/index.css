@@ -124,3 +124,8 @@ body {
 .live-indicator-pulse {
   animation: pulseLive 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+@keyframes eq-bar {
+  0% { height: 4px; }
+  100% { height: 20px; }
+}

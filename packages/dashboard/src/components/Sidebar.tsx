@@ -12,6 +12,7 @@ const mainNav = [
   { to: '/projects', icon: 'folder_open', label: 'Projects' },
   { to: '/goals', icon: 'flag', label: 'Goals' },
   { to: '/chat', icon: 'forum', label: 'Chat' },
+  { to: '/meetings', icon: 'groups', label: 'Meetings' },
   { to: '/agents', icon: 'smart_toy', label: 'Agents' },
   { to: '/approvals', icon: 'approval', label: 'Approvals', badgeKey: 'approvals' as const },
   { to: '/activity', icon: 'timeline', label: 'Activity' },

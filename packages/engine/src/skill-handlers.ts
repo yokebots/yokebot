@@ -901,7 +901,6 @@ registerHandler('recommend_agents', async (args, _creds, ctx) => {
 registerHandler('deploy_agent', async (args, _creds, ctx) => {
   if (process.env.YOKEBOT_HOSTED_MODE !== 'true') return ADVISOR_HOSTED_GUARD
   const templateId = args.templateId as string
-  const customName = args.name as string | undefined
   const template = getTemplate(templateId)
   if (!template) return `Template not found: ${templateId}. Use list_templates to see available options.`
 
@@ -909,9 +908,9 @@ registerHandler('deploy_agent', async (args, _creds, ctx) => {
   const modelConfig = await resolveModelConfig(ctx.db, template.recommendedModel)
   if (!modelConfig) return `Could not resolve model config for ${template.recommendedModel}. The recommended model may not be available.`
 
-  // Create the agent
+  // Create the agent — always use the template name (no custom names with team/company prefixes)
   const config: AgentConfig = {
-    name: customName ?? template.name,
+    name: template.name,
     department: template.department,
     iconName: template.icon,
     iconColor: template.iconColor,

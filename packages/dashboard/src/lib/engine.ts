@@ -117,6 +117,8 @@ export interface ChatMessage {
   senderId: string
   content: string
   attachments: ChatAttachment[]
+  audioKey: string | null
+  audioDurationMs: number | null
   taskId: string | null
   createdAt: string
 }
@@ -931,6 +933,38 @@ export function connectMeetingStream(
   return () => controller.abort()
 }
 
+// ===== Meeting List & Replay =====
+
+export interface MeetingSummary {
+  id: string
+  teamId: string
+  channelId: string
+  type: string
+  title: string
+  status: 'in_progress' | 'completed'
+  startedAt: string
+  endedAt: string | null
+  summary: string | null
+  actionItems: Array<{ description: string; assignee: string }> | null
+}
+
+export interface MeetingDetail extends MeetingSummary {
+  agents: Array<{ id: string; name: string; iconName: string | null; iconColor: string | null }>
+}
+
+export const listMeetings = (teamId: string) =>
+  request<MeetingSummary[]>(`/api/teams/${teamId}/meetings`)
+
+export const getMeeting = (teamId: string, meetingId: string) =>
+  request<MeetingDetail>(`/api/teams/${teamId}/meetings/${meetingId}`)
+
+/**
+ * Get the audio URL for a stored meeting audio key.
+ * Audio is served through the engine (proxied from R2).
+ */
+export const getMeetingAudioUrl = (audioKey: string): string =>
+  `${ENGINE_URL}/api/audio/${audioKey}`
+
 // ===== Knowledge Base =====
 
 export interface KbDocument {
@@ -1034,3 +1068,14 @@ export interface ChatSearchResult {
 
 export const searchChatMessages = (q: string, limit = 20) =>
   request<ChatSearchResult[]>(`/api/chat/search?q=${encodeURIComponent(q)}&limit=${limit}`)
+
+// ===== Reactions =====
+
+export const toggleReaction = (messageId: number, emoji: string) =>
+  request<{ action: 'added' | 'removed'; emoji: string }>(`/api/chat/messages/${messageId}/reactions`, {
+    method: 'POST',
+    body: JSON.stringify({ emoji }),
+  })
+
+export const getReactions = (messageId: number) =>
+  request<Record<string, string[]>>(`/api/chat/messages/${messageId}/reactions`)

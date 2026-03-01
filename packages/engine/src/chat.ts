@@ -20,7 +20,7 @@ export interface ChatAttachment {
   duration?: number  // milliseconds (for audio/video)
 }
 
-export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; attachments: ChatAttachment[]; taskId: string | null; createdAt: string }
+export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; attachments: ChatAttachment[]; audioKey: string | null; audioDurationMs: number | null; taskId: string | null; createdAt: string }
 
 // ---- Channels ----
 
@@ -65,11 +65,15 @@ export async function getTaskThread(db: Db, taskId: string, teamId = ''): Promis
 
 // ---- Messages ----
 
-export async function sendMessage(db: Db, channelId: string, senderType: SenderType, senderId: string, content: string, taskId?: string, teamId = '', attachments?: ChatAttachment[]): Promise<ChatMessage> {
+export async function sendMessage(
+  db: Db, channelId: string, senderType: SenderType, senderId: string, content: string,
+  taskId?: string, teamId = '', attachments?: ChatAttachment[],
+  audioKey?: string, audioDurationMs?: number,
+): Promise<ChatMessage> {
   const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null
   const insertedId = await db.insert(
-    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id, attachments) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-    [teamId, channelId, senderType, senderId, content, taskId ?? null, attachmentsJson],
+    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id, attachments, audio_key, audio_duration_ms) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+    [teamId, channelId, senderType, senderId, content, taskId ?? null, attachmentsJson, audioKey ?? null, audioDurationMs ?? null],
     'id',
   )
   return (await getMessage(db, Number(insertedId)))!
@@ -172,14 +176,14 @@ export async function processMentions(
 
   // Lazy imports to avoid circular deps
   const { createNotification } = await import('./notifications.ts')
-  const { triggerAgentNow } = await import('./scheduler.ts')
+  const { respondToMention } = await import('./scheduler.ts')
 
   for (const mention of mentions) {
     try {
       switch (mention.type) {
         case 'agent':
-          // Notify the agent by triggering its heartbeat immediately
-          await triggerAgentNow(db, mention.id, teamId)
+          // Have the agent read the message and reply in the same channel
+          await respondToMention(db, mention.id, teamId, channelId, message)
           break
 
         case 'user':
@@ -212,6 +216,7 @@ function rowToMessage(row: Record<string, unknown>): ChatMessage {
   return {
     id: row.id as number, channelId: row.channel_id as string, senderType: row.sender_type as SenderType,
     senderId: row.sender_id as string, content: row.content as string, attachments,
+    audioKey: (row.audio_key as string) ?? null, audioDurationMs: (row.audio_duration_ms as number) ?? null,
     taskId: row.task_id as string | null, createdAt: row.created_at as string,
   }
 }

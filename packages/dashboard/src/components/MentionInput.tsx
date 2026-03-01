@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { MentionCompletionData } from '@/lib/engine'
+import data from '@emoji-mart/data'
+import Picker from '@emoji-mart/react'
 
 interface MentionInputProps {
   value: string
@@ -8,6 +10,7 @@ interface MentionInputProps {
   placeholder?: string
   completions: MentionCompletionData | null
   disabled?: boolean
+  onGifSelect?: (gifUrl: string, title: string) => void
 }
 
 interface MentionOption {
@@ -27,13 +30,23 @@ const FILE_ICONS: Record<string, string> = {
   csv: 'table_chart',
 }
 
-export function MentionInput({ value, onChange, onSubmit, placeholder, completions, disabled }: MentionInputProps) {
+const GIPHY_API_KEY = 'GlVGYHkr3WSBnllca54iNt0yFbjz7L65' // GIPHY public beta key
+
+export function MentionInput({ value, onChange, onSubmit, placeholder, completions, disabled, onGifSelect }: MentionInputProps) {
   const [showDropdown, setShowDropdown] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionStart, setMentionStart] = useState(-1)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [showGifPicker, setShowGifPicker] = useState(false)
+  const [gifQuery, setGifQuery] = useState('')
+  const [gifResults, setGifResults] = useState<Array<{ id: string; url: string; title: string }>>([])
+  const [gifLoading, setGifLoading] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const emojiPickerRef = useRef<HTMLDivElement>(null)
+  const gifPickerRef = useRef<HTMLDivElement>(null)
+  const gifSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Build flat list of all mention options
   const allOptions: MentionOption[] = completions ? [
@@ -153,6 +166,79 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
     }
   }
 
+  // Close emoji/gif picker on outside click
+  useEffect(() => {
+    if (!showEmojiPicker && !showGifPicker) return
+    const handler = (e: MouseEvent) => {
+      if (showEmojiPicker && emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false)
+      }
+      if (showGifPicker && gifPickerRef.current && !gifPickerRef.current.contains(e.target as Node)) {
+        setShowGifPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showEmojiPicker, showGifPicker])
+
+  // Load trending GIFs when picker opens
+  useEffect(() => {
+    if (!showGifPicker) return
+    const loadTrending = async () => {
+      setGifLoading(true)
+      try {
+        const res = await fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=20&rating=pg`)
+        const data = await res.json()
+        setGifResults(data.data.map((g: Record<string, unknown>) => ({
+          id: (g as { id: string }).id,
+          url: ((g as { images: { fixed_width: { url: string } } }).images.fixed_width.url),
+          title: (g as { title: string }).title,
+        })))
+      } catch { /* ignore */ }
+      setGifLoading(false)
+    }
+    loadTrending()
+  }, [showGifPicker])
+
+  const searchGifs = (query: string) => {
+    setGifQuery(query)
+    if (gifSearchTimer.current) clearTimeout(gifSearchTimer.current)
+    if (!query.trim()) {
+      // Reload trending
+      setShowGifPicker(false)
+      setTimeout(() => setShowGifPicker(true), 0)
+      return
+    }
+    gifSearchTimer.current = setTimeout(async () => {
+      setGifLoading(true)
+      try {
+        const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=20&rating=pg`)
+        const data = await res.json()
+        setGifResults(data.data.map((g: Record<string, unknown>) => ({
+          id: (g as { id: string }).id,
+          url: ((g as { images: { fixed_width: { url: string } } }).images.fixed_width.url),
+          title: (g as { title: string }).title,
+        })))
+      } catch { /* ignore */ }
+      setGifLoading(false)
+    }, 300)
+  }
+
+  const handleEmojiSelect = (emoji: { native: string }) => {
+    const cursorPos = inputRef.current?.selectionStart ?? value.length
+    const newValue = value.slice(0, cursorPos) + emoji.native + value.slice(cursorPos)
+    onChange(newValue)
+    setShowEmojiPicker(false)
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        const pos = cursorPos + emoji.native.length
+        inputRef.current.selectionStart = pos
+        inputRef.current.selectionEnd = pos
+        inputRef.current.focus()
+      }
+    })
+  }
+
   const sectionLabel = (type: string) => {
     switch (type) {
       case 'agent': return 'Agents'
@@ -162,28 +248,115 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
     }
   }
 
+  const [isFocused, setIsFocused] = useState(false)
+  const hasMentions = /@\[[^\]]+\]\([^)]+\)/.test(value)
+
   // Group filtered options by type for section headers
   let lastType = ''
 
   return (
     <div className="relative w-full">
-      <textarea
-        ref={inputRef}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        disabled={disabled}
-        rows={1}
-        className="w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 text-sm focus:border-forest-green focus:outline-none disabled:opacity-50"
-        style={{ minHeight: '40px', maxHeight: '120px' }}
-        onInput={(e) => {
-          // Auto-resize textarea
-          const target = e.target as HTMLTextAreaElement
-          target.style.height = 'auto'
-          target.style.height = Math.min(target.scrollHeight, 120) + 'px'
-        }}
-      />
+      <div className="relative">
+        {/* Styled preview overlay — shows when unfocused and has mentions */}
+        {!isFocused && hasMentions && value.trim() && (
+          <div
+            onClick={() => {
+              setIsFocused(true)
+              requestAnimationFrame(() => inputRef.current?.focus())
+            }}
+            className="absolute inset-0 z-10 flex items-center rounded-xl border border-border-subtle bg-white px-4 py-2.5 pr-16 text-sm cursor-text overflow-hidden"
+          >
+            <span className="truncate">
+              {renderMentionContent(value)}
+            </span>
+          </div>
+        )}
+        <textarea
+          ref={inputRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          placeholder={placeholder}
+          disabled={disabled}
+          rows={1}
+          className="w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-16 text-sm focus:border-forest-green focus:outline-none disabled:opacity-50"
+          style={{ minHeight: '40px', maxHeight: '120px' }}
+          onInput={(e) => {
+            // Auto-resize textarea
+            const target = e.target as HTMLTextAreaElement
+            target.style.height = 'auto'
+            target.style.height = Math.min(target.scrollHeight, 120) + 'px'
+          }}
+        />
+        {/* GIF + Emoji buttons */}
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+          {onGifSelect && (
+            <button
+              type="button"
+              onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false) }}
+              className="rounded-md p-1 text-text-muted hover:text-text-main hover:bg-light-surface-alt transition-colors"
+              title="Add GIF"
+            >
+              <span className="material-symbols-outlined text-[18px]">gif_box</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false) }}
+            className="rounded-md p-1 text-text-muted hover:text-text-main hover:bg-light-surface-alt transition-colors"
+            title="Add emoji"
+          >
+            <span className="material-symbols-outlined text-[18px]">mood</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Emoji Picker */}
+      {showEmojiPicker && (
+        <div ref={emojiPickerRef} className="absolute bottom-full right-0 mb-2 z-50">
+          <Picker data={data} onEmojiSelect={handleEmojiSelect} theme="light" previewPosition="none" skinTonePosition="none" />
+        </div>
+      )}
+
+      {/* GIF Picker */}
+      {showGifPicker && (
+        <div ref={gifPickerRef} className="absolute bottom-full right-0 mb-2 z-50 w-80 rounded-xl border border-border-subtle bg-white shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-border-subtle">
+            <input
+              type="text"
+              value={gifQuery}
+              onChange={(e) => searchGifs(e.target.value)}
+              placeholder="Search GIFs..."
+              className="w-full rounded-lg border border-border-subtle px-3 py-1.5 text-sm focus:border-forest-green focus:outline-none"
+              autoFocus
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-1 p-2 max-h-64 overflow-y-auto">
+            {gifLoading && <p className="col-span-2 py-4 text-center text-sm text-text-muted">Loading...</p>}
+            {!gifLoading && gifResults.map((gif) => (
+              <button
+                key={gif.id}
+                onClick={() => {
+                  onGifSelect?.(gif.url, gif.title)
+                  setShowGifPicker(false)
+                  setGifQuery('')
+                }}
+                className="rounded-lg overflow-hidden hover:ring-2 hover:ring-forest-green transition-all"
+              >
+                <img src={gif.url} alt={gif.title} className="w-full h-24 object-cover" loading="lazy" />
+              </button>
+            ))}
+            {!gifLoading && gifResults.length === 0 && gifQuery && (
+              <p className="col-span-2 py-4 text-center text-sm text-text-muted">No GIFs found</p>
+            )}
+          </div>
+          <div className="border-t border-border-subtle px-2 py-1">
+            <p className="text-[9px] text-text-muted text-right">Powered by GIPHY</p>
+          </div>
+        </div>
+      )}
 
       {/* Mention Dropdown */}
       {showDropdown && filteredOptions.length > 0 && (
@@ -249,6 +422,7 @@ export function renderMentionContent(
   content: string,
   onAgentClick?: (agentId: string) => void,
   onFileClick?: (docId: string) => void,
+  agentColorMap?: Map<string, { color: string; icon: string }>,
 ): React.ReactNode[] {
   const regex = /@\[([^\]]+)\]\((agent|user|file):([^)]+)\)/g
   const parts: React.ReactNode[] = []
@@ -265,18 +439,23 @@ export function renderMentionContent(
     const key = `m-${match.index}`
 
     switch (type) {
-      case 'agent':
+      case 'agent': {
+        const agentInfo = agentColorMap?.get(id)
+        const color = agentInfo?.color ?? '#0F4D26'
+        const icon = agentInfo?.icon ?? 'smart_toy'
         parts.push(
           <span
             key={key}
-            className="inline-flex items-center gap-0.5 rounded bg-forest-green/10 text-forest-green px-1 text-[13px] font-medium cursor-pointer hover:bg-forest-green/20"
+            className="inline-flex items-center gap-0.5 rounded px-1 text-[13px] font-medium cursor-pointer"
+            style={{ backgroundColor: color + '18', color }}
             onClick={() => onAgentClick?.(id)}
           >
-            <span className="material-symbols-outlined text-[12px]">smart_toy</span>
+            <span className="material-symbols-outlined text-[12px]">{icon}</span>
             @{displayName}
           </span>,
         )
         break
+      }
       case 'user':
         parts.push(
           <span
