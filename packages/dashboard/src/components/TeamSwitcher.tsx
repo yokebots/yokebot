@@ -4,6 +4,32 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useTeam } from '../lib/team-context'
+import { getTeamLogoUrl } from '../lib/engine'
+
+function TeamIcon({ teamId, name, size = 6 }: { teamId: string; name: string; size?: number }) {
+  const [hasLogo, setHasLogo] = useState(true)
+  const sizeClass = size === 6 ? 'w-6 h-6' : 'w-5 h-5'
+  const textSize = size === 6 ? 'text-xs' : 'text-[10px]'
+
+  if (hasLogo) {
+    return (
+      <span className={`${sizeClass} rounded bg-forest-green/15 flex items-center justify-center overflow-hidden`}>
+        <img
+          src={getTeamLogoUrl(teamId)}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setHasLogo(false)}
+        />
+      </span>
+    )
+  }
+
+  return (
+    <span className={`${sizeClass} rounded bg-forest-green/15 text-forest-green flex items-center justify-center ${textSize} font-bold`}>
+      {name.charAt(0).toUpperCase()}
+    </span>
+  )
+}
 
 export default function TeamSwitcher() {
   const { teams, activeTeam, switchTeam, createAndSwitchTeam } = useTeam()
@@ -40,9 +66,7 @@ export default function TeamSwitcher() {
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-light-surface-alt transition-colors text-left"
       >
-        <span className="w-6 h-6 rounded bg-forest-green/15 text-forest-green flex items-center justify-center text-xs font-bold">
-          {activeTeam.name.charAt(0).toUpperCase()}
-        </span>
+        <TeamIcon teamId={activeTeam.id} name={activeTeam.name} size={6} />
         <span className="flex-1 truncate text-text-main font-medium">{activeTeam.name}</span>
         <svg className={`w-4 h-4 text-text-muted transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -57,9 +81,7 @@ export default function TeamSwitcher() {
               onClick={() => { switchTeam(team.id); setOpen(false) }}
               className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-light-surface-alt transition-colors ${team.id === activeTeam.id ? 'bg-light-surface-alt text-forest-green' : 'text-text-main'}`}
             >
-              <span className="w-5 h-5 rounded bg-forest-green/15 text-forest-green flex items-center justify-center text-[10px] font-bold">
-                {team.name.charAt(0).toUpperCase()}
-              </span>
+              <TeamIcon teamId={team.id} name={team.name} size={5} />
               <span className="flex-1 truncate">{team.name}</span>
               {team.role && <span className="text-[10px] text-text-muted uppercase">{team.role}</span>}
             </button>

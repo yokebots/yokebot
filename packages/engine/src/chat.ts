@@ -148,15 +148,17 @@ export interface ChatSearchResult {
 }
 
 export async function searchMessages(db: Db, teamId: string, query: string, limit = 20): Promise<ChatSearchResult[]> {
+  // Escape LIKE wildcards in user input
+  const safeQuery = query.replace(/[%_\\]/g, '\\$&')
   const rows = await db.query<Record<string, unknown>>(
     `SELECT m.id, m.channel_id, c.name AS channel_name, c.type AS channel_type,
             m.sender_type, m.sender_id, m.content, m.created_at
      FROM chat_messages m
      JOIN chat_channels c ON c.id = m.channel_id
-     WHERE m.team_id = $1 AND m.content ILIKE $2
+     WHERE m.team_id = $1 AND m.content ILIKE $2 ESCAPE '\\'
      ORDER BY m.created_at DESC
      LIMIT $3`,
-    [teamId, `%${query}%`, limit],
+    [teamId, `%${safeQuery}%`, limit],
   )
   return rows.map((r) => ({
     id: r.id as number,

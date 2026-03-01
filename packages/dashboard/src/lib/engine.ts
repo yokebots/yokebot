@@ -840,6 +840,33 @@ export const setupAdvisor = (teamId: string) =>
     method: 'POST',
   })
 
+// ===== Team Logo =====
+
+export async function uploadTeamLogo(teamId: string, file: File): Promise<{ success: boolean }> {
+  const base64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      const base64Data = result.includes(',') ? result.split(',')[1] : result
+      resolve(base64Data)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+  return request(`/api/teams/${teamId}/logo`, {
+    method: 'POST',
+    body: JSON.stringify({ contentBase64: base64, contentType: file.type }),
+  })
+}
+
+export const removeTeamLogo = (teamId: string) =>
+  request<{ success: boolean }>(`/api/teams/${teamId}/logo`, { method: 'DELETE' })
+
+export const getTeamLogoUrl = (teamId: string): string => {
+  const url = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
+  return `${url}/api/teams/${teamId}/logo`
+}
+
 // ===== User Profile =====
 
 export const updateUserProfile = (data: { iconName?: string; iconColor?: string }) =>

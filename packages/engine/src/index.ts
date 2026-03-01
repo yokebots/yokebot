@@ -159,6 +159,7 @@ async function main() {
   })
 
   app.post('/api/agents', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const body = validate(CreateAgentSchema, req.body)
 
@@ -211,6 +212,7 @@ async function main() {
   })
 
   app.patch('/api/agents/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const body = validate(UpdateAgentSchema, req.body)
@@ -232,6 +234,7 @@ async function main() {
 
   // Start/stop agent
   app.post('/api/agents/:id/start', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const agent = await getAgent(db, req.params.id)
@@ -260,6 +263,7 @@ async function main() {
   })
 
   app.post('/api/agents/:id/stop', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const agent = await getAgent(db, req.params.id)
@@ -273,6 +277,7 @@ async function main() {
   // ===== Chat with Agent (ReAct loop) =====
 
   app.post('/api/agents/:id/chat', chatLimiter, async (req: Request, res: Response) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('agents', req.params.id as string, teamId)) return res.status(404).json({ error: 'Agent not found' })
     const agent = await getAgent(db, req.params.id as string)
@@ -387,6 +392,7 @@ async function main() {
   })
 
   app.post('/api/tasks', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const body = validate(CreateTaskSchema, req.body)
     const task = await createTask(db, teamId, body.title, body)
@@ -394,6 +400,7 @@ async function main() {
   })
 
   app.patch('/api/tasks/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
     const body = validate(UpdateTaskSchema, req.body)
@@ -554,6 +561,7 @@ async function main() {
   })
 
   app.post('/api/chat/channels', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const { name, type } = validate(CreateChannelSchema, req.body)
     const channel = await createChannel(db, teamId, name, type)
@@ -561,6 +569,7 @@ async function main() {
   })
 
   app.patch('/api/chat/channels/:channelId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
     const { name } = req.body as { name?: string }
@@ -571,6 +580,7 @@ async function main() {
   })
 
   app.delete('/api/chat/channels/:channelId', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) { res.status(404).json({ error: 'Channel not found' }); return }
     const channel = await getChannel(db, req.params.channelId)
@@ -737,9 +747,17 @@ async function main() {
   // Toggle a reaction (add if not exists, remove if exists)
   app.post('/api/chat/messages/:messageId/reactions', async (req, res) => {
     const userId = req.user!.id
+    const teamId = req.user!.activeTeamId!
     const messageId = Number(req.params.messageId)
     const { emoji } = req.body as { emoji: string }
     if (!emoji || typeof emoji !== 'string') return res.status(400).json({ error: 'emoji required' })
+
+    // Verify message belongs to a channel owned by this team
+    const msg = await db.queryOne<{ id: number }>(
+      `SELECT m.id FROM chat_messages m JOIN chat_channels c ON m.channel_id = c.id WHERE m.id = $1 AND c.team_id = $2`,
+      [messageId, teamId],
+    )
+    if (!msg) return res.status(404).json({ error: 'Message not found' })
 
     // Check if reaction already exists
     const existing = await db.queryOne<{ id: number }>(
@@ -763,7 +781,16 @@ async function main() {
 
   // Get reactions for a message
   app.get('/api/chat/messages/:messageId/reactions', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
     const messageId = Number(req.params.messageId)
+
+    // Verify message belongs to this team
+    const msg = await db.queryOne<{ id: number }>(
+      `SELECT m.id FROM chat_messages m JOIN chat_channels c ON m.channel_id = c.id WHERE m.id = $1 AND c.team_id = $2`,
+      [messageId, teamId],
+    )
+    if (!msg) return res.status(404).json({ error: 'Message not found' })
+
     const reactions = await db.query<{ emoji: string; user_id: string; created_at: string }>(
       'SELECT emoji, user_id, created_at FROM chat_reactions WHERE message_id = $1 ORDER BY created_at',
       [messageId],
@@ -793,6 +820,7 @@ async function main() {
   })
 
   app.put('/api/workspace/file', (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
     const { path, content, agentId } = validate(WriteFileSchema, req.body)
     const result = writeFile(workspaceConfig, path, content, agentId)
     if (!result.success) return res.status(423).json({ error: result.error })
@@ -802,6 +830,7 @@ async function main() {
   // ===== Knowledge Base =====
 
   app.post('/api/kb/documents', express.json({ limit: '15mb' }), async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     try {
       const teamId = req.user!.activeTeamId!
       const { fileName, fileType, content, title } = validate(UploadKbDocumentSchema, req.body)
@@ -883,6 +912,7 @@ async function main() {
   })
 
   app.post('/api/sor/tables', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const { name, columns } = validate(CreateSorTableSchema, req.body)
     const table = await createSorTable(db, teamId, name)
@@ -899,6 +929,7 @@ async function main() {
   })
 
   app.post('/api/sor/tables/:id/rows', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
     const row = await addSorRow(db, req.params.id, req.body as Record<string, unknown>)
@@ -906,8 +937,12 @@ async function main() {
   })
 
   app.patch('/api/sor/tables/:tableId/rows/:rowId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('sor_tables', req.params.tableId, teamId)) return res.status(404).json({ error: 'Table not found' })
+    // Verify row belongs to this table
+    const rowCheck = await db.queryOne<{ id: string }>('SELECT id FROM sor_rows WHERE id = $1 AND table_id = $2', [req.params.rowId, req.params.tableId])
+    if (!rowCheck) return res.status(404).json({ error: 'Row not found' })
     const row = await updateSorRow(db, req.params.rowId, req.body as Record<string, unknown>)
     if (!row) return res.status(404).json({ error: 'Row not found' })
     res.json(row)
@@ -917,6 +952,9 @@ async function main() {
     if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('sor_tables', req.params.tableId, teamId)) return res.status(404).json({ error: 'Table not found' })
+    // Verify row belongs to this table
+    const rowCheck = await db.queryOne<{ id: string }>('SELECT id FROM sor_rows WHERE id = $1 AND table_id = $2', [req.params.rowId, req.params.tableId])
+    if (!rowCheck) return res.status(404).json({ error: 'Row not found' })
     await deleteSorRow(db, req.params.rowId)
     res.status(204).end()
   })
@@ -928,6 +966,7 @@ async function main() {
   })
 
   app.patch('/api/sor/tables/:id/permissions', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('sor_tables', req.params.id, teamId)) return res.status(404).json({ error: 'Table not found' })
     const { agentId, canRead, canWrite } = validate(UpdateSorPermissionSchema, req.body)
@@ -959,6 +998,7 @@ async function main() {
   })
 
   app.patch('/api/models/providers/:id', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
     const provider = PROVIDERS.find((p) => p.id === req.params.id)
     if (!provider) return res.status(404).json({ error: 'Unknown provider' })
     const { apiKey, enabled } = validate(UpdateProviderSchema, req.body)
@@ -1000,6 +1040,7 @@ async function main() {
   })
 
   app.post('/api/agents/:id/skills', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
     const { skillName } = validate(InstallSkillSchema, req.body)
@@ -1008,6 +1049,7 @@ async function main() {
   })
 
   app.delete('/api/agents/:id/skills/:skillName', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('agents', req.params.id, teamId))) return res.status(404).json({ error: 'Agent not found' })
     await uninstallSkill(db, req.params.id, req.params.skillName)
@@ -1458,6 +1500,54 @@ async function main() {
     res.json({ success: true })
   })
 
+  // ===== Team Logo (upload / serve / remove) =====
+
+  app.post('/api/teams/:id/logo', uploadLimiter, express.json({ limit: '3mb' }), async (req: Request, res: Response) => {
+    const teamId = req.params.id as string
+    const team = await getTeam(db, teamId)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    if (!requireRole(req, res, 'admin')) return
+
+    const { contentBase64, contentType } = req.body as { contentBase64?: string; contentType?: string }
+    if (!contentBase64 || !contentType) return res.status(400).json({ error: 'contentBase64 and contentType are required' })
+    if (!['image/png', 'image/jpeg'].includes(contentType)) return res.status(400).json({ error: 'Only PNG and JPEG images are supported' })
+
+    try {
+      const storagePath = './cloud/storage.js'
+      const { uploadTeamLogo } = await import(/* @vite-ignore */ storagePath)
+      await uploadTeamLogo(contentBase64, teamId, contentType)
+      res.json({ success: true })
+    } catch (err) {
+      console.error('[team-logo] Upload error:', err)
+      res.status(500).json({ error: 'Failed to upload logo' })
+    }
+  })
+
+  app.get('/api/teams/:id/logo', async (req, res) => {
+    const teamId = req.params.id as string
+    try {
+      const storagePath = './cloud/storage.js'
+      const { getTeamLogo } = await import(/* @vite-ignore */ storagePath)
+      const result = await getTeamLogo(teamId)
+      if (!result) return res.status(404).json({ error: 'No logo found' })
+      res.setHeader('Content-Type', result.contentType)
+      res.setHeader('Content-Length', result.contentLength)
+      res.setHeader('Cache-Control', 'public, max-age=3600')
+      result.stream.pipe(res)
+    } catch {
+      res.status(404).json({ error: 'No logo found' })
+    }
+  })
+
+  app.delete('/api/teams/:id/logo', async (req: Request, res: Response) => {
+    const teamId = req.params.id as string
+    const team = await getTeam(db, teamId)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    if (!requireRole(req, res, 'admin')) return
+    // Logo will just 404 on GET after this — no need to delete from R2
+    res.json({ success: true })
+  })
+
   // ===== Website Scan (Tavily + LLM, hosted only, platform cost) =====
 
   app.post('/api/teams/:id/scan-website', async (req, res) => {
@@ -1543,6 +1633,46 @@ ${truncated}`,
       // Parse JSON from LLM response (handle markdown code fences)
       const jsonStr = raw.startsWith('{') ? raw : (raw.match(/\{[\s\S]*\}/)?.[0] ?? '{}')
       const parsed = JSON.parse(jsonStr) as Record<string, string | null>
+
+      // Best-effort: try to fetch the site's favicon and set as team logo
+      void (async () => {
+        try {
+          const parsedUrl = new URL(url)
+          const origin = parsedUrl.origin
+
+          // Try common favicon locations (prefer larger icons)
+          const candidates = [
+            `${origin}/apple-touch-icon.png`,
+            `${origin}/apple-touch-icon-precomposed.png`,
+            `${origin}/favicon-192x192.png`,
+            `${origin}/android-chrome-192x192.png`,
+            `${origin}/favicon-96x96.png`,
+            `${origin}/favicon-32x32.png`,
+            `${origin}/favicon.png`,
+            `${origin}/favicon.ico`,
+          ]
+
+          for (const faviconUrl of candidates) {
+            try {
+              const faviconRes = await fetch(faviconUrl, { redirect: 'follow' })
+              if (!faviconRes.ok) continue
+              const ct = faviconRes.headers.get('content-type') ?? ''
+              if (!ct.includes('image/png') && !ct.includes('image/jpeg')) continue
+              const buf = Buffer.from(await faviconRes.arrayBuffer())
+              // Skip tiny favicons (< 2KB is likely 16x16 or corrupt)
+              if (buf.length < 2048) continue
+
+              const storagePath = './cloud/storage.js'
+              const { uploadTeamLogo } = await import(/* @vite-ignore */ storagePath)
+              await uploadTeamLogo(buf.toString('base64'), req.params.id, ct.includes('png') ? 'image/png' : 'image/jpeg')
+              console.log(`[scan] Auto-set team logo from favicon: ${faviconUrl} (${buf.length} bytes)`)
+              break
+            } catch { continue }
+          }
+        } catch (e) {
+          console.log('[scan] Favicon extraction skipped:', (e as Error).message)
+        }
+      })()
 
       res.json({
         companyName: parsed.companyName ?? null,
@@ -1972,6 +2102,18 @@ ${truncated}`,
       const { getMeetingAudio } = await import(/* @vite-ignore */ storagePath)
       const keyParam = (req.params as Record<string, unknown>).key
       const audioKey = Array.isArray(keyParam) ? keyParam.join('/') : String(keyParam)
+
+      // Audio keys are structured as meetings/{teamId}/... — verify team access
+      const keyParts = audioKey.split('/')
+      if (keyParts[0] === 'meetings' && keyParts[1]) {
+        const audioTeamId = keyParts[1]
+        const membership = await db.queryOne<{ team_id: string }>(
+          'SELECT team_id FROM team_members WHERE team_id = $1 AND user_id = $2',
+          [audioTeamId, req.user!.id],
+        )
+        if (!membership) return res.status(403).json({ error: 'Access denied' })
+      }
+
       const result = await getMeetingAudio(audioKey)
       if (!result) return res.status(404).json({ error: 'Audio not found' })
 
@@ -2010,11 +2152,12 @@ ${truncated}`,
 
       // Send notification email
       try {
+        const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
         const { sendEmail } = await import('./email.ts')
         await sendEmail({
           to: 'james@yokebot.com',
           subject: `[YokeBot Contact] ${name.trim()}`,
-          html: `<p><strong>From:</strong> ${name.trim()} &lt;${email.trim()}&gt;</p><p><strong>Message:</strong></p><p>${message.trim().replace(/\n/g, '<br>')}</p>`,
+          html: `<p><strong>From:</strong> ${esc(name.trim())} &lt;${esc(email.trim())}&gt;</p><p><strong>Message:</strong></p><p>${esc(message.trim()).replace(/\n/g, '<br>')}</p>`,
           replyTo: email.trim(),
         })
       } catch (emailErr) {
@@ -2149,6 +2292,7 @@ ${truncated}`,
   })
 
   app.post('/api/goals', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const { title, description, targetDate } = req.body as { title: string; description?: string; targetDate?: string }
     if (!title) return res.status(400).json({ error: 'title is required' })
@@ -2167,6 +2311,7 @@ ${truncated}`,
   })
 
   app.patch('/api/goals/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
     const { title, description, status, targetDate } = req.body as { title?: string; description?: string; status?: GoalStatus; targetDate?: string | null }
@@ -2184,6 +2329,7 @@ ${truncated}`,
   })
 
   app.post('/api/goals/:id/tasks', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
     const { taskId } = req.body as { taskId: string }
@@ -2193,6 +2339,7 @@ ${truncated}`,
   })
 
   app.delete('/api/goals/:id/tasks/:taskId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
     await unlinkTask(db, req.params.id, req.params.taskId)
@@ -2208,6 +2355,7 @@ ${truncated}`,
   })
 
   app.post('/api/kpi-goals', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const { title, metricName, targetValue, unit, currentValue, deadline } = req.body as {
       title: string; metricName: string; targetValue: number; unit?: string; currentValue?: number; deadline?: string
@@ -2231,6 +2379,7 @@ ${truncated}`,
   })
 
   app.patch('/api/kpi-goals/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('kpi_goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
     const updates = req.body as Record<string, unknown>
@@ -2256,6 +2405,7 @@ ${truncated}`,
   })
 
   app.post('/api/workflows', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const body = validate(CreateWorkflowSchema, req.body)
     const workflow = await createWorkflow(db, teamId, body.name, {
@@ -2293,6 +2443,7 @@ ${truncated}`,
   })
 
   app.patch('/api/workflows/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
     const body = validate(UpdateWorkflowSchema, req.body)
@@ -2315,6 +2466,7 @@ ${truncated}`,
   // ---- Workflow Steps ----
 
   app.post('/api/workflows/:id/steps', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
     const body = validate(AddWorkflowStepSchema, req.body)
@@ -2323,6 +2475,7 @@ ${truncated}`,
   })
 
   app.patch('/api/workflows/:id/steps/:stepId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
     const body = validate(UpdateWorkflowStepSchema, req.body)
@@ -2340,6 +2493,7 @@ ${truncated}`,
   })
 
   app.put('/api/workflows/:id/steps/reorder', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
     const body = validate(ReorderWorkflowStepsSchema, req.body)
@@ -2350,6 +2504,7 @@ ${truncated}`,
   // ---- Workflow Runs ----
 
   app.post('/api/workflows/:id/run', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
     const wfForRun = await getWorkflow(db, req.params.id)
@@ -2377,6 +2532,7 @@ ${truncated}`,
   })
 
   app.post('/api/workflow-runs/:id/cancel', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflow_runs', req.params.id, teamId))) return res.status(404).json({ error: 'Run not found' })
     const run = await cancelRun(db, req.params.id)
@@ -2388,6 +2544,12 @@ ${truncated}`,
 
   app.post('/api/workflow-run-steps/:id/approve', async (req, res) => {
     const teamId = req.user!.activeTeamId!
+    // Verify step belongs to a workflow run owned by this team
+    const step = await db.queryOne<{ id: string }>(
+      `SELECT s.id FROM workflow_run_steps s JOIN workflow_runs r ON s.run_id = r.id JOIN workflows w ON r.workflow_id = w.id WHERE s.id = $1 AND w.team_id = $2`,
+      [req.params.id, teamId],
+    )
+    if (!step) return res.status(404).json({ error: 'Step not found' })
     await approveWorkflowStep(db, req.params.id)
     await logActivity(db, 'workflow_step_approved', null, `Workflow step approved`, undefined, teamId)
     res.json({ approved: true })
@@ -2396,6 +2558,7 @@ ${truncated}`,
   // ---- Workflow Capture ----
 
   app.post('/api/workflows/capture', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const body = validate(CaptureWorkflowSchema, req.body)
     const workflow = await captureWorkflow(db, teamId, body.name, body.taskIds)

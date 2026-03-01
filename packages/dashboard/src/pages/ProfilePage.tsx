@@ -7,14 +7,14 @@ import { updateUserProfile } from '@/lib/engine'
 import { supabase } from '@/lib/supabase'
 
 const AVATAR_COLORS = [
-  { id: 'green',  bg: 'bg-green-100',  text: 'text-green-600',  border: 'border-green-200' },
-  { id: 'blue',   bg: 'bg-blue-100',   text: 'text-blue-600',   border: 'border-blue-200' },
-  { id: 'purple', bg: 'bg-purple-100', text: 'text-purple-600', border: 'border-purple-200' },
-  { id: 'amber',  bg: 'bg-amber-100',  text: 'text-amber-600',  border: 'border-amber-200' },
-  { id: 'red',    bg: 'bg-red-100',    text: 'text-red-600',    border: 'border-red-200' },
-  { id: 'pink',   bg: 'bg-pink-100',   text: 'text-pink-600',   border: 'border-pink-200' },
-  { id: 'cyan',   bg: 'bg-cyan-100',   text: 'text-cyan-600',   border: 'border-cyan-200' },
-  { id: 'indigo', bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'border-indigo-200' },
+  { id: 'green',  bg: 'bg-green-100',  text: 'text-green-600',  border: 'border-green-200', ring: 'ring-green-400' },
+  { id: 'blue',   bg: 'bg-blue-100',   text: 'text-blue-600',   border: 'border-blue-200', ring: 'ring-blue-400' },
+  { id: 'purple', bg: 'bg-purple-100', text: 'text-purple-600', border: 'border-purple-200', ring: 'ring-purple-400' },
+  { id: 'amber',  bg: 'bg-amber-100',  text: 'text-amber-600',  border: 'border-amber-200', ring: 'ring-amber-400' },
+  { id: 'red',    bg: 'bg-red-100',    text: 'text-red-600',    border: 'border-red-200', ring: 'ring-red-400' },
+  { id: 'pink',   bg: 'bg-pink-100',   text: 'text-pink-600',   border: 'border-pink-200', ring: 'ring-pink-400' },
+  { id: 'cyan',   bg: 'bg-cyan-100',   text: 'text-cyan-600',   border: 'border-cyan-200', ring: 'ring-cyan-400' },
+  { id: 'indigo', bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'border-indigo-200', ring: 'ring-indigo-400' },
 ] as const
 
 const AVATAR_ICONS = [
@@ -51,29 +51,40 @@ export function ProfilePage() {
   const currentIcon = (user?.user_metadata?.icon_name as string | undefined) ?? null
   const currentColor = (user?.user_metadata?.icon_color as string | undefined) ?? null
 
+  const [showModal, setShowModal] = useState(false)
   const [selectedIcon, setSelectedIcon] = useState<string | null>(currentIcon)
   const [selectedColor, setSelectedColor] = useState<string | null>(currentColor)
   const [saving, setSaving] = useState(false)
 
   const avatar = getUserAvatar(user)
 
-  const handleSelect = async (icon: string | null, color: string | null) => {
-    const newIcon = icon ?? selectedIcon
-    const newColor = color ?? selectedColor
-    if (!newIcon || !newColor) return
-
-    setSelectedIcon(newIcon)
-    setSelectedColor(newColor)
+  const handleSave = async (icon: string, color: string) => {
     setSaving(true)
     try {
-      await updateUserProfile({ iconName: newIcon, iconColor: newColor })
-      // Refresh the session so the user object reflects updated metadata
+      await updateUserProfile({ iconName: icon, iconColor: color })
       await supabase.auth.refreshSession()
+      setShowModal(false)
     } catch (err) {
       console.error('Failed to update avatar:', err)
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleSelect = (icon: string | null, color: string | null) => {
+    const newIcon = icon ?? selectedIcon
+    const newColor = color ?? selectedColor
+    if (icon) setSelectedIcon(icon)
+    if (color) setSelectedColor(color)
+    if (newIcon && newColor) {
+      handleSave(newIcon, newColor)
+    }
+  }
+
+  const openModal = () => {
+    setSelectedIcon(currentIcon)
+    setSelectedColor(currentColor)
+    setShowModal(true)
   }
 
   return (
@@ -82,17 +93,27 @@ export function ProfilePage() {
         {/* Profile Card */}
         <div className="rounded-lg border border-border-subtle bg-white p-6">
           <div className="flex items-center gap-5">
-            {avatarUrl ? (
-              <img src={avatarUrl} alt={displayName} className="h-16 w-16 rounded-full" />
-            ) : avatar.type === 'icon' ? (
-              <div className={`flex h-16 w-16 items-center justify-center rounded-full ${avatar.bg} ${avatar.border} border`}>
-                <span className={`material-symbols-outlined text-3xl ${avatar.text}`}>{avatar.symbol}</span>
-              </div>
-            ) : (
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-tr from-forest-green to-green-300 text-xl font-bold text-white">
-                {avatar.letter}
-              </div>
-            )}
+            {/* Avatar with edit overlay */}
+            <div className="group relative cursor-pointer" onClick={avatarUrl ? undefined : openModal}>
+              {avatarUrl ? (
+                <img src={avatarUrl} alt={displayName} className="h-16 w-16 rounded-full" />
+              ) : avatar.type === 'icon' ? (
+                <div className={`flex h-16 w-16 items-center justify-center rounded-full ${avatar.bg} ${avatar.border} border`}>
+                  <span className={`material-symbols-outlined text-3xl ${avatar.text}`}>{avatar.symbol}</span>
+                </div>
+              ) : (
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-tr from-forest-green to-green-300 text-xl font-bold text-white">
+                  {avatar.letter}
+                </div>
+              )}
+              {/* Edit overlay — hidden for OAuth avatars */}
+              {!avatarUrl && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="material-symbols-outlined text-[20px] text-white">edit</span>
+                </div>
+              )}
+            </div>
+
             <div>
               <h2 className="text-lg font-bold text-text-main">{displayName}</h2>
               <p className="text-sm text-text-muted">{email}</p>
@@ -134,40 +155,44 @@ export function ProfilePage() {
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Customize Avatar — only shown when no OAuth avatar_url */}
-        {!avatarUrl && (
-          <div className="mt-6 rounded-lg border border-border-subtle bg-white p-6">
-            <h3 className="text-sm font-bold text-text-main mb-4">Customize Avatar</h3>
+      {/* Avatar Picker Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowModal(false)}>
+          <div className="mx-4 w-full max-w-md rounded-xl border border-border-subtle bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-display text-lg font-bold text-text-main">Customize Avatar</h3>
+              <button onClick={() => setShowModal(false)} className="rounded-lg p-1 text-text-muted hover:text-text-main transition-colors">
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
 
             {/* Preview */}
-            <div className="flex items-center gap-3 mb-5">
+            <div className="flex justify-center mb-5">
               {selectedIcon && selectedColor && COLOR_MAP[selectedColor] ? (
-                <div className={`flex h-12 w-12 items-center justify-center rounded-full ${COLOR_MAP[selectedColor].bg} ${COLOR_MAP[selectedColor].border} border`}>
-                  <span className={`material-symbols-outlined text-2xl ${COLOR_MAP[selectedColor].text}`}>{selectedIcon}</span>
+                <div className={`flex h-20 w-20 items-center justify-center rounded-full ${COLOR_MAP[selectedColor].bg} ${COLOR_MAP[selectedColor].border} border-2`}>
+                  <span className={`material-symbols-outlined text-4xl ${COLOR_MAP[selectedColor].text}`}>{selectedIcon}</span>
                 </div>
               ) : (
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-tr from-forest-green to-green-300 text-lg font-bold text-white">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-tr from-forest-green to-green-300 text-2xl font-bold text-white">
                   {email[0]?.toUpperCase() ?? 'U'}
                 </div>
               )}
-              <div className="text-xs text-text-muted">
-                {saving ? 'Saving...' : selectedIcon && selectedColor ? 'Pick an icon and color below' : 'Select an icon and color to customize your avatar'}
-              </div>
             </div>
 
             {/* Color Picker */}
-            <div className="mb-4">
+            <div className="mb-5">
               <label className="mb-2 block text-xs font-medium text-text-secondary">Color</label>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex justify-center gap-3">
                 {AVATAR_COLORS.map((color) => (
                   <button
                     key={color.id}
                     onClick={() => handleSelect(null, color.id)}
                     className={`h-8 w-8 rounded-full ${color.bg} border-2 transition-all ${
                       selectedColor === color.id
-                        ? `${color.border} ring-2 ring-offset-1 ring-current ${color.text} scale-110`
-                        : 'border-transparent hover:scale-105'
+                        ? `${color.border} ring-2 ring-offset-2 ${color.ring} scale-110`
+                        : 'border-transparent hover:scale-110'
                     }`}
                     title={color.id}
                   />
@@ -189,7 +214,7 @@ export function ProfilePage() {
                       onClick={() => handleSelect(icon, null)}
                       className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
                         selectedIcon === icon
-                          ? `${colorStyles.bg} ${colorStyles.border} border-2 ring-1 ring-offset-1 ring-current ${colorStyles.text} scale-110`
+                          ? `${colorStyles.bg} ${colorStyles.border} border-2 scale-110 ${colorStyles.text}`
                           : 'border border-transparent hover:bg-gray-50 text-gray-400 hover:text-gray-600 hover:scale-105'
                       }`}
                       title={icon.replace(/_/g, ' ')}
@@ -200,9 +225,16 @@ export function ProfilePage() {
                 })}
               </div>
             </div>
+
+            {saving && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-text-muted">
+                <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
+                Saving...
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </SettingsLayout>
   )
 }

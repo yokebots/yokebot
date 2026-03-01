@@ -1,9 +1,9 @@
 import { useNavigate } from 'react-router'
 
 const TABS = [
+  { id: 'identity', label: 'Business Context', path: '/settings' },
   { id: 'user', label: 'Profile', path: '/settings/user' },
   { id: 'team', label: 'Team', path: '/settings/team' },
-  { id: 'identity', label: 'Business Context', path: '/settings' },
   { id: 'integrations', label: 'Integrations', path: '/settings/integrations' },
   { id: 'notifications', label: 'Notifications', path: '/settings/notifications' },
   { id: 'billing', label: 'Billing', path: '/settings/billing' },

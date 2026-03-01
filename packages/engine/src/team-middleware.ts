@@ -19,6 +19,7 @@ const FULLY_EXEMPT_PATHS = [
   '/api/config',
   '/api/debug',
   '/api/notifications',
+  '/api/user',
 ]
 
 // UUID v4 regex for extracting team IDs from URL paths

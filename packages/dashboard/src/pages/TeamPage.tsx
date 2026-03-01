@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { Link } from 'react-router'
 import { useAuth } from '@/lib/auth'
 import * as engine from '@/lib/engine'
 import { SettingsLayout } from '@/components/SettingsLayout'
@@ -11,6 +12,7 @@ export function TeamPage() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [hasSubscription, setHasSubscription] = useState(false)
 
   // Inline rename state
   const [editingName, setEditingName] = useState(false)
@@ -20,6 +22,10 @@ export function TeamPage() {
   // New team creation state
   const [showNewTeam, setShowNewTeam] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
+
+  // Team logo upload state
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const logoInputRef = useRef<HTMLInputElement>(null)
 
   const loadTeams = async () => {
     try {
@@ -42,7 +48,12 @@ export function TeamPage() {
     } catch { /* ignore */ }
   }
 
-  useEffect(() => { loadTeams() }, [])
+  useEffect(() => {
+    loadTeams()
+    engine.getBillingStatus().then((s) => {
+      setHasSubscription(!!s.subscription)
+    }).catch(() => {})
+  }, [])
   useEffect(() => { if (selectedTeam) loadMembers(selectedTeam.id) }, [selectedTeam?.id])
 
   const handleCreateTeam = async () => {
@@ -95,6 +106,29 @@ export function TeamPage() {
     if (!selectedTeam) return
     await engine.removeTeamMember(selectedTeam.id, userId)
     await loadMembers(selectedTeam.id)
+  }
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !selectedTeam) return
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setError('Only PNG and JPG images are supported')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Logo must be under 2MB')
+      return
+    }
+    setUploadingLogo(true)
+    try {
+      await engine.uploadTeamLogo(selectedTeam.id, file)
+      await loadTeams()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload logo')
+    } finally {
+      setUploadingLogo(false)
+      if (logoInputRef.current) logoInputRef.current.value = ''
+    }
   }
 
   if (loading) {
@@ -158,39 +192,64 @@ export function TeamPage() {
           </div>
         )}
 
-        {/* Members list */}
+        {/* Team card with logo + members */}
         {selectedTeam && (
           <div className="rounded-xl border border-border-subtle bg-white shadow-soft">
             <div className="flex items-center justify-between border-b border-border-subtle px-6 py-4">
-              <div className="group">
-                {editingName ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={renameRef}
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleRename()
-                        if (e.key === 'Escape') setEditingName(false)
-                      }}
-                      onBlur={handleRename}
-                      className="rounded-lg border border-forest-green bg-white px-2.5 py-1 font-display text-lg font-bold text-text-main focus:outline-none"
-                    />
+              <div className="flex items-center gap-4">
+                {/* Team logo */}
+                <div className="group relative">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-border-subtle bg-light-surface-alt overflow-hidden">
+                    <TeamLogoDisplay teamId={selectedTeam.id} fallbackName={selectedTeam.name} />
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-display text-lg font-bold text-text-main">{selectedTeam.name}</h2>
-                    <button
-                      onClick={startRename}
-                      className="rounded p-0.5 text-text-muted opacity-0 hover:bg-light-surface-alt hover:text-text-main group-hover:opacity-100 transition-all"
-                      title="Rename team"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">edit</span>
-                    </button>
-                  </div>
-                )}
-                <p className="text-xs text-text-muted">{members.length} member{members.length !== 1 ? 's' : ''}</p>
+                  <button
+                    onClick={() => logoInputRef.current?.click()}
+                    className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    title="Change logo"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-white">
+                      {uploadingLogo ? 'progress_activity' : 'photo_camera'}
+                    </span>
+                  </button>
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                  />
+                </div>
+
+                <div className="group">
+                  {editingName ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={renameRef}
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleRename()
+                          if (e.key === 'Escape') setEditingName(false)
+                        }}
+                        onBlur={handleRename}
+                        className="rounded-lg border border-forest-green bg-white px-2.5 py-1 font-display text-lg font-bold text-text-main focus:outline-none"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <h2 className="font-display text-lg font-bold text-text-main">{selectedTeam.name}</h2>
+                      <button
+                        onClick={startRename}
+                        className="rounded p-0.5 text-text-muted opacity-0 hover:bg-light-surface-alt hover:text-text-main group-hover:opacity-100 transition-all"
+                        title="Rename team"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">edit</span>
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-xs text-text-muted">{members.length} member{members.length !== 1 ? 's' : ''}</p>
+                </div>
               </div>
             </div>
 
@@ -257,8 +316,8 @@ export function TeamPage() {
           </div>
         )}
 
-        {/* Create additional team */}
-        {teams.length > 0 && !showNewTeam && (
+        {/* Create additional team — only for subscribers */}
+        {teams.length > 0 && hasSubscription && !showNewTeam && (
           <button
             onClick={() => setShowNewTeam(true)}
             className="flex items-center gap-1.5 text-sm text-text-muted hover:text-forest-green transition-colors"
@@ -266,6 +325,17 @@ export function TeamPage() {
             <span className="material-symbols-outlined text-[16px]">add</span>
             New Team
           </button>
+        )}
+
+        {/* Upgrade prompt for free users */}
+        {teams.length > 0 && !hasSubscription && (
+          <div className="flex items-center gap-2 text-sm text-text-muted">
+            <span className="material-symbols-outlined text-[16px]">lock</span>
+            <span>
+              <Link to="/settings/billing" className="text-forest-green hover:underline">Upgrade your plan</Link>
+              {' '}to create additional teams.
+            </span>
+          </div>
         )}
 
         {showNewTeam && (
@@ -301,3 +371,27 @@ export function TeamPage() {
     </SettingsLayout>
   )
 }
+
+function TeamLogoDisplay({ teamId, fallbackName }: { teamId: string; fallbackName: string }) {
+  const [hasLogo, setHasLogo] = useState(true)
+  const logoUrl = engine.getTeamLogoUrl(teamId)
+
+  if (hasLogo) {
+    return (
+      <img
+        src={logoUrl}
+        alt={fallbackName}
+        className="h-full w-full object-cover"
+        onError={() => setHasLogo(false)}
+      />
+    )
+  }
+
+  return (
+    <span className="text-lg font-bold text-text-muted">
+      {fallbackName[0]?.toUpperCase() ?? 'T'}
+    </span>
+  )
+}
+
+export { TeamLogoDisplay }

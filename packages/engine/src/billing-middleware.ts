@@ -24,6 +24,7 @@ const BILLING_EXEMPT_PATHS = [
   '/api/notifications',
   '/api/billing',
   '/api/models',
+  '/api/user',
 ]
 
 // Extend Express Request to include subscription
