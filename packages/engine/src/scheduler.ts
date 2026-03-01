@@ -296,44 +296,41 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     return // Outside active hours, skip
   }
 
-  // For proactive agents: prompt the agent to review its state
-  if (agent.proactive) {
-    // Resolve logical model ID → real endpoint + API key
-    const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
+  // All agents are proactive — prompt the agent to review its state on each heartbeat
+  const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
 
-    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
+  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
 
-    const proactivePrompt = [
-      'This is a scheduled check-in. Before taking any action, use the "think" tool to:',
-      '1. ASSESS — Review your current tasks, goals, messages, and pending approvals.',
-      '2. PRIORITIZE — Decide what is most important right now (urgent tasks first, then messages, then proactive ideas).',
-      '3. PLAN — Outline the specific actions you will take this check-in and in what order.',
-      'Then execute your plan step by step. Use "think" again before any complex or multi-step action.',
-      'If after assessment there is genuinely nothing to do, respond with "[no-op]".',
-      'If you notice pending approvals that need human attention, remind about them.',
-    ].join('\n')
+  const proactivePrompt = [
+    'This is a scheduled check-in. Before taking any action, use the "think" tool to:',
+    '1. ASSESS — Review your current tasks, goals, messages, and pending approvals.',
+    '2. PRIORITIZE — Decide what is most important right now (urgent tasks first, then messages, then proactive ideas).',
+    '3. PLAN — Outline the specific actions you will take this check-in and in what order.',
+    'Then execute your plan step by step. Use "think" again before any complex or multi-step action.',
+    'If after assessment there is genuinely nothing to do, respond with "[no-op]".',
+    'If you notice pending approvals that need human attention, remind about them.',
+  ].join('\n')
 
-    if (!state.workspaceConfig) {
-      console.error(`[scheduler] No workspace config available for heartbeat`)
-      return
+  if (!state.workspaceConfig) {
+    console.error(`[scheduler] No workspace config available for heartbeat`)
+    return
+  }
+
+  try {
+    // AdvisorBot is always free — skip credit deduction
+    const runtimeConfig = agent.templateId === 'advisor-bot'
+      ? { maxIterations: 10, skipCredits: true }
+      : undefined
+    const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
+    if (result.response && !result.response.includes('[no-op]')) {
+      // Route proactive messages to the agent's DM channel
+      const dmChannel = await getDmChannel(db, agent.id, agent.teamId)
+      await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response, undefined, agent.teamId)
+      await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`, undefined, agent.teamId)
+      console.log(`[scheduler] Proactive message from "${agent.name}" posted to DM`)
     }
-
-    try {
-      // AdvisorBot is always free — skip credit deduction
-      const runtimeConfig = agent.templateId === 'advisor-bot'
-        ? { maxIterations: 10, skipCredits: true }
-        : undefined
-      const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
-      if (result.response && !result.response.includes('[no-op]')) {
-        // Route proactive messages to the agent's DM channel
-        const dmChannel = await getDmChannel(db, agent.id, agent.teamId)
-        await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response, undefined, agent.teamId)
-        await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`, undefined, agent.teamId)
-        console.log(`[scheduler] Proactive message from "${agent.name}" posted to DM`)
-      }
-    } catch (err) {
-      console.error(`[scheduler] Heartbeat error for "${agent.name}":`, err)
-    }
+  } catch (err) {
+    console.error(`[scheduler] Heartbeat error for "${agent.name}":`, err)
   }
 }
 

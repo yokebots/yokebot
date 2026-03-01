@@ -645,6 +645,14 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 11,
+    name: 'make_all_agents_proactive',
+    async up(db: Db) {
+      // All agents are now proactive by default — heartbeat frequency controls throttle
+      await db.run('UPDATE agents SET proactive = 1 WHERE proactive = 0')
+    },
+  },
 ]
 
 /**

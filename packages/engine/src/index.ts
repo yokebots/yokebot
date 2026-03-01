@@ -15,14 +15,14 @@ import { join } from 'path'
 import { createDb } from './db/index.ts'
 import { createAgent, listAgents, getAgent, updateAgent, deleteAgent, setAgentStatus } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
-import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent } from './scheduler.ts'
+import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
-import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages, addChatSseClient } from './chat.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages, addChatSseClient, broadcastChatEvent } from './chat.ts'
 import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
-import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS, chatCompletion } from './model.ts'
+import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS, chatCompletion, type ChatMessage as LlmMessage } from './model.ts'
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
 import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, findUserByEmail } from './teams.ts'
 import { authMiddleware } from './auth-middleware.ts'
@@ -472,6 +472,67 @@ async function main() {
     processMentions(db, teamId, req.params.channelId, msg).catch((err) =>
       console.error('[chat] Mention processing error:', err),
     )
+    // Instant agent reply — when a human messages, trigger the right agent immediately
+    if (senderType === 'human') {
+      const channel = await getChannel(db, req.params.channelId)
+      const channelId = req.params.channelId
+
+      // Helper: fire-and-forget reply from a specific agent
+      const triggerAgentReply = (agent: { id: string; name: string; iconName: string | null; iconColor: string | null }) => {
+        ;(async () => {
+          try {
+            broadcastChatEvent(channelId, {
+              type: 'typing', channelId,
+              agentId: agent.id, agentName: agent.name,
+              agentIcon: agent.iconName ?? 'smart_toy',
+              agentColor: agent.iconColor ?? '#0F4D26',
+            })
+            await respondToMention(db, agent.id, teamId, channelId, { senderId, content })
+            broadcastChatEvent(channelId, {
+              type: 'stop_typing', channelId, agentId: agent.id,
+            })
+          } catch (err) {
+            console.error(`[chat] Auto-reply error for agent ${agent.id}:`, err)
+          }
+        })()
+      }
+
+      if (channel?.type === 'dm' && channel.name.startsWith('dm:')) {
+        // DM — reply from the DM's agent
+        const agentId = channel.name.slice(3)
+        const agent = await getAgent(db, agentId)
+        if (agent && agent.status === 'running') triggerAgentReply(agent)
+      } else if (channel?.type === 'group' && !content.match(/@\[[^\]]+\]\((agent|everyone):/)) {
+        // Group channel, no @agent or @everyone mention — pick the most relevant agent
+        ;(async () => {
+          try {
+            const agents = await listAgents(db, teamId)
+            const running = agents.filter(a => a.status === 'running')
+            if (running.length === 0) return
+
+            // If only one agent, just use that one
+            if (running.length === 1) {
+              triggerAgentReply(running[0])
+              return
+            }
+
+            // Quick LLM call to pick the best agent
+            const agentList = running.map((a, i) => `${i + 1}. ${a.name} — ${a.department ?? 'general'}`).join('\n')
+            const routerModel = await resolveModelConfig(db, 'gemma-3-27b')
+            const result = await chatCompletion(routerModel, [
+              { role: 'system', content: 'You are a routing assistant. Given a user message and a list of agents, reply with ONLY the number of the most relevant agent. Nothing else.' },
+              { role: 'user', content: `Agents:\n${agentList}\n\nMessage: "${content.slice(0, 300)}"\n\nWhich agent number should respond?` },
+            ] as LlmMessage[])
+
+            const pick = parseInt(result.content?.trim() ?? '', 10)
+            const chosenAgent = pick >= 1 && pick <= running.length ? running[pick - 1] : running[0]
+            triggerAgentReply(chosenAgent)
+          } catch (err) {
+            console.error('[chat] Group auto-reply routing error:', err)
+          }
+        })()
+      }
+    }
     res.status(201).json(msg)
   })
 

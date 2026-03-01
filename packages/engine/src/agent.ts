@@ -59,7 +59,7 @@ export async function createAgent(db: Db, teamId: string, config: AgentConfig): 
     [
       id, teamId, config.name, config.department ?? null, config.iconName ?? null, config.iconColor ?? null,
       config.modelId ?? null, config.modelConfig.endpoint, config.modelConfig.model,
-      config.systemPrompt ?? null, config.proactive ? 1 : 0, config.heartbeatSeconds ?? 3600,
+      config.systemPrompt ?? null, 1, config.heartbeatSeconds ?? 3600,
       config.activeHoursStart ?? 9, config.activeHoursEnd ?? 17, config.templateId ?? null, now, now,
     ],
   )

@@ -377,20 +377,6 @@ export function AgentDetailPage() {
                 />
               </div>
 
-              {/* Behavior (read-only) */}
-              <div className="rounded-lg border border-border-subtle bg-white p-4">
-                <h3 className="mb-3 text-sm font-bold text-text-main">Behavior</h3>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-text-main">Proactive Mode</p>
-                    <p className="text-xs text-text-muted">Agent initiates actions during heartbeat cycles</p>
-                  </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${agent.proactive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                    {agent.proactive ? 'On' : 'Off'}
-                  </span>
-                </div>
-              </div>
-
               <button onClick={saveConfig} className="rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white">
                 Save Changes
               </button>
