@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router'
+import { useParams, useNavigate, useSearchParams } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, MentionCompletionData } from '@/lib/engine'
 import { MentionInput, renderMentionContent } from '@/components/MentionInput'
@@ -32,6 +32,7 @@ function ThinkingBlock({ content }: { content: string }) {
 
 export function ChatPage() {
   const { channelId: paramChannelId } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const [channels, setChannels] = useState<ChatChannel[]>([])
   const [agents, setAgents] = useState<EngineAgent[]>([])
@@ -82,6 +83,20 @@ export function ChatPage() {
   }
 
   useEffect(() => { loadChannels(); loadMentionCompletions(); loadUnread() }, [])
+
+  // Handle ?dm=agentId query param (from AgentDetailPage link)
+  useEffect(() => {
+    const dmAgentId = searchParams.get('dm')
+    if (!dmAgentId) return
+    const resolve = async () => {
+      try {
+        const ch = await engine.getDmChannel(dmAgentId)
+        setActiveChannelId(ch.id)
+        setSearchParams({}, { replace: true }) // clean up URL
+      } catch { /* channel not found */ }
+    }
+    resolve()
+  }, [searchParams])
   useEffect(() => {
     // Mark channel as read when selecting it
     if (!activeChannelId) return

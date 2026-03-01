@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { EngineAgent, ChatMessage, LogicalModel, AgentSkill, ModelCreditCost, BillingStatus } from '@/lib/engine'
+import type { EngineAgent, LogicalModel, AgentSkill, ModelCreditCost, BillingStatus } from '@/lib/engine'
 
 function StarRating({ stars, label }: { stars: number; label: string }) {
   return (
@@ -20,9 +20,6 @@ export function AgentDetailPage() {
   const { agentId } = useParams()
   const [agent, setAgent] = useState<EngineAgent | null>(null)
   const [tab, setTab] = useState<'config' | 'skills' | 'activity'>('config')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [, setChannelId] = useState('')
-  const [newMessage, setNewMessage] = useState('')
   const [editPrompt, setEditPrompt] = useState('')
   const [editModelId, setEditModelId] = useState('')
   const [editHeartbeat, setEditHeartbeat] = useState(1800)
@@ -57,23 +54,10 @@ export function AgentDetailPage() {
       setBillingStatus(billing)
       setAgentSkills(skills)
       setAvailableSkills(allSkills)
-      const ch = await engine.getDmChannel(agentId)
-      setChannelId(ch.id)
-      const msgs = await engine.getMessages(ch.id)
-      setMessages(msgs)
     } catch { /* offline */ }
   }
 
   useEffect(() => { loadData() }, [agentId])
-
-  const sendMsg = async () => {
-    if (!newMessage.trim() || !agentId) return
-    try {
-      await engine.chatWithAgent(agentId, newMessage.trim())
-    } catch { /* model not available */ }
-    setNewMessage('')
-    loadData()
-  }
 
   const toggleStatus = async () => {
     if (!agent) return
@@ -478,43 +462,24 @@ export function AgentDetailPage() {
           )}
         </div>
 
-        {/* Right - Chat Panel */}
-        <div className="flex w-80 shrink-0 flex-col rounded-lg border border-border-subtle bg-white">
-          <div className="border-b border-border-subtle px-4 py-3">
-            <h3 className="text-sm font-bold text-text-main">Chat with {agent.name}</h3>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ maxHeight: '400px' }}>
-            {messages.length === 0 && (
-              <p className="py-8 text-center text-xs text-text-muted">Send a message to start chatting.</p>
-            )}
-            {messages.map((msg) => (
-              <div key={msg.id} className={`flex gap-2 ${msg.senderType === 'human' ? 'justify-end' : ''}`}>
-                <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                  msg.senderType === 'human'
-                    ? 'bg-forest-green/10 text-text-main'
-                    : 'bg-light-surface-alt text-text-main'
-                }`}>
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
-                  <p className="mt-1 text-[10px] text-text-muted">{new Date(msg.createdAt).toLocaleTimeString()}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="border-t border-border-subtle p-3">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder={`Message ${agent.name}...`}
-                className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
-                onKeyDown={(e) => e.key === 'Enter' && sendMsg()}
-              />
-              <button onClick={sendMsg} className="rounded-lg bg-forest-green px-3 py-2 text-white">
-                <span className="material-symbols-outlined text-[16px]">send</span>
-              </button>
+        {/* Right - Chat Link */}
+        <div className="w-80 shrink-0">
+          <Link
+            to={`/chat?dm=${agent.id}`}
+            className="flex flex-col items-center gap-3 rounded-lg border border-border-subtle bg-white p-6 text-center hover:border-forest-green/30 hover:shadow-soft transition-all"
+          >
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-forest-green/10 text-forest-green">
+              <span className="material-symbols-outlined text-3xl">forum</span>
             </div>
-          </div>
+            <div>
+              <p className="text-sm font-bold text-text-main">Chat with {agent.name}</p>
+              <p className="mt-1 text-xs text-text-muted">Open direct message in Chat</p>
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white">
+              <span className="material-symbols-outlined text-[16px]">chat</span>
+              Open Chat
+            </span>
+          </Link>
         </div>
       </div>
     </div>
