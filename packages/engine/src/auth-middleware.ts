@@ -112,12 +112,14 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   }
 
   const authHeader = req.headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) {
+  // Also support ?token= query param for SSE endpoints (EventSource can't send headers)
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : null
+  if (!authHeader?.startsWith('Bearer ') && !queryToken) {
     res.status(401).json({ error: 'Authentication required' })
     return
   }
 
-  const token = authHeader.slice(7)
+  const token = queryToken || authHeader!.slice(7)
 
   // Peek at the token header to determine algorithm
   const headerB64 = token.split('.')[0]

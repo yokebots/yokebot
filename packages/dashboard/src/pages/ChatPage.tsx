@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, MentionCompletionData } from '@/lib/engine'
 import { MentionInput, renderMentionContent } from '@/components/MentionInput'
+import { supabase } from '@/lib/supabase'
 
 const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 
@@ -193,6 +194,147 @@ export function ChatPage() {
 
   const [showChannelsMobile, setShowChannelsMobile] = useState(false)
 
+  // Rename channel state
+  const [editingChannelId, setEditingChannelId] = useState<string | null>(null)
+  const [editChannelName, setEditChannelName] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+
+  // Edit agent state (rename + icon)
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
+  const [editAgentName, setEditAgentName] = useState('')
+  const [editAgentIcon, setEditAgentIcon] = useState('')
+  const [editAgentColor, setEditAgentColor] = useState('')
+  const editAgentRef = useRef<HTMLDivElement>(null)
+
+  const AGENT_ICONS = [
+    'smart_toy', 'person', 'face', 'psychology', 'support_agent', 'robot_2',
+    'engineering', 'school', 'science', 'brush', 'edit_note', 'campaign',
+    'trending_up', 'analytics', 'query_stats', 'groups', 'diversity_3',
+    'lightbulb', 'target', 'rocket_launch', 'code', 'terminal', 'memory',
+    'hub', 'share', 'public', 'language', 'translate', 'attach_money',
+    'payments', 'storefront', 'shopping_cart', 'inventory_2', 'local_shipping',
+    'security', 'shield', 'gavel', 'balance', 'handshake',
+    'auto_awesome', 'star', 'favorite', 'emoji_objects', 'verified',
+  ]
+
+  const AGENT_COLORS = [
+    '#0F4D26', '#1a7a4c', '#2563eb', '#7c3aed', '#db2777',
+    '#dc2626', '#ea580c', '#d97706', '#65a30d', '#0891b2',
+    '#4f46e5', '#9333ea', '#c026d3', '#059669', '#0d9488',
+    '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#14b8a6',
+  ]
+
+  const handleRenameChannel = async (channelId: string) => {
+    const name = editChannelName.trim()
+    if (!name) { setEditingChannelId(null); return }
+    try {
+      await engine.renameChannel(channelId, name)
+      await loadChannels()
+    } catch { /* error */ }
+    setEditingChannelId(null)
+  }
+
+  const startEditChannel = (ch: ChatChannel) => {
+    setEditingChannelId(ch.id)
+    setEditChannelName(ch.name)
+    requestAnimationFrame(() => renameInputRef.current?.focus())
+  }
+
+  const startEditAgent = (agent: EngineAgent) => {
+    setEditingAgentId(agent.id)
+    setEditAgentName(agent.name)
+    setEditAgentIcon(agent.iconName ?? 'smart_toy')
+    setEditAgentColor(agent.iconColor ?? '#0F4D26')
+  }
+
+  const handleSaveAgent = async () => {
+    if (!editingAgentId) return
+    const agent = agents.find((a) => a.id === editingAgentId)
+    if (!agent) return
+    const updates: Record<string, string> = {}
+    if (editAgentName.trim() && editAgentName.trim() !== agent.name) updates.name = editAgentName.trim()
+    if (editAgentIcon !== (agent.iconName ?? 'smart_toy')) updates.iconName = editAgentIcon
+    if (editAgentColor !== (agent.iconColor ?? '#0F4D26')) updates.iconColor = editAgentColor
+    if (Object.keys(updates).length > 0) {
+      try {
+        await engine.updateAgent(editingAgentId, updates)
+        await loadChannels()
+      } catch { /* error */ }
+    }
+    setEditingAgentId(null)
+  }
+
+  // Close agent edit popover on outside click
+  useEffect(() => {
+    if (!editingAgentId) return
+    const handler = (e: MouseEvent) => {
+      if (editAgentRef.current && !editAgentRef.current.contains(e.target as Node)) {
+        handleSaveAgent()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [editingAgentId, editAgentName, editAgentIcon, editAgentColor])
+
+  // Typing indicator state (from SSE)
+  const [typingAgent, setTypingAgent] = useState<{ id: string; name: string; icon: string; color: string } | null>(null)
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Chat SSE for typing indicators
+  useEffect(() => {
+    if (!activeChannelId) return
+    let aborted = false
+    const controller = new AbortController()
+
+    const connectSse = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token || aborted) return
+
+      const teamId = engine.getActiveTeamId()
+      const url = `${ENGINE_URL}/api/chat/channels/${activeChannelId}/events?token=${encodeURIComponent(session.access_token)}${teamId ? `&teamId=${teamId}` : ''}`
+
+      try {
+        const res = await fetch(url, { signal: controller.signal })
+        if (!res.ok || !res.body) return
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (!aborted) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            try {
+              const event = JSON.parse(line.slice(6))
+              if (event.type === 'typing') {
+                setTypingAgent({ id: event.agentId, name: event.agentName, icon: event.agentIcon || 'smart_toy', color: event.agentColor || '#0F4D26' })
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
+                typingTimeoutRef.current = setTimeout(() => setTypingAgent(null), 3000)
+              } else if (event.type === 'stop_typing') {
+                setTypingAgent(null)
+                if (typingTimeoutRef.current) { clearTimeout(typingTimeoutRef.current); typingTimeoutRef.current = null }
+                // Refresh messages when agent finishes typing (new message posted)
+                loadMessages()
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      } catch { /* aborted or network error */ }
+    }
+
+    connectSse()
+    return () => {
+      aborted = true
+      controller.abort()
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
+      setTypingAgent(null)
+    }
+  }, [activeChannelId])
+
   return (
     <div className="flex h-[calc(100vh-8rem)] -m-4 md:-m-6 border-t border-border-subtle">
       {/* Mobile channels backdrop */}
@@ -267,24 +409,51 @@ export function ChatPage() {
                     : 'hover:bg-light-surface-alt'
                 }`}
               >
-                <button
-                  onClick={() => { setActiveChannelId(ch.id); setShowChannelsMobile(false) }}
-                  className={`flex flex-1 items-center gap-2 px-2 py-2 text-sm ${
-                    ch.id === activeChannelId
-                      ? 'text-forest-green font-medium'
-                      : 'text-text-secondary'
-                  }`}
-                >
-                  <span className="text-text-muted">#</span>
-                  {ch.name}
-                </button>
-                <button
-                  onClick={() => handleDeleteChannel(ch.id)}
-                  className="mr-1 hidden rounded p-0.5 text-text-muted hover:bg-red-50 hover:text-red-500 group-hover:block"
-                  title="Delete channel"
-                >
-                  <span className="material-symbols-outlined text-[14px]">close</span>
-                </button>
+                {editingChannelId === ch.id ? (
+                  <div className="flex flex-1 items-center gap-1 px-2 py-1">
+                    <span className="text-text-muted text-sm">#</span>
+                    <input
+                      ref={renameInputRef}
+                      type="text"
+                      value={editChannelName}
+                      onChange={(e) => setEditChannelName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRenameChannel(ch.id)
+                        if (e.key === 'Escape') setEditingChannelId(null)
+                      }}
+                      onBlur={() => handleRenameChannel(ch.id)}
+                      className="flex-1 min-w-0 bg-white border border-forest-green rounded px-1.5 py-0.5 text-sm outline-none"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => { setActiveChannelId(ch.id); setShowChannelsMobile(false) }}
+                      className={`flex flex-1 items-center gap-2 px-2 py-2 text-sm ${
+                        ch.id === activeChannelId
+                          ? 'text-forest-green font-medium'
+                          : 'text-text-secondary'
+                      }`}
+                    >
+                      <span className="text-text-muted">#</span>
+                      {ch.name}
+                    </button>
+                    <button
+                      onClick={() => startEditChannel(ch)}
+                      className="mr-0.5 hidden rounded p-0.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main group-hover:block"
+                      title="Rename channel"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">edit</span>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteChannel(ch.id)}
+                      className="mr-1 hidden rounded p-0.5 text-text-muted hover:bg-red-50 hover:text-red-500 group-hover:block"
+                      title="Delete channel"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">close</span>
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -294,25 +463,96 @@ export function ChatPage() {
             <p className="mb-2 px-2 text-xs font-bold uppercase tracking-wider text-text-muted">Direct Messages</p>
             {agents.map((agent) => {
               const dmCh = dmChannels.find((c) => c.name === `dm:${agent.id}`)
+              const isActive = dmCh && dmCh.id === activeChannelId
               return (
-                <button
-                  key={agent.id}
-                  onClick={() => openDm(agent.id)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
-                    dmCh && dmCh.id === activeChannelId
-                      ? 'font-medium'
-                      : 'text-text-secondary hover:bg-light-surface-alt'
-                  }`}
-                  style={dmCh && dmCh.id === activeChannelId ? { backgroundColor: (agent.iconColor ?? '#0F4D26') + '18', color: agent.iconColor ?? '#0F4D26' } : undefined}
-                >
-                  <span
-                    className="material-symbols-outlined text-[16px]"
-                    style={{ color: agent.iconColor ?? '#0F4D26' }}
-                  >
-                    {agent.iconName ?? 'smart_toy'}
-                  </span>
-                  {agent.name}
-                </button>
+                <div key={agent.id} className="group relative">
+                  <div className="flex items-center">
+                    <button
+                      onClick={() => openDm(agent.id)}
+                      className={`flex flex-1 items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
+                        isActive ? 'font-medium' : 'text-text-secondary hover:bg-light-surface-alt'
+                      }`}
+                      style={isActive ? { backgroundColor: (agent.iconColor ?? '#0F4D26') + '18', color: agent.iconColor ?? '#0F4D26' } : undefined}
+                    >
+                      <span
+                        className="material-symbols-outlined text-[16px]"
+                        style={{ color: agent.iconColor ?? '#0F4D26' }}
+                      >
+                        {agent.iconName ?? 'smart_toy'}
+                      </span>
+                      {agent.name}
+                    </button>
+                    <button
+                      onClick={() => startEditAgent(agent)}
+                      className="mr-1 hidden rounded p-0.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main group-hover:block"
+                      title="Edit agent"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">edit</span>
+                    </button>
+                  </div>
+
+                  {/* Agent edit popover */}
+                  {editingAgentId === agent.id && (
+                    <div ref={editAgentRef} className="absolute left-full top-0 ml-2 z-50 w-64 rounded-xl border border-border-subtle bg-white shadow-lg p-3 space-y-3">
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Name</label>
+                        <input
+                          type="text"
+                          value={editAgentName}
+                          onChange={(e) => setEditAgentName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSaveAgent() }}
+                          className="mt-1 w-full rounded-lg border border-border-subtle px-2.5 py-1.5 text-sm focus:border-forest-green focus:outline-none"
+                          autoFocus
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Color</label>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {AGENT_COLORS.map((c) => (
+                            <button
+                              key={c}
+                              onClick={() => setEditAgentColor(c)}
+                              className={`h-6 w-6 rounded-full border-2 transition-transform ${editAgentColor === c ? 'border-text-main scale-110' : 'border-transparent hover:scale-110'}`}
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Icon</label>
+                        <div className="mt-1 grid grid-cols-8 gap-1 max-h-32 overflow-y-auto">
+                          {AGENT_ICONS.map((icon) => (
+                            <button
+                              key={icon}
+                              onClick={() => setEditAgentIcon(icon)}
+                              className={`flex items-center justify-center rounded-lg p-1 transition-colors ${editAgentIcon === icon ? 'bg-forest-green/15 ring-1 ring-forest-green' : 'hover:bg-light-surface-alt'}`}
+                              style={editAgentIcon === icon ? { color: editAgentColor } : undefined}
+                            >
+                              <span className="material-symbols-outlined text-[18px]">{icon}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          onClick={() => setEditingAgentId(null)}
+                          className="rounded-lg px-3 py-1.5 text-xs text-text-muted hover:bg-light-surface-alt"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleSaveAgent}
+                          className="rounded-lg bg-forest-green px-3 py-1.5 text-xs text-white hover:bg-forest-green/90"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )
             })}
             {agents.length === 0 && (
@@ -489,49 +729,65 @@ export function ChatPage() {
 
                 <p className="mt-1 text-[10px] text-text-muted">{new Date(msg.createdAt).toLocaleTimeString()}</p>
 
-                {/* Existing reactions */}
-                {reactions[msg.id] && Object.keys(reactions[msg.id]).length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {Object.entries(reactions[msg.id]).map(([emoji, users]) => (
-                      <button
-                        key={emoji}
-                        onClick={() => handleToggleReaction(msg.id, emoji)}
-                        className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-light-surface px-2 py-0.5 text-xs hover:bg-light-surface-alt transition-colors"
-                      >
-                        <span>{emoji}</span>
-                        <span className="text-text-muted">{users.length}</span>
-                      </button>
-                    ))}
+                {/* Reactions row: existing reactions + add button */}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  {reactions[msg.id] && Object.entries(reactions[msg.id]).map(([emoji, users]) => (
+                    <button
+                      key={emoji}
+                      onClick={() => handleToggleReaction(msg.id, emoji)}
+                      className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-light-surface px-2 py-0.5 text-xs hover:bg-light-surface-alt transition-colors"
+                    >
+                      <span>{emoji}</span>
+                      <span className="text-text-muted">{users.length}</span>
+                    </button>
+                  ))}
+                  {/* Add reaction button — inline with reaction pills */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)}
+                      className="inline-flex items-center rounded-full border border-dashed border-border-subtle px-1.5 py-0.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main opacity-0 group-hover/msg:opacity-100 transition-all"
+                      title="Add reaction"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">add_reaction</span>
+                    </button>
+                    {showReactionPicker === msg.id && (
+                      <div className="absolute bottom-full left-0 mb-1 z-50 flex gap-1 rounded-xl border border-border-subtle bg-white p-2 shadow-lg">
+                        {QUICK_EMOJIS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            onClick={() => handleToggleReaction(msg.id, emoji)}
+                            className="rounded-md p-1 text-lg hover:bg-light-surface-alt transition-colors"
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-
-              {/* Quick react button (appears on hover) */}
-              <div className="relative shrink-0 self-start opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                <button
-                  onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)}
-                  className="rounded-md p-1 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
-                  title="Add reaction"
-                >
-                  <span className="material-symbols-outlined text-[16px]">add_reaction</span>
-                </button>
-                {showReactionPicker === msg.id && (
-                  <div className="absolute top-8 right-0 z-50 flex gap-1 rounded-xl border border-border-subtle bg-white p-2 shadow-lg">
-                    {QUICK_EMOJIS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => handleToggleReaction(msg.id, emoji)}
-                        className="rounded-md p-1 text-lg hover:bg-light-surface-alt transition-colors"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                </div>
               </div>
             </div>
             )
           })}
+          {/* Typing indicator */}
+          {typingAgent && (
+            <div className="flex items-center gap-2 px-1">
+              <div
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                style={{ backgroundColor: typingAgent.color + '18', color: typingAgent.color }}
+              >
+                <span className="material-symbols-outlined text-[16px]">{typingAgent.icon}</span>
+              </div>
+              <div className="rounded-xl bg-white border border-border-subtle px-4 py-2.5">
+                <p className="text-[11px] font-bold mb-0.5" style={{ color: typingAgent.color }}>{typingAgent.name}</p>
+                <div className="flex gap-1 items-center">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
 

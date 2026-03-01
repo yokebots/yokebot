@@ -39,6 +39,8 @@ export const UpdateAgentSchema = z.object({
   modelName: z.string().max(200).optional(),
   proactive: z.boolean().optional(),
   heartbeatSeconds: z.number().int().min(60).max(86400).optional(),
+  iconName: z.string().max(50).optional(),
+  iconColor: z.string().max(20).optional(),
 })
 
 export const ChatWithAgentSchema = z.object({

@@ -3,10 +3,42 @@
  */
 
 import type { Db } from './db/types.ts'
+import type { Response } from 'express'
 import { randomUUID } from 'crypto'
 
 export type ChannelType = 'dm' | 'group' | 'task_thread'
 export type SenderType = 'human' | 'agent' | 'system'
+
+// ---- Chat SSE (typing indicators + real-time events) ----
+
+export interface ChatEvent {
+  type: 'typing' | 'stop_typing' | 'new_message'
+  channelId: string
+  agentId?: string
+  agentName?: string
+  agentIcon?: string
+  agentColor?: string
+}
+
+const chatSseClients = new Map<string, Set<Response>>() // channelId → SSE clients
+
+export function addChatSseClient(channelId: string, res: Response): void {
+  if (!chatSseClients.has(channelId)) chatSseClients.set(channelId, new Set())
+  chatSseClients.get(channelId)!.add(res)
+  res.on('close', () => {
+    chatSseClients.get(channelId)?.delete(res)
+    if (chatSseClients.get(channelId)?.size === 0) chatSseClients.delete(channelId)
+  })
+}
+
+export function broadcastChatEvent(channelId: string, event: ChatEvent): void {
+  const clients = chatSseClients.get(channelId)
+  if (!clients) return
+  const data = `data: ${JSON.stringify(event)}\n\n`
+  for (const res of clients) {
+    try { res.write(data) } catch { /* client gone */ }
+  }
+}
 
 export interface ChatChannel { id: string; name: string; type: ChannelType; createdAt: string }
 export interface ChatAttachment {
@@ -140,11 +172,11 @@ export async function searchMessages(db: Db, teamId: string, query: string, limi
 
 // ---- Mention Processing ----
 
-const MENTION_REGEX = /@\[([^\]]+)\]\((agent|user|file):([^)]+)\)/g
+const MENTION_REGEX = /@\[([^\]]+)\]\((agent|user|file|everyone):([^)]+)\)/g
 
 interface ParsedMention {
   displayName: string
-  type: 'agent' | 'user' | 'file'
+  type: 'agent' | 'user' | 'file' | 'everyone'
   id: string
 }
 
@@ -159,6 +191,17 @@ function parseMentions(content: string): ParsedMention[] {
     })
   }
   return mentions
+}
+
+/**
+ * Shuffle an array in-place (Fisher-Yates).
+ */
+function shuffleArray<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
 }
 
 /**
@@ -177,13 +220,77 @@ export async function processMentions(
   // Lazy imports to avoid circular deps
   const { createNotification } = await import('./notifications.ts')
   const { respondToMention } = await import('./scheduler.ts')
+  const { listAgents } = await import('./agent.ts')
+
+  // Check for @everyone — triggers all agents in the team sequentially
+  const hasEveryone = mentions.some((m) => m.type === 'everyone')
+  if (hasEveryone) {
+    const allAgents = await listAgents(db, teamId)
+    const runningAgents = allAgents.filter((a) => a.status === 'running')
+    shuffleArray(runningAgents)
+
+    console.log(`[chat] @everyone in channel ${channelId} — triggering ${runningAgents.length} agents: ${runningAgents.map((a) => a.name).join(', ')}`)
+
+    for (const agent of runningAgents) {
+      // Broadcast typing indicator
+      broadcastChatEvent(channelId, {
+        type: 'typing',
+        channelId,
+        agentId: agent.id,
+        agentName: agent.name,
+        agentIcon: agent.iconName ?? 'smart_toy',
+        agentColor: agent.iconColor ?? '#0F4D26',
+      })
+
+      try {
+        await respondToMention(db, agent.id, teamId, channelId, message)
+      } catch (err) {
+        console.error(`[chat] @everyone: error from "${agent.name}":`, err)
+      }
+
+      // Clear typing indicator
+      broadcastChatEvent(channelId, {
+        type: 'stop_typing',
+        channelId,
+        agentId: agent.id,
+      })
+    }
+
+    // Also process any individual user mentions in the same message
+    const userMentions = mentions.filter((m) => m.type === 'user')
+    for (const mention of userMentions) {
+      try {
+        await createNotification(
+          db, teamId, mention.id, 'mention',
+          `You were mentioned by ${message.senderType === 'agent' ? 'an agent' : 'a team member'}`,
+          message.content.slice(0, 200),
+          `/chat/channels/${channelId}`,
+        )
+      } catch (err) {
+        console.error(`[chat] Failed to process mention user:${mention.id}:`, err)
+      }
+    }
+    return
+  }
 
   for (const mention of mentions) {
     try {
       switch (mention.type) {
         case 'agent':
+          // Broadcast typing indicator for individual mention too
+          broadcastChatEvent(channelId, {
+            type: 'typing',
+            channelId,
+            agentId: mention.id,
+            agentName: mention.displayName,
+          })
           // Have the agent read the message and reply in the same channel
           await respondToMention(db, mention.id, teamId, channelId, message)
+          broadcastChatEvent(channelId, {
+            type: 'stop_typing',
+            channelId,
+            agentId: mention.id,
+          })
           break
 
         case 'user':

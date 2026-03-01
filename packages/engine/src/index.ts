@@ -18,7 +18,7 @@ import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
-import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages } from './chat.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages, addChatSseClient } from './chat.ts'
 import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
@@ -422,6 +422,16 @@ async function main() {
     res.status(201).json(channel)
   })
 
+  app.patch('/api/chat/channels/:channelId', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
+    const { name } = req.body as { name?: string }
+    if (!name || typeof name !== 'string' || name.trim().length === 0) return res.status(400).json({ error: 'Name is required' })
+    await db.run('UPDATE chat_channels SET name = $1 WHERE id = $2 AND team_id = $3', [name.trim(), req.params.channelId, teamId])
+    const channel = await getChannel(db, req.params.channelId)
+    res.json(channel)
+  })
+
   app.delete('/api/chat/channels/:channelId', async (req, res) => {
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) { res.status(404).json({ error: 'Channel not found' }); return }
@@ -463,6 +473,20 @@ async function main() {
       console.error('[chat] Mention processing error:', err),
     )
     res.status(201).json(msg)
+  })
+
+  // Chat SSE — typing indicators + real-time events
+  app.get('/api/chat/channels/:channelId/events', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    })
+    res.write('data: {"type":"connected"}\n\n')
+    addChatSseClient(req.params.channelId, res)
+    req.on('close', () => res.end())
   })
 
   // Mention autocomplete data — returns agents, users, and KB documents for the @ dropdown
@@ -1667,13 +1691,11 @@ ${truncated}`,
         startedAt: (row.started_at as string) ?? null,
         endedAt: (row.ended_at as string) ?? null,
         createdAt: row.created_at as string,
-        participants: agentRows.map(a => ({
+        agents: agentRows.map(a => ({
           id: a.sender_id as string,
           name: (a.name as string) ?? 'Unknown Agent',
           iconName: (a.icon_name as string) ?? 'smart_toy',
           iconColor: (a.icon_color as string) ?? '#0F4D26',
-          department: (a.department as string) ?? null,
-          templateId: (a.template_id as string) ?? null,
         })),
       })
     } catch (err) {

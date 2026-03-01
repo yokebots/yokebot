@@ -38,8 +38,9 @@ export function createTeamMiddleware(db: Db) {
       return
     }
 
-    // Try to get team ID from header first
-    let teamId = req.headers['x-team-id'] as string | undefined
+    // Try to get team ID from header first, or from ?teamId= query param (for SSE)
+    let teamId = (req.headers['x-team-id'] as string | undefined)
+      || (typeof req.query.teamId === 'string' ? req.query.teamId : undefined)
 
     // For /api/teams/:id/... routes, extract team ID from URL if header is missing
     if (!teamId) {

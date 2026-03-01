@@ -14,7 +14,7 @@ interface MentionInputProps {
 }
 
 interface MentionOption {
-  type: 'agent' | 'user' | 'file'
+  type: 'agent' | 'user' | 'file' | 'everyone'
   id: string
   label: string
   icon: string
@@ -48,8 +48,9 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
   const gifPickerRef = useRef<HTMLDivElement>(null)
   const gifSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Build flat list of all mention options
+  // Build flat list of all mention options — @Everyone first
   const allOptions: MentionOption[] = completions ? [
+    { type: 'everyone' as const, id: 'all', label: 'Everyone', icon: 'groups', iconColor: '#6366f1' },
     ...completions.agents.map((a) => ({
       type: 'agent' as const, id: a.id, label: a.name,
       icon: a.iconName ?? 'smart_toy', iconColor: a.iconColor, status: a.status,
@@ -241,6 +242,7 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
 
   const sectionLabel = (type: string) => {
     switch (type) {
+      case 'everyone': return ''
       case 'agent': return 'Agents'
       case 'user': return 'Team Members'
       case 'file': return 'Documents'
@@ -362,42 +364,49 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
       {showDropdown && filteredOptions.length > 0 && (
         <div
           ref={dropdownRef}
-          className="absolute bottom-full left-0 right-0 mb-1 max-h-60 overflow-y-auto rounded-xl border border-border-subtle bg-white shadow-lg z-50"
+          className="absolute bottom-full left-0 right-0 mb-1 max-h-60 overflow-y-auto rounded-xl border border-border-subtle bg-white shadow-lg z-50 py-1"
         >
           {filteredOptions.map((option, i) => {
             const showHeader = option.type !== lastType
             lastType = option.type
             return (
               <div key={`${option.type}:${option.id}`}>
-                {showHeader && (
-                  <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted bg-light-surface">
+                {showHeader && sectionLabel(option.type) && (
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted first:pt-1">
                     {sectionLabel(option.type)}
                   </div>
                 )}
                 <button
                   data-selected={i === selectedIndex}
                   onClick={() => insertMention(option)}
-                  className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-sm transition-colors ${
                     i === selectedIndex
-                      ? 'bg-forest-green/10 text-forest-green'
-                      : 'text-text-secondary hover:bg-light-surface-alt'
+                      ? 'bg-forest-green/10'
+                      : 'hover:bg-light-surface-alt'
                   }`}
                 >
                   <span
-                    className="material-symbols-outlined text-[16px] shrink-0"
+                    className="material-symbols-outlined text-[18px] shrink-0"
                     style={option.iconColor ? { color: option.iconColor } : undefined}
                   >
                     {option.icon}
                   </span>
-                  <span className="truncate">{option.label}</span>
+                  <span className={`truncate font-medium ${i === selectedIndex ? 'text-forest-green' : 'text-text-main'}`}>
+                    {option.label}
+                  </span>
                   {option.type === 'agent' && option.status && (
-                    <span className={`ml-auto h-2 w-2 rounded-full shrink-0 ${
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${
                       option.status === 'running' ? 'bg-green-500' : 'bg-gray-300'
                     }`} />
                   )}
-                  <span className="ml-auto text-[10px] text-text-muted uppercase">
-                    {option.type === 'file' ? 'doc' : option.type}
-                  </span>
+                  {option.type !== 'everyone' && (
+                    <span className="ml-auto text-[10px] text-text-muted uppercase tracking-wide shrink-0">
+                      {option.type === 'file' ? 'doc' : option.type}
+                    </span>
+                  )}
+                  {option.type === 'everyone' && (
+                    <span className="ml-auto text-[10px] text-indigo-400 uppercase tracking-wide shrink-0">all agents</span>
+                  )}
                 </button>
               </div>
             )
@@ -424,7 +433,7 @@ export function renderMentionContent(
   onFileClick?: (docId: string) => void,
   agentColorMap?: Map<string, { color: string; icon: string }>,
 ): React.ReactNode[] {
-  const regex = /@\[([^\]]+)\]\((agent|user|file):([^)]+)\)/g
+  const regex = /@\[([^\]]+)\]\((agent|user|file|everyone):([^)]+)\)/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let match
@@ -476,6 +485,17 @@ export function renderMentionContent(
           >
             <span className="material-symbols-outlined text-[12px]">description</span>
             @{displayName}
+          </span>,
+        )
+        break
+      case 'everyone':
+        parts.push(
+          <span
+            key={key}
+            className="inline-flex items-center gap-0.5 rounded bg-indigo-100 text-indigo-700 px-1 text-[13px] font-medium"
+          >
+            <span className="material-symbols-outlined text-[12px]">groups</span>
+            @Everyone
           </span>,
         )
         break

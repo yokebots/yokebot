@@ -228,6 +228,9 @@ export const createGroupChannel = (name: string) =>
 export const deleteChannel = (channelId: string) =>
   request<void>(`/api/chat/channels/${channelId}`, { method: 'DELETE' })
 
+export const renameChannel = (channelId: string, name: string) =>
+  request<ChatChannel>(`/api/chat/channels/${channelId}`, { method: 'PATCH', body: JSON.stringify({ name }) })
+
 export const getDmChannel = (agentId: string) =>
   request<ChatChannel>(`/api/chat/dm/${agentId}`)
 

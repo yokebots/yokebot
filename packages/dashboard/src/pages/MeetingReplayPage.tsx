@@ -226,7 +226,7 @@ export function MeetingReplayPage() {
     if (audioRef.current) audioRef.current.playbackRate = next
   }
 
-  if (loading) {
+  if (loading || (!activeTeam && !meeting)) {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-forest-green" />
@@ -246,7 +246,7 @@ export function MeetingReplayPage() {
   const progress = playlist.length > 0 ? ((currentIdx + 1) / playlist.length) * 100 : 0
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col -m-4 md:-m-6" style={{ height: 'calc(100vh - 8rem)' }}>
       {/* ── TOP: Speaker Banner ── */}
       {currentItem && currentItem.senderType === 'agent' && (
         <div className="shrink-0 bg-gray-900 px-6 py-5">

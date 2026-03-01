@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router'
+import { NavLink, useLocation } from 'react-router'
 import { useAuth } from '@/lib/auth'
 import { useEffect, useState } from 'react'
 import * as engine from '@/lib/engine'
@@ -6,23 +6,32 @@ import TeamSwitcher from './TeamSwitcher'
 import { useTeam } from '@/lib/team-context'
 import { useSidebar } from '@/lib/sidebar-context'
 
-const mainNav = [
-  { to: '/dashboard', icon: 'dashboard', label: 'Dashboard', end: true },
-  { to: '/tasks', icon: 'task_alt', label: 'Tasks' },
-  { to: '/projects', icon: 'folder_open', label: 'Projects' },
-  { to: '/goals', icon: 'flag', label: 'Goals' },
-  { to: '/chat', icon: 'forum', label: 'Chat' },
-  { to: '/meetings', icon: 'groups', label: 'Meetings' },
-  { to: '/agents', icon: 'smart_toy', label: 'Agents' },
-  { to: '/approvals', icon: 'approval', label: 'Approvals', badgeKey: 'approvals' as const },
-  { to: '/activity', icon: 'timeline', label: 'Activity' },
-]
+interface NavItem {
+  to: string
+  icon: string
+  label: string
+  end?: boolean
+  badgeKey?: 'approvals'
+  children?: NavItem[]
+}
 
-const resourceNav = [
-  { to: '/data-tables', icon: 'table_chart', label: 'Data Tables' },
-  { to: '/knowledge-base', icon: 'menu_book', label: 'Knowledge Base' },
-  { to: '/skills', icon: 'extension', label: 'Skills' },
-  { to: '/templates', icon: 'library_books', label: 'Templates' },
+const mainNav: NavItem[] = [
+  { to: '/dashboard', icon: 'dashboard', label: 'Dashboard', end: true },
+  { to: '/chat', icon: 'forum', label: 'Chat' },
+  { to: '/agents', icon: 'smart_toy', label: 'Agents', children: [
+    { to: '/skills', icon: 'extension', label: 'Skills' },
+    { to: '/templates', icon: 'library_books', label: 'Templates' },
+  ]},
+  { to: '/tasks', icon: 'task_alt', label: 'Tasks', children: [
+    { to: '/goals', icon: 'flag', label: 'Goals' },
+    { to: '/projects', icon: 'folder_open', label: 'Projects' },
+    { to: '/approvals', icon: 'approval', label: 'Approvals', badgeKey: 'approvals' },
+  ]},
+  { to: '/knowledge-base', icon: 'menu_book', label: 'Knowledge Base', children: [
+    { to: '/data-tables', icon: 'table_chart', label: 'Data Tables' },
+  ]},
+  { to: '/meetings', icon: 'groups', label: 'Meetings' },
+  { to: '/activity', icon: 'timeline', label: 'Activity' },
 ]
 
 const settingsNav = [
@@ -34,7 +43,31 @@ export function Sidebar() {
   const { user, signOut } = useAuth()
   const { activeTeam } = useTeam()
   const { collapsed, toggle, mobileOpen, closeMobile } = useSidebar()
+  const location = useLocation()
   const [approvalCount, setApprovalCount] = useState(0)
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
+
+  // Auto-expand parent section when on a child route
+  useEffect(() => {
+    for (const item of mainNav) {
+      if (item.children) {
+        const isOnChild = item.children.some((c) => location.pathname.startsWith(c.to))
+        const isOnParent = location.pathname.startsWith(item.to)
+        if (isOnChild || isOnParent) {
+          setExpandedSections((prev) => new Set(prev).add(item.to))
+        }
+      }
+    }
+  }, [location.pathname])
+
+  const toggleSection = (to: string) => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev)
+      if (next.has(to)) next.delete(to)
+      else next.add(to)
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!activeTeam) return
@@ -126,51 +159,86 @@ export function Sidebar() {
         {/* Navigation */}
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-6">
           {mainNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={navLinkClass}
-              title={!showLabels ? item.label : undefined}
-              onClick={handleNavClick}
-            >
-              <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
-                {item.icon}
-              </span>
-              {showLabels && item.label}
-              {showLabels && item.badgeKey === 'approvals' && approvalCount > 0 && (
-                <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-                  {approvalCount}
-                </span>
+            <div key={item.to}>
+              {item.children ? (
+                <>
+                  {/* Parent with expandable children */}
+                  <div className="flex items-center">
+                    <NavLink
+                      to={item.to}
+                      end
+                      className={navLinkClass}
+                      title={!showLabels ? item.label : undefined}
+                      onClick={handleNavClick}
+                      style={{ flex: 1 }}
+                    >
+                      <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
+                        {item.icon}
+                      </span>
+                      {showLabels && item.label}
+                    </NavLink>
+                    {showLabels && (
+                      <button
+                        onClick={() => toggleSection(item.to)}
+                        className="rounded p-1 text-text-muted hover:text-text-main transition-colors"
+                      >
+                        <span className={`material-symbols-outlined text-[16px] transition-transform ${expandedSections.has(item.to) ? 'rotate-90' : ''}`}>
+                          chevron_right
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                  {/* Nested children */}
+                  {showLabels && expandedSections.has(item.to) && (
+                    <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border-subtle pl-2">
+                      {item.children.map((child) => (
+                        <NavLink
+                          key={child.to}
+                          to={child.to}
+                          className={navLinkClass}
+                          title={child.label}
+                          onClick={handleNavClick}
+                        >
+                          <span className="material-symbols-outlined text-[18px] group-hover:text-forest-green transition-colors">
+                            {child.icon}
+                          </span>
+                          {child.label}
+                          {child.badgeKey === 'approvals' && approvalCount > 0 && (
+                            <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                              {approvalCount}
+                            </span>
+                          )}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <NavLink
+                  to={item.to}
+                  end={item.end}
+                  className={navLinkClass}
+                  title={!showLabels ? item.label : undefined}
+                  onClick={handleNavClick}
+                >
+                  <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
+                    {item.icon}
+                  </span>
+                  {showLabels && item.label}
+                  {showLabels && item.badgeKey === 'approvals' && approvalCount > 0 && (
+                    <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                      {approvalCount}
+                    </span>
+                  )}
+                  {!showLabels && item.badgeKey === 'approvals' && approvalCount > 0 && (
+                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
+                  )}
+                </NavLink>
               )}
-              {!showLabels && item.badgeKey === 'approvals' && approvalCount > 0 && (
-                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
-              )}
-            </NavLink>
+            </div>
           ))}
 
-          {/* Resources section */}
-          <div className="mt-6 border-t border-border-subtle pt-6">
-            {showLabels && (
-              <p className="mb-2 px-3 font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
-                Resources
-              </p>
-            )}
-            {resourceNav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={navLinkClass}
-                title={!showLabels ? item.label : undefined}
-                onClick={handleNavClick}
-              >
-                <span className="material-symbols-outlined text-[20px] group-hover:text-forest-green transition-colors">
-                  {item.icon}
-                </span>
-                {showLabels && item.label}
-              </NavLink>
-            ))}
-          </div>
+          {/* Resources section (empty — items nested under main nav) */}
 
           {/* Settings section */}
           <div className="mt-6 border-t border-border-subtle pt-6">
