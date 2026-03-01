@@ -20,7 +20,7 @@ const mainNav: NavItem[] = [
   { to: '/chat', icon: 'forum', label: 'Chat', badgeKey: 'chat' },
   { to: '/agents', icon: 'smart_toy', label: 'Agents', children: [
     { to: '/skills', icon: 'extension', label: 'Skills' },
-    { to: '/templates', icon: 'library_books', label: 'Templates' },
+    { to: '/templates', icon: 'library_books', label: 'Pre-Built' },
   ]},
   { to: '/tasks', icon: 'task_alt', label: 'Tasks', children: [
     { to: '/goals', icon: 'flag', label: 'Goals' },

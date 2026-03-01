@@ -186,7 +186,7 @@ export function HomePage() {
             <div className="grid gap-8 md:grid-cols-3">
               {[
                 { icon: 'precision_manufacturing', color: 'text-accent-gold-dim', title: 'Heavy Lifting', desc: 'Offload the grind. Our agents handle 1000s of tasks simultaneously without breaking a sweat.' },
-                { icon: 'bolt', color: 'text-forest-green', title: 'Instant Deployment', desc: 'No complex coding. Select a template, connect your data, and set your workforce loose.' },
+                { icon: 'bolt', color: 'text-forest-green', title: 'Instant Deployment', desc: 'No complex coding. Choose a pre-built agent, connect your data, and set your workforce loose.' },
                 { icon: 'monitoring', color: 'text-blue-600', title: 'ROI Tracking', desc: 'Monitor performance in real-time. See exactly how much time and money your bots are saving.' },
               ].map((f) => (
                 <div key={f.title} className="flex items-start gap-4">

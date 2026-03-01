@@ -49,9 +49,9 @@ export function TemplatesPage() {
     <div>
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold text-text-main">Agent Templates</h1>
+          <h1 className="font-display text-2xl font-bold text-text-main">Pre-Built Agents</h1>
           <p className="text-sm text-text-muted">
-            {templates.length} pre-configured agents ready to deploy. Choose a template and customize it for your team.
+            {templates.length} pre-built agents ready to deploy. Choose one and customize it for your team.
           </p>
         </div>
         <div className="relative max-w-xs w-full">
@@ -60,7 +60,7 @@ export function TemplatesPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search templates..."
+            placeholder="Search pre-built agents..."
             className="w-full rounded-lg border border-border-subtle pl-10 pr-4 py-2 text-sm focus:border-forest-green focus:outline-none"
           />
         </div>
@@ -149,12 +149,12 @@ export function TemplatesPage() {
       {filtered.length === 0 && (
         <div className="rounded-lg border border-border-subtle bg-white p-8 text-center">
           <span className="material-symbols-outlined mb-2 text-4xl text-text-muted">search_off</span>
-          <p className="text-sm text-text-muted">No templates match your search.</p>
+          <p className="text-sm text-text-muted">No agents match your search.</p>
         </div>
       )}
 
       <div className="mt-6 text-center text-sm text-text-muted">
-        Showing {filtered.length} of {templates.length} templates
+        Showing {filtered.length} of {templates.length} pre-built agents
       </div>
 
       {showCreate && selectedTemplate && (

@@ -92,7 +92,7 @@ export function AgentsPage() {
           </div>
           <div className="text-center">
             <h3 className="text-sm font-bold text-text-main group-hover:text-forest-green">Deploy New Agent</h3>
-            <p className="text-xs text-text-muted">Configure from template</p>
+            <p className="text-xs text-text-muted">Choose a pre-built agent</p>
           </div>
         </button>
       </div>

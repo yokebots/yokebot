@@ -26,7 +26,7 @@ const TUTORIAL_SLIDES = [
     icon: 'smart_toy',
     title: 'Your AI Agents',
     bullets: [
-      'Deploy specialized workers from 40+ templates',
+      'Deploy specialized workers from 40+ pre-built agents',
       'Each agent has its own skills, personality, and department',
       'Agents can use tools like web search, email, CRM, and more',
     ],
@@ -87,7 +87,7 @@ const THINKING_PHRASES = [
   'Reviewing your goals and priorities...',
   'Matching agent capabilities to your needs...',
   'Evaluating the best team composition...',
-  'Cross-referencing 40+ agent templates...',
+  'Cross-referencing 40+ pre-built agents...',
   'Ranking recommendations by impact...',
   'Considering your industry specifics...',
   'Almost there, finalizing suggestions...',
@@ -1789,7 +1789,7 @@ export function OnboardingPage() {
                   onClick={() => navigate('/templates', { replace: true })}
                   className="flex-1 rounded-lg border border-border-subtle px-4 py-3 text-base font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
                 >
-                  Browse Templates
+                  Browse Pre-Built Agents
                 </button>
               </div>
             </div>
