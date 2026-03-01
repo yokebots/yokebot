@@ -192,7 +192,7 @@ export function FeatureCta({
             Contact Sales
           </button>
         </div>
-        <p className="mt-4 text-sm text-gray-500">No credit card required. 1,250 free credits to start.</p>
+        <p className="mt-4 text-sm text-gray-500">No credit card required. 500 free credits to start.</p>
       </div>
     </section>
   )

@@ -22,7 +22,7 @@ const pricingFaq = [
   },
   {
     q: 'Is there a free tier?',
-    a: 'Every new account gets 1,250 free credits to explore the platform. After that, choose a plan that fits your needs. You can also self-host YokeBot for free forever with your own API keys.',
+    a: 'Every new account gets 500 free credits to explore the platform. After that, choose a plan that fits your needs. You can also self-host YokeBot for free forever with your own API keys.',
   },
 ]
 

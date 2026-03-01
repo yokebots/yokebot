@@ -468,7 +468,7 @@ export function HomePage() {
               </button>
             </div>
             <p className="mt-4 text-sm text-white/60">
-              Every new hosted account at yokebot.com gets 1,250 credits free to start.
+              Every new hosted account at yokebot.com gets 500 credits free to start.
             </p>
           </div>
         </section>

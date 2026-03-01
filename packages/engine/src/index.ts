@@ -1142,7 +1142,7 @@ async function main() {
       if (req.user?.id) {
         const userTeams = await getUserTeams(db, req.user.id)
         if (userTeams.length === 1) {
-          await addCredits(db, team.id, 1250, 'starter_credits', 'Welcome bonus: 1,250 starter credits')
+          await addCredits(db, team.id, 500, 'starter_credits', 'Welcome bonus: 500 starter credits')
           console.log(`[engine] Granted 1,250 starter credits to team ${team.id}`)
         }
       }
