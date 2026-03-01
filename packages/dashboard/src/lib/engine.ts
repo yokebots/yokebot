@@ -68,6 +68,10 @@ export interface EngineAgent {
   updatedAt: string
 }
 
+export interface TaskAttachment {
+  name: string; url: string; type: string; size: number
+}
+
 export interface EngineTask {
   id: string
   title: string
@@ -77,6 +81,8 @@ export interface EngineTask {
   assignedAgentId: string | null
   parentTaskId: string | null
   deadline: string | null
+  headerImage: string | null
+  attachments: TaskAttachment[]
   createdAt: string
   updatedAt: string
 }
@@ -202,6 +208,40 @@ export const updateTask = (id: string, data: Record<string, unknown>) =>
 
 export const deleteTask = (id: string) =>
   request<void>(`/api/tasks/${id}`, { method: 'DELETE' })
+
+export const uploadTaskAttachment = async (taskId: string, file: File): Promise<{ url: string; attachments: TaskAttachment[] }> => {
+  const contentBase64 = await fileToBase64(file)
+  return request(`/api/tasks/${taskId}/attachments`, {
+    method: 'POST',
+    body: JSON.stringify({ fileName: file.name, fileType: file.type, fileSize: file.size, contentBase64 }),
+  })
+}
+
+export const removeTaskAttachment = (taskId: string, index: number) =>
+  request<{ attachments: TaskAttachment[] }>(`/api/tasks/${taskId}/attachments/${index}`, { method: 'DELETE' })
+
+export const setTaskHeaderImage = async (taskId: string, file: File): Promise<{ url: string }> => {
+  const contentBase64 = await fileToBase64(file)
+  return request(`/api/tasks/${taskId}/header-image`, {
+    method: 'POST',
+    body: JSON.stringify({ fileName: file.name, fileType: file.type, contentBase64 }),
+  })
+}
+
+export const removeTaskHeaderImage = (taskId: string) =>
+  request<void>(`/api/tasks/${taskId}/header-image`, { method: 'DELETE' })
+
+async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      resolve(result.split(',')[1]) // strip "data:...;base64," prefix
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 
 // ===== Approvals =====
 

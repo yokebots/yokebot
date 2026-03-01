@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, MentionCompletionData } from '@/lib/engine'
+import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, EngineTask, MentionCompletionData } from '@/lib/engine'
 import { MentionInput, renderMentionContent } from '@/components/MentionInput'
 import { supabase } from '@/lib/supabase'
 
@@ -48,14 +48,16 @@ export function ChatPage() {
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelInputRef = useRef<HTMLInputElement>(null)
+  const [tasks, setTasks] = useState<EngineTask[]>([])
 
   const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀', '💯', '🙌']
 
   const loadChannels = async () => {
     try {
-      const [ch, ag] = await Promise.all([engine.listChannels(), engine.listAgents()])
+      const [ch, ag, t] = await Promise.all([engine.listChannels(), engine.listAgents(), engine.listTasks()])
       setChannels(ch)
       setAgents(ag)
+      setTasks(t)
       if (!activeChannelId && ch.length > 0) setActiveChannelId(ch[0].id)
     } catch { /* offline */ }
   }
@@ -187,6 +189,18 @@ export function ChatPage() {
     if (!ch.name.startsWith('dm:')) return null
     const agentId = ch.name.replace('dm:', '')
     return agents.find((a) => a.id === agentId) ?? null
+  }
+
+  // Build taskId → title map for task thread display
+  const taskTitleMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const t of tasks) map.set(t.id, t.title)
+    return map
+  }, [tasks])
+
+  const getTaskThreadName = (ch: ChatChannel) => {
+    const taskId = ch.name.replace('task:', '')
+    return taskTitleMap.get(taskId) ?? taskId.slice(0, 8) + '...'
   }
 
   // Build agent color/icon map for mention rendering
@@ -637,7 +651,7 @@ export function ChatPage() {
                   }`}
                 >
                   <span className="material-symbols-outlined text-[16px]">task_alt</span>
-                  {ch.name.replace('task:', '').slice(0, 8)}...
+                  <span className="truncate">{getTaskThreadName(ch)}</span>
                 </button>
               ))}
             </div>
@@ -663,7 +677,7 @@ export function ChatPage() {
                   {activeChannel.type === 'dm' ? 'smart_toy' : activeChannel.type === 'task_thread' ? 'task_alt' : 'tag'}
                 </span>
                 <h3 className="font-medium text-text-main">
-                  {activeChannel.type === 'dm' ? getAgentName(activeChannel) : activeChannel.name}
+                  {activeChannel.type === 'dm' ? getAgentName(activeChannel) : activeChannel.type === 'task_thread' ? getTaskThreadName(activeChannel) : activeChannel.name}
                 </h3>
                 {activeChannel.type === 'dm' && (() => {
                   const ag = getAgentForChannel(activeChannel)

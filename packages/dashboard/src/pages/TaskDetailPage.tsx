@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router'
+import { useState, useEffect, useRef } from 'react'
+import { useParams, Link, useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { EngineTask, EngineAgent, ChatMessage } from '@/lib/engine'
 
@@ -21,8 +21,29 @@ const priorityStyle: Record<string, string> = {
   low: 'bg-gray-50 text-gray-600',
 }
 
+const FILE_ICONS: Record<string, string> = {
+  'application/pdf': 'picture_as_pdf',
+  'text/plain': 'description',
+  'text/csv': 'table_chart',
+  'text/markdown': 'description',
+  'application/json': 'data_object',
+  'application/zip': 'folder_zip',
+}
+
+function getFileIcon(type: string): string {
+  if (type.startsWith('image/')) return 'image'
+  return FILE_ICONS[type] ?? 'attach_file'
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export function TaskDetailPage() {
   const { taskId } = useParams()
+  const navigate = useNavigate()
   const [task, setTask] = useState<EngineTask | null>(null)
   const [subtasks, setSubtasks] = useState<EngineTask[]>([])
   const [agents, setAgents] = useState<EngineAgent[]>([])
@@ -30,6 +51,10 @@ export function TaskDetailPage() {
   const [channelId, setChannelId] = useState('')
   const [newMessage, setNewMessage] = useState('')
   const [newSubtask, setNewSubtask] = useState('')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const headerImageInputRef = useRef<HTMLInputElement>(null)
 
   const loadData = async () => {
     if (!taskId) return
@@ -77,6 +102,50 @@ export function TaskDetailPage() {
     loadData()
   }
 
+  const handleHeaderImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !taskId) return
+    setUploading(true)
+    try {
+      await engine.setTaskHeaderImage(taskId, file)
+      loadData()
+    } catch { /* error */ }
+    setUploading(false)
+    e.target.value = ''
+  }
+
+  const handleRemoveHeaderImage = async () => {
+    if (!taskId) return
+    await engine.removeTaskHeaderImage(taskId)
+    loadData()
+  }
+
+  const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || !taskId) return
+    setUploading(true)
+    for (const file of Array.from(files)) {
+      try {
+        await engine.uploadTaskAttachment(taskId, file)
+      } catch { /* error */ }
+    }
+    loadData()
+    setUploading(false)
+    e.target.value = ''
+  }
+
+  const handleRemoveAttachment = async (index: number) => {
+    if (!taskId) return
+    await engine.removeTaskAttachment(taskId, index)
+    loadData()
+  }
+
+  const handleDelete = async () => {
+    if (!taskId) return
+    await engine.deleteTask(taskId)
+    navigate('/tasks')
+  }
+
   if (!task) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -86,6 +155,7 @@ export function TaskDetailPage() {
   }
 
   const assignedAgent = agents.find((a) => a.id === task.assignedAgentId)
+  const engineUrl = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -95,6 +165,25 @@ export function TaskDetailPage() {
         <span>/</span>
         <span className="text-text-main font-medium">{task.title}</span>
       </div>
+
+      {/* Header Image */}
+      {task.headerImage && (
+        <div className="group relative mb-6 overflow-hidden rounded-xl border border-border-subtle">
+          <img
+            src={`${engineUrl}${task.headerImage}`}
+            alt="Task header"
+            className="h-48 w-full object-cover"
+          />
+          <div className="absolute inset-0 flex items-start justify-end bg-black/0 p-3 opacity-0 transition-opacity group-hover:bg-black/20 group-hover:opacity-100">
+            <button
+              onClick={handleRemoveHeaderImage}
+              className="rounded-lg bg-white/90 px-3 py-1.5 text-xs font-medium text-red-600 shadow-sm hover:bg-white"
+            >
+              <span className="material-symbols-outlined text-[14px] align-middle">delete</span> Remove
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-6">
         {/* Left Column - Main Content */}
@@ -116,6 +205,93 @@ export function TaskDetailPage() {
             <p className="text-sm text-text-muted whitespace-pre-wrap">
               {task.description || 'No description yet.'}
             </p>
+          </div>
+
+          {/* Attachments */}
+          <div className="mb-6 rounded-lg border border-border-subtle bg-white p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-text-main">
+                Attachments
+                {task.attachments.length > 0 && (
+                  <span className="ml-2 text-text-muted font-normal">{task.attachments.length}</span>
+                )}
+              </h3>
+              <div className="flex items-center gap-2">
+                {!task.headerImage && (
+                  <button
+                    onClick={() => headerImageInputRef.current?.click()}
+                    disabled={uploading}
+                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">add_photo_alternate</span>
+                    Cover
+                  </button>
+                )}
+                <button
+                  onClick={() => attachmentInputRef.current?.click()}
+                  disabled={uploading}
+                  className="flex items-center gap-1 rounded-lg bg-light-surface-alt px-3 py-1 text-xs font-medium text-text-secondary hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[14px]">attach_file</span>
+                  {uploading ? 'Uploading...' : 'Add File'}
+                </button>
+              </div>
+            </div>
+
+            {task.attachments.length === 0 ? (
+              <p className="py-3 text-center text-xs text-text-muted">No attachments yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {task.attachments.map((att, i) => (
+                  <div key={i} className="group flex items-center gap-3 rounded-lg border border-border-subtle p-2 hover:bg-light-surface-alt transition-colors">
+                    {att.type.startsWith('image/') ? (
+                      <img
+                        src={`${engineUrl}${att.url}`}
+                        alt={att.name}
+                        className="h-10 w-10 shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-gray-100 text-text-muted">
+                        <span className="material-symbols-outlined text-[18px]">{getFileIcon(att.type)}</span>
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <a
+                        href={`${engineUrl}${att.url}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block truncate text-sm font-medium text-text-main hover:text-forest-green"
+                      >
+                        {att.name}
+                      </a>
+                      <p className="text-[10px] text-text-muted">{formatFileSize(att.size)}</p>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveAttachment(i)}
+                      className="hidden rounded p-1 text-text-muted hover:bg-red-50 hover:text-red-600 group-hover:block transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <input
+              ref={attachmentInputRef}
+              type="file"
+              multiple
+              onChange={handleAttachmentUpload}
+              className="hidden"
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md,.json,.zip"
+            />
+            <input
+              ref={headerImageInputRef}
+              type="file"
+              onChange={handleHeaderImageUpload}
+              className="hidden"
+              accept="image/*"
+            />
           </div>
 
           {/* Subtasks */}
@@ -279,16 +455,34 @@ export function TaskDetailPage() {
             </div>
           </div>
 
-          <button
-            onClick={async () => {
-              if (!taskId) return
-              await engine.deleteTask(taskId)
-              window.history.back()
-            }}
-            className="w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-          >
-            Delete Task
-          </button>
+          {/* Delete with confirmation */}
+          {showDeleteConfirm ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+              <p className="mb-3 text-sm font-medium text-red-700">Are you sure you want to delete this task?</p>
+              <p className="mb-3 text-xs text-red-600">This will permanently delete the task, its subtasks, and all discussion messages.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm font-medium text-text-secondary hover:bg-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+            >
+              Delete Task
+            </button>
+          )}
         </div>
       </div>
     </div>

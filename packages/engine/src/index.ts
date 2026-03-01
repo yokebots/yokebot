@@ -408,6 +408,138 @@ async function main() {
     res.status(204).end()
   })
 
+  // ---- Task Attachments & Header Images ----
+
+  const ALLOWED_FILE_TYPES = new Set([
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+    'application/pdf',
+    'text/plain', 'text/csv', 'text/markdown',
+    'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/json', 'application/zip',
+  ])
+
+  const uploadLimiter = rateLimit({ windowMs: 60_000, max: 20, keyGenerator: (req) => req.user?.activeTeamId ?? req.ip ?? 'unknown' })
+
+  app.post('/api/tasks/:id/attachments', uploadLimiter, express.json({ limit: '15mb' }), async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const taskId = req.params.id as string
+    if (!await verifyOwnership('tasks', taskId, teamId)) return res.status(404).json({ error: 'Task not found' })
+
+    const { fileName, fileType, fileSize, contentBase64 } = req.body as {
+      fileName?: string; fileType?: string; fileSize?: number; contentBase64?: string
+    }
+    if (!fileName || !fileType || !contentBase64) return res.status(400).json({ error: 'fileName, fileType, and contentBase64 are required' })
+    if (!ALLOWED_FILE_TYPES.has(fileType)) return res.status(400).json({ error: `File type "${fileType}" not allowed` })
+    if ((fileSize ?? 0) > 10 * 1024 * 1024) return res.status(400).json({ error: 'File size exceeds 10MB limit' })
+
+    if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
+      try {
+        const storagePath = './cloud/storage.js'
+        const { uploadTaskFile } = await import(/* @vite-ignore */ storagePath)
+        const key = await uploadTaskFile(contentBase64, teamId, taskId, fileName, fileType)
+        const url = `/api/files/${key}`
+
+        // Append to task's attachments array
+        const task = await getTask(db, taskId)
+        if (!task) return res.status(404).json({ error: 'Task not found' })
+        const attachments = [...task.attachments, { name: fileName, url, type: fileType, size: fileSize ?? 0 }]
+        await updateTask(db, taskId, { attachments: JSON.stringify(attachments) })
+        res.json({ url, attachments })
+      } catch (err) {
+        console.error('[tasks] Attachment upload error:', err)
+        res.status(500).json({ error: 'Failed to upload attachment' })
+      }
+    } else {
+      res.status(501).json({ error: 'File uploads require hosted mode' })
+    }
+  })
+
+  app.delete('/api/tasks/:id/attachments/:index', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const taskId = req.params.id as string
+    if (!await verifyOwnership('tasks', taskId, teamId)) return res.status(404).json({ error: 'Task not found' })
+
+    const task = await getTask(db, taskId)
+    if (!task) return res.status(404).json({ error: 'Task not found' })
+    const idx = parseInt(req.params.index as string, 10)
+    if (isNaN(idx) || idx < 0 || idx >= task.attachments.length) return res.status(400).json({ error: 'Invalid attachment index' })
+
+    const attachments = task.attachments.filter((_, i) => i !== idx)
+    await updateTask(db, taskId, { attachments: JSON.stringify(attachments) })
+    res.json({ attachments })
+  })
+
+  app.post('/api/tasks/:id/header-image', uploadLimiter, express.json({ limit: '15mb' }), async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const taskId = req.params.id as string
+    if (!await verifyOwnership('tasks', taskId, teamId)) return res.status(404).json({ error: 'Task not found' })
+
+    const { fileName, fileType, contentBase64 } = req.body as {
+      fileName?: string; fileType?: string; contentBase64?: string
+    }
+    if (!fileName || !fileType || !contentBase64) return res.status(400).json({ error: 'fileName, fileType, and contentBase64 are required' })
+    if (!fileType.startsWith('image/')) return res.status(400).json({ error: 'Header image must be an image file' })
+
+    if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
+      try {
+        const storagePath = './cloud/storage.js'
+        const { uploadTaskFile } = await import(/* @vite-ignore */ storagePath)
+        const key = await uploadTaskFile(contentBase64, teamId, taskId, fileName, fileType)
+        const url = `/api/files/${key}`
+        await updateTask(db, taskId, { headerImage: url })
+        res.json({ url })
+      } catch (err) {
+        console.error('[tasks] Header image upload error:', err)
+        res.status(500).json({ error: 'Failed to upload header image' })
+      }
+    } else {
+      res.status(501).json({ error: 'File uploads require hosted mode' })
+    }
+  })
+
+  app.delete('/api/tasks/:id/header-image', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const taskId = req.params.id as string
+    if (!await verifyOwnership('tasks', taskId, teamId)) return res.status(404).json({ error: 'Task not found' })
+    await updateTask(db, taskId, { headerImage: null })
+    res.status(204).end()
+  })
+
+  // Serve task files from R2 (proxied through engine for auth)
+  app.get('/api/files/*key', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const keyParam = (req.params as Record<string, unknown>).key
+    const fileKey = Array.isArray(keyParam) ? keyParam.join('/') : String(keyParam)
+
+    // Multi-tenant security: validate teamId in key matches requesting user's team
+    const keyParts = fileKey.split('/')
+    if (keyParts.length < 3 || keyParts[0] !== 'tasks' || keyParts[1] !== teamId) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') return res.status(501).json({ error: 'File serving requires hosted mode' })
+    try {
+      const storagePath = './cloud/storage.js'
+      const { getTaskFile } = await import(/* @vite-ignore */ storagePath)
+      const result = await getTaskFile(fileKey)
+      if (!result) return res.status(404).json({ error: 'File not found' })
+
+      res.setHeader('Content-Type', result.contentType)
+      if (result.contentLength) res.setHeader('Content-Length', result.contentLength)
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      result.stream.pipe(res)
+    } catch (err) {
+      console.error('[files] Serve error:', err)
+      res.status(500).json({ error: 'Failed to serve file' })
+    }
+  })
+
   // ===== Chat =====
 
   app.get('/api/chat/channels', async (req, res) => {

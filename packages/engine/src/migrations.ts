@@ -694,6 +694,25 @@ const migrations: Migration[] = [
       }
     },
   },
+
+  {
+    version: 14,
+    name: 'add_header_image_and_attachments_to_tasks',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS header_image TEXT")
+        await db.run("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attachments TEXT DEFAULT '[]'")
+      } else {
+        const cols = await db.query<{ name: string }>('PRAGMA table_info(tasks)')
+        if (!cols.some((c) => c.name === 'header_image')) {
+          await db.run('ALTER TABLE tasks ADD COLUMN header_image TEXT')
+        }
+        if (!cols.some((c) => c.name === 'attachments')) {
+          await db.run("ALTER TABLE tasks ADD COLUMN attachments TEXT DEFAULT '[]'")
+        }
+      }
+    },
+  },
 ]
 
 /**

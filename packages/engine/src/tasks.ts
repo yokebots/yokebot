@@ -8,9 +8,14 @@ import { randomUUID } from 'crypto'
 export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
 
+export interface TaskAttachment {
+  name: string; url: string; type: string; size: number
+}
+
 export interface Task {
   id: string; title: string; description: string | null; status: TaskStatus; priority: TaskPriority
   assignedAgentId: string | null; parentTaskId: string | null; deadline: string | null
+  headerImage: string | null; attachments: TaskAttachment[]
   createdAt: string; updatedAt: string
 }
 
@@ -50,7 +55,7 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   return rows.map(rowToTask)
 }
 
-export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'deadline'>>): Promise<Task | null> {
+export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'deadline' | 'headerImage'>> & { attachments?: string }): Promise<Task | null> {
   const fields: string[] = []
   const values: unknown[] = []
   let paramIdx = 1
@@ -61,6 +66,8 @@ export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task,
   if (updates.priority !== undefined) { fields.push(`priority = $${paramIdx++}`); values.push(updates.priority) }
   if (updates.assignedAgentId !== undefined) { fields.push(`assigned_agent_id = $${paramIdx++}`); values.push(updates.assignedAgentId) }
   if (updates.deadline !== undefined) { fields.push(`deadline = $${paramIdx++}`); values.push(updates.deadline) }
+  if (updates.headerImage !== undefined) { fields.push(`header_image = $${paramIdx++}`); values.push(updates.headerImage) }
+  if (updates.attachments !== undefined) { fields.push(`attachments = $${paramIdx++}`); values.push(updates.attachments) }
 
   if (fields.length === 0) return getTask(db, id)
 
@@ -96,10 +103,16 @@ export async function getSubtasks(db: Db, parentId: string): Promise<Task[]> {
 }
 
 function rowToTask(row: Record<string, unknown>): Task {
+  let attachments: TaskAttachment[] = []
+  try {
+    const raw = row.attachments as string | null
+    if (raw) attachments = JSON.parse(raw) as TaskAttachment[]
+  } catch { /* invalid JSON — default to empty */ }
   return {
     id: row.id as string, title: row.title as string, description: row.description as string | null,
     status: row.status as TaskStatus, priority: row.priority as TaskPriority,
     assignedAgentId: row.assigned_agent_id as string | null, parentTaskId: row.parent_task_id as string | null,
-    deadline: row.deadline as string | null, createdAt: row.created_at as string, updatedAt: row.updated_at as string,
+    deadline: row.deadline as string | null, headerImage: (row.header_image as string | null) ?? null,
+    attachments, createdAt: row.created_at as string, updatedAt: row.updated_at as string,
   }
 }

@@ -13,7 +13,7 @@ import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCa
 import { getMessages, addMessage } from './agent.ts'
 import { listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { createTask, listTasks, updateTask } from './tasks.ts'
-import { getDmChannel, sendMessage } from './chat.ts'
+import { getDmChannel, sendMessage, getTaskThread } from './chat.ts'
 import { createApproval } from './approval.ts'
 import { listSorTables, listSorRows, updateSorRow, getSorTableByName, checkSorPermission } from './sor.ts'
 import { getAgentSkills, getSkillTools } from './skills.ts'
@@ -103,12 +103,25 @@ function getBuiltinTools(): ToolDef[] {
       deadline: { type: 'string', description: 'Deadline in ISO 8601 format (e.g. 2026-03-15). Set a reasonable deadline based on task complexity and urgency.' },
     }, ['title']),
 
-    toolDef('update_task', 'Update an existing task (status, priority, description).', {
+    toolDef('update_task', 'Update an existing task. Can change any field: status, priority, description, title, assigned agent, or deadline.', {
       taskId: { type: 'string', description: 'The task ID to update' },
       status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'New status' },
       priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'New priority' },
       description: { type: 'string', description: 'Updated description' },
+      title: { type: 'string', description: 'New title for the task' },
+      assignedAgentId: { type: 'string', description: 'Agent ID to reassign the task to' },
+      deadline: { type: 'string', description: 'New deadline in ISO 8601 format (e.g. 2026-03-15)' },
     }, ['taskId']),
+
+    toolDef('delete_task', 'Request deletion of a task. Requires human approval — the task will NOT be deleted until a human approves.', {
+      taskId: { type: 'string', description: 'The task ID to delete' },
+      reason: { type: 'string', description: 'Why this task should be deleted' },
+    }, ['taskId', 'reason']),
+
+    toolDef('add_subtask', 'Add a subtask to an existing task.', {
+      parentTaskId: { type: 'string', description: 'The parent task ID' },
+      title: { type: 'string', description: 'Subtask title' },
+    }, ['parentTaskId', 'title']),
 
     toolDef('list_tasks', 'Query tasks from Mission Control.', {
       status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'Filter by status' },
@@ -216,6 +229,16 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         assignedAgentId: ctx.agentId,
         deadline: args.deadline as string | undefined,
       })
+      // Auto-create task thread and post initial summary
+      try {
+        const thread = await getTaskThread(ctx.db, task.id, ctx.teamId)
+        const parts = [`**${task.title}**`]
+        if (task.description) parts.push(task.description)
+        parts.push(`Priority: ${task.priority}`)
+        if (task.deadline) parts.push(`Deadline: ${task.deadline}`)
+        parts.push(`Status: ${task.status}`)
+        await sendMessage(ctx.db, thread.id, 'agent', ctx.agentId, parts.join('\n'))
+      } catch { /* thread creation is best-effort */ }
       return `Task created: "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''})`
     }
 
@@ -228,9 +251,39 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (args.status) updates.status = args.status
       if (args.priority) updates.priority = args.priority
       if (args.description) updates.description = args.description
+      if (args.title) updates.title = args.title
+      if (args.assignedAgentId) updates.assignedAgentId = args.assignedAgentId
+      if (args.deadline) updates.deadline = args.deadline
       const task = await updateTask(ctx.db, args.taskId as string, updates)
       if (!task) return `Task not found: ${args.taskId as string}`
-      return `Task updated: "${task.title}" (status: ${task.status}, priority: ${task.priority})`
+      return `Task updated: "${task.title}" (status: ${task.status}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${task.assignedAgentId ? `, assigned: ${task.assignedAgentId}` : ''})`
+    }
+
+    case 'delete_task': {
+      // Verify task belongs to this agent's team
+      const allTasks = await listTasks(ctx.db, { teamId: ctx.teamId })
+      const taskToDelete = allTasks.find((t) => t.id === (args.taskId as string))
+      if (!taskToDelete) return `Task not found or access denied: ${args.taskId as string}`
+      // Route through approval — agent cannot delete directly
+      const deleteApproval = await createApproval(
+        ctx.db, ctx.teamId, ctx.agentId,
+        'delete_task',
+        `Delete task "${taskToDelete.title}" (id: ${taskToDelete.id}). Reason: ${args.reason as string}`,
+        'high',
+      )
+      return `Deletion request submitted for approval (approval id: ${deleteApproval.id}). Task "${taskToDelete.title}" will be deleted once a human approves.`
+    }
+
+    case 'add_subtask': {
+      // Verify parent task belongs to this agent's team
+      const teamTasks = await listTasks(ctx.db, { teamId: ctx.teamId })
+      const parentTask = teamTasks.find((t) => t.id === (args.parentTaskId as string))
+      if (!parentTask) return `Parent task not found or access denied: ${args.parentTaskId as string}`
+      const subtask = await createTask(ctx.db, ctx.teamId, args.title as string, {
+        parentTaskId: args.parentTaskId as string,
+        assignedAgentId: ctx.agentId,
+      })
+      return `Subtask created: "${subtask.title}" (id: ${subtask.id}) under parent "${parentTask.title}"`
     }
 
     case 'list_tasks': {
