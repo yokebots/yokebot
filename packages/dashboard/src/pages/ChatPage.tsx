@@ -7,6 +7,29 @@ import { supabase } from '@/lib/supabase'
 
 const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 
+function ThinkingBlock({ content }: { content: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mb-1.5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-xs text-text-muted hover:text-text-secondary transition-colors"
+      >
+        <span className={`material-symbols-outlined text-[14px] transition-transform ${open ? 'rotate-90' : ''}`}>
+          chevron_right
+        </span>
+        <span className="material-symbols-outlined text-[13px]">psychology</span>
+        {open ? 'Hide reasoning' : 'Show reasoning'}
+      </button>
+      {open && (
+        <div className="mt-1 ml-5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-text-muted whitespace-pre-wrap leading-relaxed">
+          {content}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ChatPage() {
   const { channelId: paramChannelId } = useParams()
   const navigate = useNavigate()
@@ -717,19 +740,35 @@ export function ChatPage() {
                     {msgAgent?.name ?? 'Agent'}
                   </p>
                 )}
-                {/* Render text (minus any markdown images) */}
+                {/* Render text (minus any markdown images), with collapsible thinking */}
                 {(() => {
                   const textOnly = msg.content.replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim()
-                  return textOnly ? (
-                    <p className="text-sm whitespace-pre-wrap">
-                      {renderMentionContent(
-                        textOnly,
-                        (agentId) => openDm(agentId),
-                        (docId) => navigate(`/knowledge-base?doc=${docId}`),
-                        agentColorMap,
+                  if (!textOnly) return null
+                  // Extract [think]...[/think] blocks
+                  const thinkRegex = /\[think\]([\s\S]*?)\[\/think\]/g
+                  const thinkBlocks: string[] = []
+                  let thinkMatch
+                  while ((thinkMatch = thinkRegex.exec(textOnly)) !== null) {
+                    thinkBlocks.push(thinkMatch[1].trim())
+                  }
+                  const visibleText = textOnly.replace(/\[think\][\s\S]*?\[\/think\]\s*/g, '').trim()
+                  return (
+                    <>
+                      {thinkBlocks.length > 0 && (
+                        <ThinkingBlock content={thinkBlocks.join('\n\n')} />
                       )}
-                    </p>
-                  ) : null
+                      {visibleText && (
+                        <p className="text-sm whitespace-pre-wrap">
+                          {renderMentionContent(
+                            visibleText,
+                            (agentId) => openDm(agentId),
+                            (docId) => navigate(`/knowledge-base?doc=${docId}`),
+                            agentColorMap,
+                          )}
+                        </p>
+                      )}
+                    </>
+                  )
                 })()}
 
                 {/* Render inline images/GIFs from markdown syntax */}
