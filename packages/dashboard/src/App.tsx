@@ -24,6 +24,9 @@ import { MeetingsPage } from '@/pages/MeetingsPage'
 import { MeetingReplayPage } from '@/pages/MeetingReplayPage'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { GoalsPage } from '@/pages/GoalsPage'
+import { WorkflowsPage } from '@/pages/WorkflowsPage'
+import { WorkflowBuilderPage } from '@/pages/WorkflowBuilderPage'
+import { WorkflowRunPage } from '@/pages/WorkflowRunPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
@@ -151,6 +154,10 @@ function AppRoutes() {
         <Route path="tasks/:taskId" element={<TaskDetailPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="goals" element={<GoalsPage />} />
+        <Route path="workflows" element={<WorkflowsPage />} />
+        <Route path="workflows/new" element={<WorkflowBuilderPage />} />
+        <Route path="workflows/:id" element={<WorkflowBuilderPage />} />
+        <Route path="workflows/:id/runs/:runId" element={<WorkflowRunPage />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:channelId" element={<ChatPage />} />
         <Route path="meetings" element={<MeetingsPage />} />
@@ -164,10 +171,13 @@ function AppRoutes() {
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="activity" element={<ActivityPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/notifications" element={<SettingsPage />} />
         <Route path="settings/billing" element={<BillingPage />} />
         <Route path="settings/integrations" element={<IntegrationsPage />} />
-        <Route path="team" element={<TeamPage />} />
-        <Route path="profile" element={<ProfilePage />} />
+        <Route path="settings/team" element={<TeamPage />} />
+        <Route path="settings/user" element={<ProfilePage />} />
+        <Route path="team" element={<Navigate to="/settings/team" replace />} />
+        <Route path="profile" element={<Navigate to="/settings/user" replace />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

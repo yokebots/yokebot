@@ -5,6 +5,35 @@ import * as engine from '@/lib/engine'
 import TeamSwitcher from './TeamSwitcher'
 import { useTeam } from '@/lib/team-context'
 import { useSidebar } from '@/lib/sidebar-context'
+import { getUserAvatar } from '@/pages/ProfilePage'
+import type { User } from '@supabase/supabase-js'
+
+function SidebarAvatar({ user, size, hoverable }: { user: User | null; size: number; hoverable?: boolean }) {
+  const avatarUrl = user?.user_metadata?.avatar_url as string | undefined
+  const avatar = getUserAvatar(user)
+  const sizeClass = size === 8 ? 'h-8 w-8' : 'h-10 w-10'
+  const textSize = size === 8 ? 'text-xs' : 'text-sm'
+
+  if (avatarUrl) {
+    return <img src={avatarUrl} alt="" className={`${sizeClass} rounded-full ${hoverable ? 'hover:ring-2 hover:ring-forest-green/30 transition-all' : ''}`} />
+  }
+
+  if (avatar.type === 'icon') {
+    return (
+      <div className={`flex ${sizeClass} items-center justify-center rounded-full ${avatar.bg} ${avatar.border} border ${hoverable ? 'hover:ring-2 hover:ring-forest-green/30 transition-all' : ''}`}>
+        <span className={`material-symbols-outlined ${textSize} ${avatar.text}`}>{avatar.symbol}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`${sizeClass} overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px] ${hoverable ? 'hover:ring-2 hover:ring-forest-green/30 transition-all' : ''}`}>
+      <div className={`flex h-full w-full items-center justify-center rounded-full bg-white ${textSize} font-bold text-forest-green`}>
+        {avatar.letter}
+      </div>
+    </div>
+  )
+}
 
 interface NavItem {
   to: string
@@ -25,6 +54,7 @@ const mainNav: NavItem[] = [
   { to: '/tasks', icon: 'task_alt', label: 'Tasks', children: [
     { to: '/goals', icon: 'flag', label: 'Goals' },
     { to: '/projects', icon: 'folder_open', label: 'Projects' },
+    { to: '/workflows', icon: 'account_tree', label: 'Workflows' },
     { to: '/approvals', icon: 'approval', label: 'Approvals', badgeKey: 'approvals' },
   ]},
   { to: '/knowledge-base', icon: 'menu_book', label: 'Knowledge Base', children: [
@@ -275,13 +305,9 @@ export function Sidebar() {
         {/* User Profile */}
         {showLabels ? (
           <div className="border-t border-border-subtle p-4">
-            <Link to="/profile" onClick={handleNavClick} className="block rounded-xl border border-border-subtle bg-light-surface-alt p-3 hover:border-forest-green/30 transition-colors">
+            <Link to="/settings/user" onClick={handleNavClick} className="block rounded-xl border border-border-subtle bg-light-surface-alt p-3 hover:border-forest-green/30 transition-colors">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px]">
-                  <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
-                    {user?.email?.[0]?.toUpperCase() ?? 'U'}
-                  </div>
-                </div>
+                <SidebarAvatar user={user} size={8} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-bold text-text-main">
                     {user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User'}
@@ -300,12 +326,8 @@ export function Sidebar() {
           </div>
         ) : (
           <div className="border-t border-border-subtle p-2 flex flex-col items-center gap-2">
-            <Link to="/profile" onClick={handleNavClick} title="Profile">
-              <div className="h-8 w-8 overflow-hidden rounded-full bg-gradient-to-tr from-forest-green to-green-300 p-[1px] hover:ring-2 hover:ring-forest-green/30 transition-all">
-                <div className="flex h-full w-full items-center justify-center rounded-full bg-white text-xs font-bold text-forest-green">
-                  {user?.email?.[0]?.toUpperCase() ?? 'U'}
-                </div>
-              </div>
+            <Link to="/settings/user" onClick={handleNavClick} title="Profile">
+              <SidebarAvatar user={user} size={8} hoverable />
             </Link>
             <button
               onClick={signOut}

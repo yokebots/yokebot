@@ -387,6 +387,56 @@ const SQLITE_DDL = `
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Workflows
+  CREATE TABLE IF NOT EXISTS workflows (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    goal_id TEXT,
+    trigger_type TEXT NOT NULL DEFAULT 'manual',
+    schedule_cron TEXT,
+    created_by TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_steps (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    step_order INTEGER NOT NULL DEFAULT 0,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    assigned_agent_id TEXT,
+    gate TEXT NOT NULL DEFAULT 'auto',
+    timeout_minutes INTEGER,
+    config TEXT NOT NULL DEFAULT '{}'
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_runs (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'running',
+    current_step INTEGER NOT NULL DEFAULT 0,
+    started_by TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    error TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_run_steps (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+    step_id TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+    task_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    started_at TEXT,
+    completed_at TEXT,
+    error TEXT
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -416,6 +466,13 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_meetings_team ON team_meetings(team_id);
   CREATE INDEX IF NOT EXISTS idx_meetings_status ON team_meetings(status);
   CREATE INDEX IF NOT EXISTS idx_chat_reactions_message ON chat_reactions(message_id);
+  CREATE INDEX IF NOT EXISTS idx_workflows_team ON workflows(team_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_runs_team ON workflow_runs(team_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+  CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_run ON workflow_run_steps(run_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_task ON workflow_run_steps(task_id);
 `
 
 const POSTGRES_DDL = `
@@ -820,6 +877,56 @@ const POSTGRES_DDL = `
   ALTER TABLE team_meetings ADD COLUMN IF NOT EXISTS summary TEXT;
   ALTER TABLE team_meetings ADD COLUMN IF NOT EXISTS action_items JSONB;
 
+  -- Workflows
+  CREATE TABLE IF NOT EXISTS workflows (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    goal_id TEXT,
+    trigger_type TEXT NOT NULL DEFAULT 'manual',
+    schedule_cron TEXT,
+    created_by TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_steps (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    step_order INTEGER NOT NULL DEFAULT 0,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    assigned_agent_id TEXT,
+    gate TEXT NOT NULL DEFAULT 'auto',
+    timeout_minutes INTEGER,
+    config TEXT NOT NULL DEFAULT '{}'
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_runs (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'running',
+    current_step INTEGER NOT NULL DEFAULT 0,
+    started_by TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    error TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_run_steps (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+    step_id TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+    task_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error TEXT
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -855,6 +962,13 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_meetings_team ON team_meetings(team_id);
   CREATE INDEX IF NOT EXISTS idx_meetings_status ON team_meetings(status);
   CREATE INDEX IF NOT EXISTS idx_chat_reactions_message ON chat_reactions(message_id);
+  CREATE INDEX IF NOT EXISTS idx_workflows_team ON workflows(team_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_runs_team ON workflow_runs(team_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+  CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_run ON workflow_run_steps(run_id);
+  CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_task ON workflow_run_steps(task_id);
 
   -- =====================================================================
   -- Row Level Security (RLS)
@@ -899,6 +1013,10 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS team_meetings ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS chat_reactions ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS channel_reads ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS workflows ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS workflow_steps ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS workflow_runs ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS workflow_run_steps ENABLE ROW LEVEL SECURITY;
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses

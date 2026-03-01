@@ -476,7 +476,11 @@ export async function resolveModelConfig(db: Db, logicalModelId: string): Promis
       continue
     }
 
-    // Cloud providers: check DB for API key (self-hosted users enter keys in Settings)
+    // Cloud providers: check env var first, then DB fallback
+    const envKey = process.env[`${backend.providerId.toUpperCase()}_API_KEY`]
+    if (envKey) {
+      return { endpoint: provider.endpoint, model: backend.providerModelId, apiKey: envKey }
+    }
     const stored = await getStoredProvider(db, backend.providerId)
     if (stored?.enabled && stored.apiKey) {
       return { endpoint: provider.endpoint, model: backend.providerModelId, apiKey: stored.apiKey }
@@ -485,7 +489,7 @@ export async function resolveModelConfig(db: Db, logicalModelId: string): Promis
 
   throw new Error(
     `No provider available for model "${logical.name}". ` +
-    `Configure a provider API key in Settings → Model Providers.`,
+    `Set a provider API key via environment variable (e.g. DEEPINFRA_API_KEY).`,
   )
 }
 
@@ -527,15 +531,13 @@ async function resolveLegacyModelConfig(db: Db, endpointOrId: string): Promise<M
 export async function getAvailableModels(db: Db): Promise<LogicalModel[]> {
   const available: LogicalModel[] = []
 
-  // Check which cloud providers have keys configured
-  const hostedMode = process.env.YOKEBOT_HOSTED_MODE === 'true'
+  // Check which cloud providers have keys configured (env var first, DB fallback)
   const providerKeys = new Map<string, boolean>()
   for (const provider of PROVIDERS) {
     if (!provider.requiresKey) continue
-    // In hosted mode, check env vars for API keys
-    if (hostedMode) {
-      const envKey = `${provider.id.toUpperCase()}_API_KEY`
-      providerKeys.set(provider.id, !!process.env[envKey])
+    const envKey = `${provider.id.toUpperCase()}_API_KEY`
+    if (process.env[envKey]) {
+      providerKeys.set(provider.id, true)
     } else {
       const stored = await getStoredProvider(db, provider.id)
       providerKeys.set(provider.id, !!(stored?.enabled && stored.apiKey))

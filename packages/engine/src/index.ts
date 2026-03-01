@@ -30,7 +30,9 @@ import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
 import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
 import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
-import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema } from './validation.ts'
+import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema, CreateWorkflowSchema, UpdateWorkflowSchema, CaptureWorkflowSchema, AddWorkflowStepSchema, UpdateWorkflowStepSchema, ReorderWorkflowStepsSchema } from './validation.ts'
+import { createWorkflow, getWorkflow, listWorkflows, updateWorkflow, deleteWorkflow, addStep, updateStep, deleteStep, listSteps, reorderSteps, startRun, getRun, listRuns, cancelRun, listRunSteps, captureWorkflow } from './workflows.ts'
+import { advanceWorkflow, onTaskCompleted, approveWorkflowStep } from './workflow-executor.ts'
 import { uploadDocument, listDocuments, getDocument, deleteDocument, getDocumentChunks, searchKb } from './knowledge-base.ts'
 import { listCredentials, setCredential, deleteCredential } from './credentials.ts'
 import { listServices } from './services.ts'
@@ -121,7 +123,7 @@ async function main() {
 
   // ===== Ownership verification helper =====
   // Prevents IDOR: verifies an object belongs to the requesting user's team
-  const OWNERSHIP_TABLES = new Set(['agents', 'tasks', 'goals', 'kpi_goals', 'approvals', 'chat_channels', 'sor_tables', 'kb_documents'])
+  const OWNERSHIP_TABLES = new Set(['agents', 'tasks', 'goals', 'kpi_goals', 'approvals', 'chat_channels', 'sor_tables', 'kb_documents', 'workflows', 'workflow_runs'])
   async function verifyOwnership(table: string, id: string, teamId: string): Promise<boolean> {
     if (!OWNERSHIP_TABLES.has(table)) throw new Error(`verifyOwnership: unknown table "${table}"`)
     const row = await db.queryOne<{ team_id: string }>(`SELECT team_id FROM ${table} WHERE id = $1`, [id])
@@ -397,6 +399,10 @@ async function main() {
     const body = validate(UpdateTaskSchema, req.body)
     const task = await updateTask(db, req.params.id, body as Record<string, unknown>)
     if (!task) return res.status(404).json({ error: 'Task not found' })
+    // Workflow step chaining: if task is done, advance linked workflow
+    if (task.status === 'done') {
+      void onTaskCompleted(db, task.id).catch((err) => console.error('[workflows] onTaskCompleted error:', err))
+    }
     res.json(task)
   })
 
@@ -1230,6 +1236,15 @@ async function main() {
 
   app.post('/api/teams', async (req, res) => {
     const { name } = validate(CreateTeamSchema, req.body)
+
+    // Paid-only team creation: allow first team (onboarding) but require subscription for additional teams
+    if (req.user?.id) {
+      const existingTeams = await getUserTeams(db, req.user.id)
+      if (existingTeams.length >= 1 && !req.subscription) {
+        return res.status(403).json({ error: 'An active subscription is required to create additional teams' })
+      }
+    }
+
     const team = await createTeam(db, name)
     // Auto-add creator as admin
     if (req.user?.id) {
@@ -2019,6 +2034,59 @@ ${truncated}`,
     res.json({ hostedMode: process.env.YOKEBOT_HOSTED_MODE === 'true' })
   })
 
+  // ===== User Profile (update Supabase user metadata) =====
+
+  app.patch('/api/user/profile', async (req: Request, res: Response) => {
+    const supabaseUrl = process.env.SUPABASE_URL
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!supabaseUrl || !serviceRoleKey) {
+      res.status(500).json({ error: 'Supabase admin credentials not configured' })
+      return
+    }
+
+    const userId = req.user!.id
+    const { iconName, iconColor } = req.body as { iconName?: string; iconColor?: string }
+
+    try {
+      // First, fetch existing user metadata so we don't overwrite other fields
+      const getRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+        },
+      })
+      if (!getRes.ok) {
+        const err = await getRes.json().catch(() => ({ msg: getRes.statusText }))
+        res.status(500).json({ error: (err as Record<string, string>).msg ?? 'Failed to fetch user' })
+        return
+      }
+      const existing = await getRes.json() as { user_metadata?: Record<string, unknown> }
+      const existingMeta = existing.user_metadata ?? {}
+
+      // Merge new fields into existing metadata
+      const updatedMeta = { ...existingMeta, icon_name: iconName, icon_color: iconColor }
+
+      const updateRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'apikey': serviceRoleKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_metadata: updatedMeta }),
+      })
+      if (!updateRes.ok) {
+        const err = await updateRes.json().catch(() => ({ msg: updateRes.statusText }))
+        res.status(500).json({ error: (err as Record<string, string>).msg ?? 'Failed to update user' })
+        return
+      }
+      res.json({ success: true })
+    } catch (err) {
+      console.error('[user/profile] Error updating metadata:', err)
+      res.status(500).json({ error: 'Internal server error' })
+    }
+  })
+
   // ===== Notifications (cross-team, uses user_id) =====
 
   app.get('/api/notifications', async (req, res) => {
@@ -2177,6 +2245,161 @@ ${truncated}`,
     if (!(await verifyOwnership('kpi_goals', req.params.id, teamId))) return res.status(404).json({ error: 'Goal not found' })
     await deleteKpiGoal(db, req.params.id)
     res.json({ deleted: true })
+  })
+
+  // ===== Workflows =====
+
+  app.get('/api/workflows', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const status = req.query.status as 'active' | 'archived' | undefined
+    res.json(await listWorkflows(db, teamId, status))
+  })
+
+  app.post('/api/workflows', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const body = validate(CreateWorkflowSchema, req.body)
+    const workflow = await createWorkflow(db, teamId, body.name, {
+      description: body.description,
+      goalId: body.goalId,
+      triggerType: body.triggerType,
+      scheduleCron: body.scheduleCron,
+      createdBy: req.user!.id,
+    })
+    // Create steps if provided inline
+    if (body.steps) {
+      for (let i = 0; i < body.steps.length; i++) {
+        const s = body.steps[i]
+        await addStep(db, workflow.id, s.title, {
+          description: s.description,
+          assignedAgentId: s.assignedAgentId,
+          gate: s.gate,
+          timeoutMinutes: s.timeoutMinutes,
+          config: s.config,
+          stepOrder: i,
+        })
+      }
+    }
+    await logActivity(db, 'workflow_created', null, `Workflow "${workflow.name}" created (${body.steps?.length ?? 0} steps)`, undefined, teamId)
+    res.status(201).json(workflow)
+  })
+
+  app.get('/api/workflows/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
+    const workflow = await getWorkflow(db, req.params.id)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    const steps = await listSteps(db, workflow.id)
+    res.json({ ...workflow, steps })
+  })
+
+  app.patch('/api/workflows/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
+    const body = validate(UpdateWorkflowSchema, req.body)
+    const workflow = await updateWorkflow(db, req.params.id, body as Record<string, unknown>)
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' })
+    await logActivity(db, 'workflow_updated', null, `Workflow "${workflow.name}" updated`, undefined, teamId)
+    res.json(workflow)
+  })
+
+  app.delete('/api/workflows/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
+    const wfToDelete = await getWorkflow(db, req.params.id)
+    await deleteWorkflow(db, req.params.id)
+    await logActivity(db, 'workflow_deleted', null, `Workflow "${wfToDelete?.name ?? req.params.id}" deleted`, undefined, teamId)
+    res.status(204).end()
+  })
+
+  // ---- Workflow Steps ----
+
+  app.post('/api/workflows/:id/steps', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
+    const body = validate(AddWorkflowStepSchema, req.body)
+    const step = await addStep(db, req.params.id, body.title, body)
+    res.status(201).json(step)
+  })
+
+  app.patch('/api/workflows/:id/steps/:stepId', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
+    const body = validate(UpdateWorkflowStepSchema, req.body)
+    const step = await updateStep(db, req.params.stepId, body as Record<string, unknown>)
+    if (!step) return res.status(404).json({ error: 'Step not found' })
+    res.json(step)
+  })
+
+  app.delete('/api/workflows/:id/steps/:stepId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
+    await deleteStep(db, req.params.stepId)
+    res.status(204).end()
+  })
+
+  app.put('/api/workflows/:id/steps/reorder', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
+    const body = validate(ReorderWorkflowStepsSchema, req.body)
+    await reorderSteps(db, req.params.id, body.stepIds)
+    res.json({ reordered: true })
+  })
+
+  // ---- Workflow Runs ----
+
+  app.post('/api/workflows/:id/run', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
+    const wfForRun = await getWorkflow(db, req.params.id)
+    const run = await startRun(db, teamId, req.params.id, req.user!.id)
+    await logActivity(db, 'workflow_run_started', null, `Workflow "${wfForRun?.name ?? req.params.id}" run started`, undefined, teamId)
+    // Kick off the first step
+    void advanceWorkflow(db, run.id).catch((err) => console.error('[workflows] advanceWorkflow error:', err))
+    res.status(201).json(run)
+  })
+
+  app.get('/api/workflow-runs', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const workflowId = req.query.workflowId as string | undefined
+    const status = req.query.status as string | undefined
+    res.json(await listRuns(db, { teamId, workflowId, status: status as 'running' | 'paused' | 'completed' | 'failed' | 'canceled' | undefined }))
+  })
+
+  app.get('/api/workflow-runs/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflow_runs', req.params.id, teamId))) return res.status(404).json({ error: 'Run not found' })
+    const run = await getRun(db, req.params.id)
+    if (!run) return res.status(404).json({ error: 'Run not found' })
+    const runSteps = await listRunSteps(db, run.id)
+    res.json({ ...run, steps: runSteps })
+  })
+
+  app.post('/api/workflow-runs/:id/cancel', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('workflow_runs', req.params.id, teamId))) return res.status(404).json({ error: 'Run not found' })
+    const run = await cancelRun(db, req.params.id)
+    if (!run) return res.status(404).json({ error: 'Run not found' })
+    const wfForCancel = await getWorkflow(db, run.workflowId)
+    await logActivity(db, 'workflow_run_canceled', null, `Workflow "${wfForCancel?.name ?? run.workflowId}" run canceled`, undefined, teamId)
+    res.json(run)
+  })
+
+  app.post('/api/workflow-run-steps/:id/approve', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    await approveWorkflowStep(db, req.params.id)
+    await logActivity(db, 'workflow_step_approved', null, `Workflow step approved`, undefined, teamId)
+    res.json({ approved: true })
+  })
+
+  // ---- Workflow Capture ----
+
+  app.post('/api/workflows/capture', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const body = validate(CaptureWorkflowSchema, req.body)
+    const workflow = await captureWorkflow(db, teamId, body.name, body.taskIds)
+    res.status(201).json(workflow)
   })
 
   // ===== Global Error Handler =====

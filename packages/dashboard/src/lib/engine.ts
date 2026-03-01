@@ -840,6 +840,11 @@ export const setupAdvisor = (teamId: string) =>
     method: 'POST',
   })
 
+// ===== User Profile =====
+
+export const updateUserProfile = (data: { iconName?: string; iconColor?: string }) =>
+  request<{ success: boolean }>('/api/user/profile', { method: 'PATCH', body: JSON.stringify(data) })
+
 // ===== Config =====
 
 export interface PlatformConfig {
@@ -1134,3 +1139,120 @@ export const toggleReaction = (messageId: number, emoji: string) =>
 
 export const getReactions = (messageId: number) =>
   request<Record<string, string[]>>(`/api/chat/messages/${messageId}/reactions`)
+
+// ===== Workflows =====
+
+export interface Workflow {
+  id: string
+  teamId: string
+  name: string
+  description: string
+  goalId: string | null
+  triggerType: 'manual' | 'scheduled'
+  scheduleCron: string | null
+  createdBy: string
+  status: 'active' | 'archived'
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowStep {
+  id: string
+  workflowId: string
+  stepOrder: number
+  title: string
+  description: string
+  assignedAgentId: string | null
+  gate: 'auto' | 'approval'
+  timeoutMinutes: number | null
+  config: string
+}
+
+export interface WorkflowWithSteps extends Workflow {
+  steps: WorkflowStep[]
+}
+
+export interface WorkflowRun {
+  id: string
+  teamId: string
+  workflowId: string
+  status: 'running' | 'paused' | 'completed' | 'failed' | 'canceled'
+  currentStep: number
+  startedBy: string
+  startedAt: string
+  completedAt: string | null
+  error: string | null
+}
+
+export interface WorkflowRunStep {
+  id: string
+  runId: string
+  stepId: string
+  taskId: string | null
+  status: 'pending' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'skipped'
+  startedAt: string | null
+  completedAt: string | null
+  error: string | null
+}
+
+export interface WorkflowRunWithSteps extends WorkflowRun {
+  steps: WorkflowRunStep[]
+}
+
+export const listWorkflows = (status?: string) => {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  const qs = params.toString()
+  return request<Workflow[]>(`/api/workflows${qs ? `?${qs}` : ''}`)
+}
+
+export const createWorkflow = (data: {
+  name: string; description?: string; goalId?: string;
+  triggerType?: string; scheduleCron?: string;
+  steps?: Array<{ title: string; description?: string; assignedAgentId?: string; gate?: string; timeoutMinutes?: number; config?: string }>
+}) =>
+  request<Workflow>('/api/workflows', { method: 'POST', body: JSON.stringify(data) })
+
+export const getWorkflow = (id: string) =>
+  request<WorkflowWithSteps>(`/api/workflows/${id}`)
+
+export const updateWorkflow = (id: string, data: Record<string, unknown>) =>
+  request<Workflow>(`/api/workflows/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deleteWorkflow = (id: string) =>
+  request<void>(`/api/workflows/${id}`, { method: 'DELETE' })
+
+export const addWorkflowStep = (workflowId: string, data: { title: string; description?: string; assignedAgentId?: string; gate?: string; timeoutMinutes?: number; config?: string }) =>
+  request<WorkflowStep>(`/api/workflows/${workflowId}/steps`, { method: 'POST', body: JSON.stringify(data) })
+
+export const updateWorkflowStep = (workflowId: string, stepId: string, data: Record<string, unknown>) =>
+  request<WorkflowStep>(`/api/workflows/${workflowId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deleteWorkflowStep = (workflowId: string, stepId: string) =>
+  request<void>(`/api/workflows/${workflowId}/steps/${stepId}`, { method: 'DELETE' })
+
+export const reorderWorkflowSteps = (workflowId: string, stepIds: string[]) =>
+  request<{ reordered: boolean }>(`/api/workflows/${workflowId}/steps/reorder`, { method: 'PUT', body: JSON.stringify({ stepIds }) })
+
+export const startWorkflowRun = (workflowId: string) =>
+  request<WorkflowRun>(`/api/workflows/${workflowId}/run`, { method: 'POST' })
+
+export const listWorkflowRuns = (filters?: { workflowId?: string; status?: string }) => {
+  const params = new URLSearchParams()
+  if (filters?.workflowId) params.set('workflowId', filters.workflowId)
+  if (filters?.status) params.set('status', filters.status)
+  const qs = params.toString()
+  return request<WorkflowRun[]>(`/api/workflow-runs${qs ? `?${qs}` : ''}`)
+}
+
+export const getWorkflowRun = (id: string) =>
+  request<WorkflowRunWithSteps>(`/api/workflow-runs/${id}`)
+
+export const cancelWorkflowRun = (id: string) =>
+  request<WorkflowRun>(`/api/workflow-runs/${id}/cancel`, { method: 'POST' })
+
+export const approveWorkflowRunStep = (runStepId: string) =>
+  request<{ approved: boolean }>(`/api/workflow-run-steps/${runStepId}/approve`, { method: 'POST' })
+
+export const captureWorkflow = (name: string, taskIds: string[]) =>
+  request<Workflow>('/api/workflows/capture', { method: 'POST', body: JSON.stringify({ name, taskIds }) })

@@ -713,6 +713,152 @@ const migrations: Migration[] = [
       }
     },
   },
+
+  {
+    version: 15,
+    name: 'add_workflows',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            goal_id TEXT,
+            trigger_type TEXT NOT NULL DEFAULT 'manual',
+            schedule_cron TEXT,
+            created_by TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS workflow_steps (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            step_order INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            assigned_agent_id TEXT,
+            gate TEXT NOT NULL DEFAULT 'auto',
+            timeout_minutes INTEGER,
+            config TEXT NOT NULL DEFAULT '{}'
+          );
+
+          CREATE TABLE IF NOT EXISTS workflow_runs (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'running',
+            current_step INTEGER NOT NULL DEFAULT 0,
+            started_by TEXT NOT NULL DEFAULT '',
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at TIMESTAMPTZ,
+            error TEXT
+          );
+
+          CREATE TABLE IF NOT EXISTS workflow_run_steps (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+            step_id TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+            task_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            started_at TIMESTAMPTZ,
+            completed_at TIMESTAMPTZ,
+            error TEXT
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_workflows_team ON workflows(team_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_runs_team ON workflow_runs(team_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+          CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_run ON workflow_run_steps(run_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_task ON workflow_run_steps(task_id);
+
+          ALTER TABLE workflows ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE workflow_steps ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE workflow_runs ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE workflow_run_steps ENABLE ROW LEVEL SECURITY;
+        `)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            goal_id TEXT,
+            trigger_type TEXT NOT NULL DEFAULT 'manual',
+            schedule_cron TEXT,
+            created_by TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+
+          CREATE TABLE IF NOT EXISTS workflow_steps (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            step_order INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            assigned_agent_id TEXT,
+            gate TEXT NOT NULL DEFAULT 'auto',
+            timeout_minutes INTEGER,
+            config TEXT NOT NULL DEFAULT '{}'
+          );
+
+          CREATE TABLE IF NOT EXISTS workflow_runs (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'running',
+            current_step INTEGER NOT NULL DEFAULT 0,
+            started_by TEXT NOT NULL DEFAULT '',
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT,
+            error TEXT
+          );
+
+          CREATE TABLE IF NOT EXISTS workflow_run_steps (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+            step_id TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+            task_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            started_at TEXT,
+            completed_at TEXT,
+            error TEXT
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_workflows_team ON workflows(team_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_runs_team ON workflow_runs(team_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+          CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_run ON workflow_run_steps(run_id);
+          CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_task ON workflow_run_steps(task_id);
+        `)
+      }
+    },
+  },
+  {
+    version: 16,
+    name: 'add_workflow_run_step_config',
+    async up(db: Db) {
+      // Add config column to workflow_run_steps for storing output variables
+      if (db.driver === 'postgres') {
+        await db.exec(`ALTER TABLE workflow_run_steps ADD COLUMN IF NOT EXISTS config TEXT NOT NULL DEFAULT '{}'`)
+      } else {
+        // SQLite doesn't support IF NOT EXISTS for ALTER TABLE
+        try {
+          await db.exec(`ALTER TABLE workflow_run_steps ADD COLUMN config TEXT NOT NULL DEFAULT '{}'`)
+        } catch { /* column may already exist */ }
+      }
+    },
+  },
 ]
 
 /**

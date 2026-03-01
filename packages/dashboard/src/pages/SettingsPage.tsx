@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { ProviderConfig, TeamProfile } from '@/lib/engine'
+import type { TeamProfile } from '@/lib/engine'
 import { useTeam } from '@/lib/team-context'
+import { SettingsLayout } from '@/components/SettingsLayout'
+import type { SettingsTab } from '@/components/SettingsLayout'
 
 interface AlertRow {
   category: string
@@ -23,13 +25,9 @@ const DEFAULT_ALERTS: AlertRow[] = [
 ]
 
 export function SettingsPage() {
-  const navigate = useNavigate()
+  const location = useLocation()
   const { activeTeam, refresh: refreshTeams } = useTeam()
-  const [tab, setTab] = useState<'team' | 'notifications' | 'providers'>('team')
-  const [providers, setProviders] = useState<ProviderConfig[]>([])
-  const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [keyInput, setKeyInput] = useState('')
-  const [saving, setSaving] = useState(false)
+  const activeTab: SettingsTab = location.pathname.endsWith('/notifications') ? 'notifications' : 'identity'
   const [savingNotifs, setSavingNotifs] = useState(false)
   const [notifSaved, setNotifSaved] = useState(false)
 
@@ -50,17 +48,9 @@ export function SettingsPage() {
   const [emailEnabled, setEmailEnabled] = useState(true)
   const [alerts, setAlerts] = useState<AlertRow[]>(DEFAULT_ALERTS)
 
-  const loadProviders = async () => {
-    try {
-      const p = await engine.listProviders()
-      setProviders(p)
-    } catch { /* offline */ }
-  }
-
   const loadNotificationPrefs = useCallback(async () => {
     if (!activeTeam) return
     try {
-      // Load global team preferences
       const prefs = await engine.listNotificationPreferences()
       const teamPref = prefs.find((p) => p.teamId === activeTeam.id)
       if (teamPref) {
@@ -69,7 +59,6 @@ export function SettingsPage() {
         setEmailEnabled(teamPref.emailEnabled)
       }
 
-      // Load per-category alert preferences
       const alertPrefs = await engine.listAlertPreferences()
       if (alertPrefs.length > 0) {
         setAlerts((prev) => prev.map((a) => {
@@ -141,14 +130,12 @@ export function SettingsPage() {
     setSavingTeam(false)
   }
 
-  useEffect(() => { loadProviders() }, [])
   useEffect(() => { loadTeamProfile() }, [loadTeamProfile])
   useEffect(() => { loadNotificationPrefs() }, [loadNotificationPrefs])
 
   const toggleAlert = async (idx: number, field: 'inApp' | 'email' | 'slack' | 'telegram') => {
     const updated = alerts.map((a, i) => i === idx ? { ...a, [field]: !a[field] } : a)
     setAlerts(updated)
-    // Save all alert preferences to backend
     try {
       await engine.saveAlertPreferences(updated.map((a) => ({
         category: a.category, inApp: a.inApp, email: a.email, slack: a.slack, telegram: a.telegram,
@@ -185,58 +172,11 @@ export function SettingsPage() {
     saveNotificationPrefs({ emailEnabled: newVal })
   }
 
-  const handleSaveKey = async (providerId: string) => {
-    setSaving(true)
-    try {
-      await engine.updateProvider(providerId, { apiKey: keyInput, enabled: keyInput.length > 0 })
-      setEditingKey(null)
-      setKeyInput('')
-      await loadProviders()
-    } catch { /* error */ }
-    setSaving(false)
-  }
-
-  const handleToggleProvider = async (providerId: string, currentEnabled: boolean) => {
-    await engine.updateProvider(providerId, { enabled: !currentEnabled })
-    await loadProviders()
-  }
-
-  const providerIcon = (id: string) => {
-    switch (id) {
-      case 'ollama': return 'terminal'
-      case 'deepinfra': return 'cloud'
-      case 'fal': return 'image'
-      default: return 'smart_toy'
-    }
-  }
-
   return (
-    <div className="max-w-3xl">
-      <div className="mb-6">
-        <h1 className="font-display text-2xl font-bold text-text-main">Settings</h1>
-        <p className="text-sm text-text-muted">Configure model providers and notifications.</p>
-      </div>
-
-      {/* Tabs */}
-      <div className="mb-6 flex gap-1 border-b border-border-subtle">
-        {([{ id: 'team', label: 'Team' }, { id: 'providers', label: 'Model Providers' }, { id: 'integrations', label: 'Integrations' }, { id: 'notifications', label: 'Notifications' }, { id: 'billing', label: 'Billing' }] as const).map((t) => (
-          <button
-            key={t.id}
-            onClick={() => t.id === 'billing' ? navigate('/settings/billing') : t.id === 'integrations' ? navigate('/settings/integrations') : setTab(t.id as 'team' | 'providers' | 'notifications')}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors ${
-              tab === t.id
-                ? 'border-b-2 border-forest-green text-forest-green'
-                : 'text-text-muted hover:text-text-main'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Team Tab */}
-      {tab === 'team' && (
-        <div className="space-y-6">
+    <SettingsLayout activeTab={activeTab}>
+      {/* Business Context Tab */}
+      {activeTab === 'identity' && (
+        <div className="max-w-3xl space-y-6">
           {teamSaved && (
             <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">
               <span className="material-symbols-outlined text-[16px]">check_circle</span>
@@ -346,107 +286,9 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* Model Providers Tab */}
-      {tab === 'providers' && (
-        <div className="space-y-4">
-          <p className="text-sm text-text-muted">
-            Configure which LLM providers your agents can use. Cloud providers require an API key.
-          </p>
-
-          {providers.map((provider) => (
-            <div key={provider.id} className="rounded-lg border border-border-subtle bg-white p-5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                    provider.enabled ? 'bg-forest-green/10 text-forest-green' : 'bg-gray-100 text-gray-500'
-                  }`}>
-                    <span className="material-symbols-outlined">{providerIcon(provider.id)}</span>
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-text-main">{provider.name}</h3>
-                    <p className="font-mono text-xs text-text-muted">{provider.endpoint}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  {provider.requiresKey && (
-                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                      provider.hasKey ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
-                    }`}>
-                      {provider.hasKey ? 'Key configured' : 'No API key'}
-                    </span>
-                  )}
-                  {!provider.requiresKey && (
-                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                      provider.enabled ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'
-                    }`}>
-                      {provider.enabled ? 'Connected' : 'Not detected'}
-                    </span>
-                  )}
-                  {provider.requiresKey && (
-                    <button
-                      onClick={() => provider.enabled ? handleToggleProvider(provider.id, provider.enabled) : undefined}
-                      className={`relative h-6 w-11 rounded-full transition-colors ${provider.enabled ? 'bg-forest-green' : 'bg-gray-300'}`}
-                    >
-                      <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${provider.enabled ? 'left-5.5' : 'left-0.5'}`} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* API Key Input */}
-              {provider.requiresKey && (
-                <div className="mt-4 border-t border-border-subtle pt-4">
-                  {editingKey === provider.id ? (
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={keyInput}
-                        onChange={(e) => setKeyInput(e.target.value)}
-                        placeholder="Paste your API key..."
-                        className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm font-mono focus:border-forest-green focus:outline-none"
-                        autoFocus
-                      />
-                      <button
-                        onClick={() => handleSaveKey(provider.id)}
-                        disabled={saving}
-                        className="rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green/90 disabled:opacity-50"
-                      >
-                        {saving ? 'Saving...' : 'Save'}
-                      </button>
-                      <button
-                        onClick={() => { setEditingKey(null); setKeyInput('') }}
-                        className="rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-muted hover:bg-light-surface-alt"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setEditingKey(provider.id)}
-                      className="flex items-center gap-2 text-sm text-forest-green hover:text-forest-green/80"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">{provider.hasKey ? 'edit' : 'key'}</span>
-                      {provider.hasKey ? 'Update API Key' : 'Add API Key'}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-
-          {providers.length === 0 && (
-            <div className="rounded-lg border border-border-subtle bg-white p-8 text-center">
-              <span className="material-symbols-outlined mb-2 text-4xl text-text-muted">cloud_off</span>
-              <p className="text-sm text-text-muted">Could not load providers. Is the engine running?</p>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Notifications Tab */}
-      {tab === 'notifications' && (
-        <>
-          {/* Saved indicator */}
+      {activeTab === 'notifications' && (
+        <div className="max-w-3xl">
           {notifSaved && (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">
               <span className="material-symbols-outlined text-[16px]">check_circle</span>
@@ -557,8 +399,8 @@ export function SettingsPage() {
               </table>
             </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </SettingsLayout>
   )
 }

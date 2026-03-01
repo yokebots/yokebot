@@ -178,6 +178,26 @@ function getBuiltinTools(): ToolDef[] {
       modelId: { type: 'string', description: 'Model to use. Default: "hunyuan-3d-v3.1-pro"' },
     }, ['imageUrl']),
 
+    // Workflows
+    toolDef('create_workflow', 'Create a reusable multi-step workflow. Each step creates a task and can auto-proceed or require human approval.', {
+      name: { type: 'string', description: 'Workflow name' },
+      description: { type: 'string', description: 'What this workflow accomplishes' },
+      steps: { type: 'array', description: 'Ordered list of steps', items: {
+        type: 'object', properties: {
+          title: { type: 'string', description: 'Step title' },
+          description: { type: 'string', description: 'Step description' },
+          assignedAgentId: { type: 'string', description: 'Agent ID to assign this step to' },
+          gate: { type: 'string', enum: ['auto', 'approval'], description: 'auto = proceed automatically, approval = wait for human approval' },
+        }, required: ['title'],
+      }},
+    }, ['name', 'steps']),
+
+    toolDef('start_workflow', 'Start a workflow run. Creates tasks for each step and chains them together.', {
+      workflowId: { type: 'string', description: 'The workflow ID to run' },
+    }, ['workflowId']),
+
+    toolDef('list_workflows', 'List available workflows for the current team.', {}, []),
+
   ]
 }
 
@@ -256,6 +276,13 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (args.deadline) updates.deadline = args.deadline
       const task = await updateTask(ctx.db, args.taskId as string, updates)
       if (!task) return `Task not found: ${args.taskId as string}`
+      // Workflow step chaining: if task is done, advance linked workflow
+      if (task.status === 'done') {
+        try {
+          const { onTaskCompleted } = await import('./workflow-executor.ts')
+          await onTaskCompleted(ctx.db, task.id)
+        } catch { /* best-effort */ }
+      }
       return `Task updated: "${task.title}" (status: ${task.status}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${task.assignedAgentId ? `, assigned: ${task.assignedAgentId}` : ''})`
     }
 
@@ -461,6 +488,42 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (content.length > 5000) return 'Error: Memory content too long (max 5000 characters).'
       await addMemory(ctx.db, ctx.teamId, ctx.agentId, content, ctx.channelId)
       return `Memory saved: "${content.slice(0, 100)}${content.length > 100 ? '...' : ''}"`
+    }
+
+    case 'create_workflow': {
+      const { createWorkflow, addStep: addWfStep } = await import('./workflows.ts')
+      const wf = await createWorkflow(ctx.db, ctx.teamId, args.name as string, {
+        description: args.description as string | undefined,
+        createdBy: `agent:${ctx.agentId}`,
+      })
+      const steps = args.steps as Array<{ title: string; description?: string; assignedAgentId?: string; gate?: string }> | undefined
+      if (steps) {
+        for (let i = 0; i < steps.length; i++) {
+          const s = steps[i]
+          await addWfStep(ctx.db, wf.id, s.title, {
+            description: s.description,
+            assignedAgentId: s.assignedAgentId,
+            gate: (s.gate as 'auto' | 'approval') ?? 'auto',
+            stepOrder: i,
+          })
+        }
+      }
+      return `Workflow created: "${wf.name}" (id: ${wf.id}) with ${steps?.length ?? 0} step(s)`
+    }
+
+    case 'start_workflow': {
+      const { startRun } = await import('./workflows.ts')
+      const { advanceWorkflow } = await import('./workflow-executor.ts')
+      const run = await startRun(ctx.db, ctx.teamId, args.workflowId as string, `agent:${ctx.agentId}`)
+      void advanceWorkflow(ctx.db, run.id).catch((err) => console.error('[workflows] advanceWorkflow error:', err))
+      return `Workflow run started (run id: ${run.id}). Tasks will be created for each step.`
+    }
+
+    case 'list_workflows': {
+      const { listWorkflows } = await import('./workflows.ts')
+      const workflows = await listWorkflows(ctx.db, ctx.teamId)
+      if (workflows.length === 0) return 'No workflows found for this team.'
+      return workflows.map((w) => `- "${w.name}" (id: ${w.id}, status: ${w.status}, trigger: ${w.triggerType})`).join('\n')
     }
 
     default: {

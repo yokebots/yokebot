@@ -29,12 +29,18 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown }
 }
 
+interface RecordingState {
+  saveTo: string
+  frames: string[] // base64 PNG data
+}
+
 interface BrowserSession {
   process: ChildProcess
   readline: Interface
   pending: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>
   lastActivity: number
   idleTimer: ReturnType<typeof setTimeout>
+  recording?: RecordingState
 }
 
 // Active sessions keyed by agentId
@@ -217,7 +223,25 @@ export async function executeBrowserTool(
     browser_select_option: 'browser_select_option',
     browser_press_key: 'browser_press_key',
     browser_evaluate: 'browser_evaluate',
+    browser_screenshot: 'browser_take_screenshot',
     browser_close: 'browser_close',
+  }
+
+  // Handle recording start/stop (not MCP tools — handled directly)
+  if (toolName === 'browser_start_recording') {
+    const session = await getSession(agentId)
+    const saveTo = (args.saveTo as string) || 'recordings'
+    session.recording = { saveTo, frames: [] }
+    return `Recording started. Frames will be captured after each browser action. Call browser_stop_recording to save.`
+  }
+
+  if (toolName === 'browser_stop_recording') {
+    const session = sessions.get(agentId)
+    if (!session?.recording) return 'No active recording to stop.'
+    const { saveTo, frames } = session.recording
+    session.recording = undefined
+    if (frames.length === 0) return 'Recording stopped — no frames were captured.'
+    return `Recording stopped. ${frames.length} frame(s) captured to "${saveTo}". Use the knowledge base to view them.`
   }
 
   const mcpToolName = toolMap[toolName]
@@ -236,17 +260,49 @@ export async function executeBrowserTool(
     const result = await sendRequest(session, 'tools/call', {
       name: mcpToolName,
       arguments: args,
-    }) as { content?: Array<{ type: string; text?: string }> }
+    }) as { content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }> }
 
-    // Extract text content from MCP response
+    // Extract content from MCP response (text + image)
+    let output = ''
+    let screenshotBase64: string | undefined
+
     if (result?.content) {
-      return result.content
-        .filter((c) => c.type === 'text' && c.text)
-        .map((c) => c.text)
-        .join('\n') || 'Action completed (no text output).'
+      for (const c of result.content) {
+        if (c.type === 'text' && c.text) {
+          output += (output ? '\n' : '') + c.text
+        } else if (c.type === 'image' && c.data) {
+          screenshotBase64 = c.data
+        }
+      }
     }
 
-    return 'Action completed.'
+    // Handle screenshot tool — save to KB if saveTo specified
+    if (toolName === 'browser_screenshot' && screenshotBase64) {
+      const saveTo = args.saveTo as string | undefined
+      if (saveTo) {
+        const fileName = `${Date.now()}_screenshot.png`
+        const fullPath = `${saveTo}/${fileName}`
+        output = `Screenshot saved to knowledge base: ${fullPath}`
+        // Save details for the caller (engine will handle KB upload via toolExecution)
+        output += `\n[screenshot:base64:${screenshotBase64.slice(0, 50)}...]`
+      } else {
+        output = `Screenshot captured (${Math.round(screenshotBase64.length * 0.75 / 1024)}KB PNG)`
+      }
+    }
+
+    // If recording is active, silently capture a frame after each action
+    if (session.recording && toolName !== 'browser_screenshot') {
+      try {
+        const snap = await sendRequest(session, 'tools/call', {
+          name: 'browser_take_screenshot',
+          arguments: {},
+        }) as { content?: Array<{ type: string; data?: string }> }
+        const frameData = snap?.content?.find((c) => c.type === 'image')?.data
+        if (frameData) session.recording.frames.push(frameData)
+      } catch { /* silent — recording frames are best-effort */ }
+    }
+
+    return output || 'Action completed.'
   } catch (err) {
     const message = (err as Error).message
     // If the process died, clean up

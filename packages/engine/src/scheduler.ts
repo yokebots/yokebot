@@ -39,6 +39,10 @@ const state: SchedulerState = {
 // Email sequence processing interval (check every 5 minutes)
 let sequenceTimer: ReturnType<typeof setInterval> | null = null
 
+// Workflow schedule processing interval (check every 60 seconds)
+let workflowTimer: ReturnType<typeof setInterval> | null = null
+const lastWorkflowFired = new Map<string, number>()
+
 /**
  * Start the scheduler. Registers staggered heartbeat timers for each running agent.
  */
@@ -78,6 +82,13 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
     setTimeout(() => void processEmailSequences(db), 30_000)
   }
 
+  // Start workflow schedule processor (every 60 seconds)
+  if (!workflowTimer) {
+    workflowTimer = setInterval(() => {
+      void processScheduledWorkflows(db)
+    }, 60 * 1000)
+  }
+
   console.log(`[scheduler] Started with ${state.timers.size} agent(s)`)
 }
 
@@ -92,6 +103,10 @@ export function stopScheduler(): void {
   if (sequenceTimer) {
     clearInterval(sequenceTimer)
     sequenceTimer = null
+  }
+  if (workflowTimer) {
+    clearInterval(workflowTimer)
+    workflowTimer = null
   }
   state.running = false
   console.log('[scheduler] Stopped')
@@ -346,5 +361,66 @@ async function processEmailSequences(db: Db): Promise<void> {
     }
   } catch (err) {
     console.error('[scheduler] Email sequence processing error:', err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * Process scheduled workflows — fires workflows whose schedule is due.
+ * Uses simple pattern: daily:HH:MM or weekly:DAY:HH:MM
+ */
+async function processScheduledWorkflows(db: Db): Promise<void> {
+  try {
+    const { listWorkflows, startRun, listRuns } = await import('./workflows.ts')
+    const { advanceWorkflow } = await import('./workflow-executor.ts')
+
+    // Query all teams' scheduled workflows
+    const rows = await db.query<Record<string, unknown>>(
+      `SELECT * FROM workflows WHERE trigger_type = 'scheduled' AND status = 'active' AND schedule_cron IS NOT NULL`,
+    )
+
+    const now = new Date()
+    const currentDay = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()]
+    const currentHour = String(now.getHours()).padStart(2, '0')
+    const currentMinute = String(now.getMinutes()).padStart(2, '0')
+    const currentTime = `${currentHour}:${currentMinute}`
+
+    for (const row of rows) {
+      const wfId = row.id as string
+      const teamId = row.team_id as string
+      const cron = row.schedule_cron as string
+
+      // Check if already fired this minute
+      const lastFired = lastWorkflowFired.get(wfId) ?? 0
+      if (now.getTime() - lastFired < 60_000) continue
+
+      let shouldFire = false
+      if (cron.startsWith('daily:')) {
+        // daily:HH:MM
+        const time = cron.slice(6)
+        shouldFire = time === currentTime
+      } else if (cron.startsWith('weekly:')) {
+        // weekly:DAY:HH:MM
+        const parts = cron.slice(7).split(':')
+        const day = parts[0]
+        const time = `${parts[1]}:${parts[2]}`
+        shouldFire = day === currentDay && time === currentTime
+      }
+
+      if (!shouldFire) continue
+
+      // Check no active run exists
+      const activeRuns = await listRuns(db, { workflowId: wfId, status: 'running' })
+      if (activeRuns.length > 0) continue
+
+      // Fire the workflow
+      lastWorkflowFired.set(wfId, now.getTime())
+      const run = await startRun(db, teamId, wfId, 'schedule')
+      void advanceWorkflow(db, run.id).catch((err) =>
+        console.error(`[scheduler] Scheduled workflow advance error:`, err),
+      )
+      console.log(`[scheduler] Fired scheduled workflow "${row.name}" (id: ${wfId})`)
+    }
+  } catch (err) {
+    console.error('[scheduler] Workflow schedule processing error:', err instanceof Error ? err.message : err)
   }
 }

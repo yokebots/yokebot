@@ -3,13 +3,21 @@ import * as engine from '@/lib/engine'
 import type { ActivityLogEntry, EngineAgent } from '@/lib/engine'
 
 const EVENT_CONFIG: Record<string, { icon: string; color: string; bg: string }> = {
-  agent_created:       { icon: 'add_circle',    color: 'text-green-600',  bg: 'bg-green-50' },
-  agent_deleted:       { icon: 'delete',        color: 'text-red-600',    bg: 'bg-red-50' },
-  agent_started:       { icon: 'play_arrow',    color: 'text-green-600',  bg: 'bg-green-50' },
-  agent_stopped:       { icon: 'stop_circle',   color: 'text-gray-600',   bg: 'bg-gray-100' },
-  tool_executed:       { icon: 'build',         color: 'text-blue-600',   bg: 'bg-blue-50' },
-  approval_resolved:   { icon: 'gavel',         color: 'text-amber-600',  bg: 'bg-amber-50' },
-  heartbeat_proactive: { icon: 'favorite',      color: 'text-pink-600',   bg: 'bg-pink-50' },
+  agent_created:          { icon: 'add_circle',    color: 'text-green-600',  bg: 'bg-green-50' },
+  agent_deleted:          { icon: 'delete',        color: 'text-red-600',    bg: 'bg-red-50' },
+  agent_started:          { icon: 'play_arrow',    color: 'text-green-600',  bg: 'bg-green-50' },
+  agent_stopped:          { icon: 'stop_circle',   color: 'text-gray-600',   bg: 'bg-gray-100' },
+  tool_executed:          { icon: 'build',         color: 'text-blue-600',   bg: 'bg-blue-50' },
+  approval_resolved:      { icon: 'gavel',         color: 'text-amber-600',  bg: 'bg-amber-50' },
+  heartbeat_proactive:    { icon: 'favorite',      color: 'text-pink-600',   bg: 'bg-pink-50' },
+  workflow_created:       { icon: 'account_tree',  color: 'text-green-600',  bg: 'bg-green-50' },
+  workflow_updated:       { icon: 'edit',          color: 'text-blue-600',   bg: 'bg-blue-50' },
+  workflow_deleted:       { icon: 'delete',        color: 'text-red-600',    bg: 'bg-red-50' },
+  workflow_run_started:   { icon: 'play_arrow',    color: 'text-blue-600',   bg: 'bg-blue-50' },
+  workflow_run_completed: { icon: 'check_circle',  color: 'text-green-600',  bg: 'bg-green-50' },
+  workflow_run_failed:    { icon: 'error',         color: 'text-red-600',    bg: 'bg-red-50' },
+  workflow_run_canceled:  { icon: 'cancel',        color: 'text-gray-600',   bg: 'bg-gray-100' },
+  workflow_step_approved: { icon: 'verified_user', color: 'text-amber-600',  bg: 'bg-amber-50' },
 }
 
 const EVENT_LABELS: Record<string, string> = {
@@ -20,6 +28,14 @@ const EVENT_LABELS: Record<string, string> = {
   tool_executed: 'Tool Executed',
   approval_resolved: 'Approval Resolved',
   heartbeat_proactive: 'Proactive Heartbeat',
+  workflow_created: 'Workflow Created',
+  workflow_updated: 'Workflow Updated',
+  workflow_deleted: 'Workflow Deleted',
+  workflow_run_started: 'Workflow Run Started',
+  workflow_run_completed: 'Workflow Run Completed',
+  workflow_run_failed: 'Workflow Run Failed',
+  workflow_run_canceled: 'Workflow Run Canceled',
+  workflow_step_approved: 'Step Approved',
 }
 
 function formatTime(iso: string): string {

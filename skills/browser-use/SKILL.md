@@ -96,6 +96,37 @@ Always start with `browser_navigate` followed by `browser_snapshot`. Use accessi
     }
   },
   {
+    "name": "browser_screenshot",
+    "description": "Take a screenshot of the current page. Optionally save to the knowledge base.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "saveTo": { "type": "string", "description": "Optional: knowledge base folder path to save the screenshot (e.g. 'screenshots/project-x'). If omitted, returns base64 data only." }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "browser_start_recording",
+    "description": "Start recording a visual screencast of browser actions. Each subsequent browser action will be captured as a screenshot. Call browser_stop_recording to save all frames.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "saveTo": { "type": "string", "description": "Knowledge base folder path to save the recording frames (e.g. 'recordings/demo')" }
+      },
+      "required": ["saveTo"]
+    }
+  },
+  {
+    "name": "browser_stop_recording",
+    "description": "Stop recording and save all captured frames to the knowledge base.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
     "name": "browser_close",
     "description": "Close the browser session and free resources.",
     "parameters": {

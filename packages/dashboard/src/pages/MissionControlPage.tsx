@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { EngineTask, EngineAgent } from '@/lib/engine'
 
@@ -31,6 +31,7 @@ const statusColors: Record<string, string> = {
 }
 
 export function MissionControlPage() {
+  const navigate = useNavigate()
   const [tasks, setTasks] = useState<EngineTask[]>([])
   const [agents, setAgents] = useState<EngineAgent[]>([])
   const [view, setView] = useState<ViewMode>(() => {
@@ -40,6 +41,9 @@ export function MissionControlPage() {
   const [newTitle, setNewTitle] = useState('')
   const [newPriority, setNewPriority] = useState('medium')
   const [filterAgent, setFilterAgent] = useState('')
+  const [selectedForCapture, setSelectedForCapture] = useState<Set<string>>(new Set())
+  const [captureMode, setCaptureMode] = useState(false)
+  const [captureName, setCaptureName] = useState('')
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
@@ -66,6 +70,28 @@ export function MissionControlPage() {
     setNewTitle('')
     setShowCreate(false)
     loadData()
+  }
+
+  const toggleCaptureTask = (taskId: string) => {
+    setSelectedForCapture((prev) => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }
+
+  const handleCapture = async () => {
+    if (!captureName.trim() || selectedForCapture.size === 0) return
+    try {
+      const wf = await engine.captureWorkflow(captureName.trim(), Array.from(selectedForCapture))
+      setCaptureMode(false)
+      setSelectedForCapture(new Set())
+      setCaptureName('')
+      navigate(`/workflows/${wf.id}`)
+    } catch (err) {
+      alert(`Failed to create workflow: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
   }
 
   const filtered = filterAgent
@@ -132,8 +158,41 @@ export function MissionControlPage() {
             <span className="material-symbols-outlined text-[18px]">add</span>
             New Task
           </button>
+          <button
+            onClick={() => { setCaptureMode(!captureMode); setSelectedForCapture(new Set()) }}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium border transition-colors ${
+              captureMode ? 'border-forest-green bg-forest-green/5 text-forest-green' : 'border-border-subtle text-text-secondary hover:border-forest-green/30'
+            }`}
+            title="Select tasks to save as a reusable workflow"
+          >
+            <span className="material-symbols-outlined text-[18px]">account_tree</span>
+            {captureMode ? 'Cancel' : 'Save as Workflow'}
+          </button>
         </div>
       </div>
+
+      {/* Capture workflow bar */}
+      {captureMode && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-forest-green/20 bg-forest-green/5 px-4 py-3">
+          <span className="text-sm text-forest-green font-medium">
+            {selectedForCapture.size} task{selectedForCapture.size !== 1 ? 's' : ''} selected
+          </span>
+          <input
+            type="text"
+            value={captureName}
+            onChange={(e) => setCaptureName(e.target.value)}
+            placeholder="Workflow name..."
+            className="flex-1 rounded-lg border border-border-subtle bg-white px-3 py-1.5 text-sm focus:border-forest-green focus:outline-none"
+          />
+          <button
+            onClick={handleCapture}
+            disabled={selectedForCapture.size === 0 || !captureName.trim()}
+            className="rounded-lg bg-forest-green px-4 py-1.5 text-sm font-medium text-white hover:bg-forest-green-dark transition-colors disabled:opacity-50"
+          >
+            Create Workflow
+          </button>
+        </div>
+      )}
 
       {/* Kanban View */}
       {view === 'kanban' && (
@@ -151,7 +210,7 @@ export function MissionControlPage() {
                 </div>
                 <div className="flex flex-1 flex-col gap-2 rounded-lg bg-light-surface-alt/50 p-2">
                   {colTasks.map((task) => (
-                    <TaskCard key={task.id} task={task} agents={agents} />
+                    <TaskCard key={task.id} task={task} agents={agents} captureMode={captureMode} selected={selectedForCapture.has(task.id)} onToggleCapture={toggleCaptureTask} />
                   ))}
                   {colTasks.length === 0 && (
                     <p className="py-8 text-center text-xs text-text-muted">No tasks</p>
@@ -181,12 +240,18 @@ export function MissionControlPage() {
             ) : (
               filtered.map((task) => {
                 const agent = agents.find((a) => a.id === task.assignedAgentId)
+                const Wrapper = captureMode ? 'div' as const : Link
+                const wrapperProps = captureMode
+                  ? { onClick: () => toggleCaptureTask(task.id), className: `cursor-pointer block md:grid md:grid-cols-[auto_1fr_120px_100px_140px_120px] md:gap-4 border-b border-border-subtle px-4 py-3 transition-colors ${selectedForCapture.has(task.id) ? 'bg-forest-green/5' : 'hover:bg-light-surface-alt/50'}` }
+                  : { to: `/tasks/${task.id}`, className: 'block md:grid md:grid-cols-[1fr_120px_100px_140px_120px] md:gap-4 border-b border-border-subtle px-4 py-3 hover:bg-light-surface-alt/50 transition-colors' }
                 return (
-                  <Link
-                    key={task.id}
-                    to={`/tasks/${task.id}`}
-                    className="block md:grid md:grid-cols-[1fr_120px_100px_140px_120px] md:gap-4 border-b border-border-subtle px-4 py-3 hover:bg-light-surface-alt/50 transition-colors"
-                  >
+                  // @ts-expect-error — dynamic wrapper component
+                  <Wrapper key={task.id} {...wrapperProps}>
+                    {captureMode && (
+                      <div className="hidden md:flex items-center">
+                        <input type="checkbox" checked={selectedForCapture.has(task.id)} readOnly className="accent-forest-green" />
+                      </div>
+                    )}
                     {/* Mobile: stacked card layout */}
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-text-main truncate">{task.title}</p>
@@ -239,7 +304,7 @@ export function MissionControlPage() {
                         {task.deadline ? new Date(task.deadline).toLocaleDateString() : '—'}
                       </span>
                     </div>
-                  </Link>
+                  </Wrapper>
                 )
               })
             )}
@@ -347,16 +412,25 @@ export function MissionControlPage() {
   )
 }
 
-function TaskCard({ task, agents }: { task: EngineTask; agents: EngineAgent[] }) {
+function TaskCard({ task, agents, captureMode, selected, onToggleCapture }: {
+  task: EngineTask; agents: EngineAgent[];
+  captureMode?: boolean; selected?: boolean; onToggleCapture?: (id: string) => void
+}) {
   const agent = agents.find((a) => a.id === task.assignedAgentId)
 
-  return (
-    <Link
-      to={`/tasks/${task.id}`}
-      className="block rounded-lg border border-border-subtle bg-white p-3 shadow-sm transition-all hover:shadow-md hover:border-forest-green/30"
-    >
+  const content = (
+    <>
       <div className="mb-2 flex items-start justify-between gap-2">
-        <h4 className="text-sm font-medium text-text-main leading-tight">{task.title}</h4>
+        {captureMode && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleCapture?.(task.id)}
+            className="mt-0.5 shrink-0 accent-forest-green"
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
+        <h4 className="flex-1 text-sm font-medium text-text-main leading-tight">{task.title}</h4>
         <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${priorityStyle[task.priority]}`}>
           {task.priority}
         </span>
@@ -381,6 +455,28 @@ function TaskCard({ task, agents }: { task: EngineTask; agents: EngineAgent[] })
           </span>
         )}
       </div>
+    </>
+  )
+
+  if (captureMode) {
+    return (
+      <div
+        onClick={() => onToggleCapture?.(task.id)}
+        className={`block cursor-pointer rounded-lg border p-3 shadow-sm transition-all hover:shadow-md ${
+          selected ? 'border-forest-green bg-forest-green/5' : 'border-border-subtle bg-white hover:border-forest-green/30'
+        }`}
+      >
+        {content}
+      </div>
+    )
+  }
+
+  return (
+    <Link
+      to={`/tasks/${task.id}`}
+      className="block rounded-lg border border-border-subtle bg-white p-3 shadow-sm transition-all hover:shadow-md hover:border-forest-green/30"
+    >
+      {content}
     </Link>
   )
 }

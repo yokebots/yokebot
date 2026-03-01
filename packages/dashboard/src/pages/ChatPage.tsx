@@ -74,6 +74,8 @@ export function ChatPage() {
     try {
       const msgs = await engine.getMessages(activeChannelId)
       setMessages(msgs)
+      // Re-mark as read while viewing to prevent false unread counts from polling
+      engine.markChannelRead(activeChannelId).catch(() => {})
     } catch { /* offline */ }
   }
 
@@ -199,6 +201,8 @@ export function ChatPage() {
   }, [tasks])
 
   const getTaskThreadName = (ch: ChatChannel) => {
+    // If the channel was renamed (name no longer starts with 'task:'), show the custom name
+    if (!ch.name.startsWith('task:')) return ch.name
     const taskId = ch.name.replace('task:', '')
     return taskTitleMap.get(taskId) ?? taskId.slice(0, 8) + '...'
   }
@@ -641,18 +645,58 @@ export function ChatPage() {
             <div>
               <p className="mb-2 px-2 text-xs font-bold uppercase tracking-wider text-text-muted">Task Threads</p>
               {taskThreads.map((ch) => (
-                <button
+                <div
                   key={ch.id}
-                  onClick={() => { setActiveChannelId(ch.id); setShowChannelsMobile(false) }}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
+                  className={`group flex w-full items-center rounded-lg transition-colors ${
                     ch.id === activeChannelId
-                      ? 'bg-forest-green/10 text-forest-green font-medium'
-                      : 'text-text-secondary hover:bg-light-surface-alt'
+                      ? 'bg-forest-green/10'
+                      : 'hover:bg-light-surface-alt'
                   }`}
                 >
-                  <span className="material-symbols-outlined text-[16px]">task_alt</span>
-                  <span className="truncate">{getTaskThreadName(ch)}</span>
-                </button>
+                  {editingChannelId === ch.id ? (
+                    <div className="flex flex-1 items-center gap-1 px-2 py-1">
+                      <span className="material-symbols-outlined text-[16px] text-text-muted">task_alt</span>
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        value={editChannelName}
+                        onChange={(e) => setEditChannelName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleRenameChannel(ch.id)
+                          if (e.key === 'Escape') setEditingChannelId(null)
+                        }}
+                        onBlur={() => handleRenameChannel(ch.id)}
+                        className="flex-1 min-w-0 bg-white border border-forest-green rounded px-1.5 py-0.5 text-sm outline-none"
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => { setActiveChannelId(ch.id); setShowChannelsMobile(false) }}
+                        className={`flex flex-1 items-center gap-2 px-2 py-2 text-sm ${
+                          ch.id === activeChannelId
+                            ? 'text-forest-green font-medium'
+                            : unreadCounts[ch.id] ? 'text-text-main font-semibold' : 'text-text-secondary'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">task_alt</span>
+                        <span className="truncate">{getTaskThreadName(ch)}</span>
+                        {unreadCounts[ch.id] && ch.id !== activeChannelId && (
+                          <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-forest-green px-1.5 text-[10px] font-bold text-white">
+                            {unreadCounts[ch.id]}
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => startEditChannel(ch)}
+                        className="mr-1 hidden rounded p-0.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main group-hover:block"
+                        title="Rename thread"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">edit</span>
+                      </button>
+                    </>
+                  )}
+                </div>
               ))}
             </div>
           )}

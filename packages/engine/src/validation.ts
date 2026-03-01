@@ -174,6 +174,59 @@ export const SearchKbSchema = z.object({
   documentIds: z.array(z.string()).optional(),
 })
 
+// ---- Workflows ----
+
+export const CreateWorkflowSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(5000).optional(),
+  goalId: z.string().max(200).optional(),
+  triggerType: z.enum(['manual', 'scheduled']).optional(),
+  scheduleCron: z.string().max(100).optional(),
+  steps: z.array(z.object({
+    title: z.string().min(1).max(500),
+    description: z.string().max(5000).optional(),
+    assignedAgentId: z.string().max(200).optional(),
+    gate: z.enum(['auto', 'approval']).optional(),
+    timeoutMinutes: z.number().int().min(1).max(10080).optional(),
+    config: z.string().max(10000).optional(),
+  })).optional(),
+})
+
+export const UpdateWorkflowSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(5000).optional(),
+  goalId: z.string().max(200).nullable().optional(),
+  triggerType: z.enum(['manual', 'scheduled']).optional(),
+  scheduleCron: z.string().max(100).nullable().optional(),
+  status: z.enum(['active', 'archived']).optional(),
+})
+
+export const CaptureWorkflowSchema = z.object({
+  name: z.string().min(1).max(200),
+  taskIds: z.array(z.string().max(200)).min(1).max(100),
+})
+
+export const AddWorkflowStepSchema = z.object({
+  title: z.string().min(1).max(500),
+  description: z.string().max(5000).optional(),
+  assignedAgentId: z.string().max(200).optional(),
+  gate: z.enum(['auto', 'approval']).optional(),
+  timeoutMinutes: z.number().int().min(1).max(10080).optional(),
+  config: z.string().max(10000).optional(),
+})
+
+export const UpdateWorkflowStepSchema = z.object({
+  title: z.string().min(1).max(500).optional(),
+  description: z.string().max(5000).optional(),
+  assignedAgentId: z.string().max(200).nullable().optional(),
+  gate: z.enum(['auto', 'approval']).optional(),
+  timeoutMinutes: z.number().int().min(1).max(10080).nullable().optional(),
+})
+
+export const ReorderWorkflowStepsSchema = z.object({
+  stepIds: z.array(z.string().max(200)).min(1).max(100),
+})
+
 // ---- Validation helper ----
 
 export function validate<T>(schema: z.ZodType<T>, data: unknown): T {
