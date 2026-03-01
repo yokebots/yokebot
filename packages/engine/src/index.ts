@@ -1445,6 +1445,25 @@ ${truncated}`,
       const { startMeetAndGreet } = await import(/* @vite-ignore */ cloudPath)
       const teamId = req.user!.activeTeamId!
 
+      // ── Meeting frequency limits (per tier) ──
+      if (req.subscription) {
+        const tier = req.subscription.tier
+        // Starter Crew ($29): 1/week, Growth Crew ($59) & Power Crew ($149): 1/day
+        const { windowHours, limitLabel, upgradeCta } = tier === 'team'
+          ? { windowHours: 168, limitLabel: '1 meeting per week', upgradeCta: 'Upgrade to Growth Crew for daily meetings.' }
+          : { windowHours: 24, limitLabel: '1 meeting per day', upgradeCta: '' }
+
+        const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString()
+        const recent = await db.queryOne<{ cnt: string }>(
+          `SELECT COUNT(*)::text AS cnt FROM team_meetings WHERE team_id = $1 AND created_at > $2`,
+          [teamId, since],
+        )
+        if (recent && parseInt(recent.cnt, 10) >= 1) {
+          const msg = `Your ${req.subscription.tier === 'team' ? 'Starter Crew' : req.subscription.tier === 'business' ? 'Growth Crew' : 'Power Crew'} plan includes ${limitLabel}.${upgradeCta ? ' ' + upgradeCta : ''}`
+          return res.status(429).json({ error: msg })
+        }
+      }
+
       // Find all deployed agents for this team
       const agents = await listAgents(db, teamId)
       if (agents.length === 0) {
@@ -1988,6 +2007,14 @@ ${truncated}`,
     process.exit(0)
   })
 }
+
+// Prevent crash-loop on unhandled errors — log and stay alive
+process.on('uncaughtException', (err) => {
+  console.error('[engine] UNCAUGHT EXCEPTION (process staying alive):', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[engine] UNHANDLED REJECTION (process staying alive):', reason)
+})
 
 // Boot
 main().catch((err) => {

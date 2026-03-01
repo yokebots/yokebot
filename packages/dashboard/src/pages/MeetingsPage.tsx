@@ -3,14 +3,17 @@
  */
 
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { useTeam } from '@/lib/team-context'
 import * as engine from '@/lib/engine'
 
 export function MeetingsPage() {
   const { activeTeam } = useTeam()
+  const navigate = useNavigate()
   const [meetings, setMeetings] = useState<engine.MeetingSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [starting, setStarting] = useState(false)
+  const [limitError, setLimitError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!activeTeam) return
@@ -40,10 +43,56 @@ export function MeetingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
-      <div className="mb-8">
-        <h1 className="font-display text-3xl font-bold text-text-main">Meetings</h1>
-        <p className="mt-1 text-text-secondary">Browse and replay past team meetings</p>
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h1 className="font-display text-3xl font-bold text-text-main">Meetings</h1>
+          <p className="mt-1 text-text-secondary">Browse and replay past team meetings</p>
+        </div>
+        <button
+          disabled={starting}
+          onClick={async () => {
+            if (!activeTeam) return
+            setStarting(true)
+            setLimitError(null)
+            try {
+              const { meetingId } = await engine.startMeetAndGreet(activeTeam.id)
+              navigate(`/meetings/${meetingId}`)
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err)
+              if (msg.includes('plan includes')) {
+                setLimitError(msg)
+              } else {
+                setLimitError('Failed to start meeting. Please try again.')
+              }
+            } finally {
+              setStarting(false)
+            }
+          }}
+          className="flex items-center gap-2 rounded-xl bg-forest-green px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-forest-green-hover disabled:opacity-50 transition-colors"
+        >
+          <span className="material-symbols-outlined text-[18px]">{starting ? 'hourglass_empty' : 'add'}</span>
+          {starting ? 'Starting...' : 'New Meeting'}
+        </button>
       </div>
+
+      {limitError && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <span className="material-symbols-outlined text-[20px] text-amber-600 mt-0.5">schedule</span>
+          <div>
+            <p className="text-sm font-medium text-amber-800">{limitError}</p>
+            <Link
+              to="/settings/billing"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-forest-green px-3 py-1.5 text-sm font-medium text-white hover:bg-forest-green-hover transition-colors"
+            >
+              <span className="material-symbols-outlined text-[16px]">upgrade</span>
+              Upgrade Plan
+            </Link>
+          </div>
+          <button onClick={() => setLimitError(null)} className="ml-auto shrink-0 text-amber-400 hover:text-amber-600">
+            <span className="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

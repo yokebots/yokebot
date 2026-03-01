@@ -123,7 +123,7 @@ export function OnboardingPage() {
   // Step 3 chat state
   const [advisorAgentId, setAdvisorAgentId] = useState<string | null>(null)
   const [advisorReady, setAdvisorReady] = useState(false)
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'agent'; content: string }>>([])
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'agent'; content: string; upgradeLink?: boolean }>>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [thinkingPhrase, setThinkingPhrase] = useState(THINKING_PHRASES[0])
@@ -1588,6 +1588,15 @@ export function OnboardingPage() {
                             : 'bg-white border border-gray-100 text-text-main rounded-bl-md'
                         }`}>
                           {msg.content}
+                          {msg.upgradeLink && (
+                            <a
+                              href="/settings/billing"
+                              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-forest-green px-3 py-1.5 text-sm font-medium text-white hover:bg-forest-green-hover transition-colors no-underline"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">upgrade</span>
+                              Upgrade Plan
+                            </a>
+                          )}
                         </div>
                         {msg.role === 'user' && (
                           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200">
@@ -1652,7 +1661,17 @@ export function OnboardingPage() {
                             setMeetingId(mid)
                             setMeetingActive(true)
                           } catch (err) {
+                            const errMsg = err instanceof Error ? err.message : String(err)
                             console.error(`[onboarding] Meet-and-greet start failed (attempt ${retries + 1}):`, err)
+                            // Meeting limit reached — show the server message directly, don't retry
+                            if (errMsg.includes('plan includes')) {
+                              setMessages(prev => [...prev, {
+                                role: 'agent',
+                                content: `${errMsg} Your agents are deployed and ready — head to the dashboard to chat with them!`,
+                                upgradeLink: true,
+                              }])
+                              return
+                            }
                             if (retries < 2) {
                               retries++
                               await new Promise(r => setTimeout(r, 2000))
