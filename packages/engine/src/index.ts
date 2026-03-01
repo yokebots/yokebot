@@ -18,7 +18,7 @@ import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
-import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages, addChatSseClient, broadcastChatEvent } from './chat.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts } from './chat.ts'
 import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
@@ -453,6 +453,24 @@ async function main() {
     const teamId = req.user!.activeTeamId!
     const channel = await getTaskThread(db, req.params.taskId, teamId)
     res.json(channel)
+  })
+
+  // Unread counts for all channels
+  app.get('/api/chat/unread', async (req, res) => {
+    const userId = req.user!.id
+    const teamId = req.user!.activeTeamId!
+    const counts = await getUnreadCounts(db, userId, teamId)
+    const total = Object.values(counts).reduce((sum, n) => sum + n, 0)
+    res.json({ counts, total })
+  })
+
+  // Mark channel as read
+  app.post('/api/chat/channels/:channelId/read', async (req, res) => {
+    const userId = req.user!.id
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
+    await markChannelRead(db, userId, req.params.channelId)
+    res.json({ ok: true })
   })
 
   app.get('/api/chat/channels/:channelId/messages', async (req, res) => {

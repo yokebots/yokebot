@@ -653,6 +653,33 @@ const migrations: Migration[] = [
       await db.run('UPDATE agents SET proactive = 1 WHERE proactive = 0')
     },
   },
+  {
+    version: 12,
+    name: 'add_channel_reads_table',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS channel_reads (
+            user_id TEXT NOT NULL,
+            channel_id TEXT NOT NULL REFERENCES chat_channels(id) ON DELETE CASCADE,
+            last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, channel_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_channel_reads_user ON channel_reads(user_id);
+          ALTER TABLE channel_reads ENABLE ROW LEVEL SECURITY;
+        `)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS channel_reads (
+            user_id TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            last_read_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (user_id, channel_id)
+          );
+        `)
+      }
+    },
+  },
 ]
 
 /**

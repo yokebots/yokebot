@@ -170,6 +170,42 @@ export async function searchMessages(db: Db, teamId: string, query: string, limi
   }))
 }
 
+// ---- Unread Tracking ----
+
+export async function markChannelRead(db: Db, userId: string, channelId: string): Promise<void> {
+  const now = db.now()
+  if (db.driver === 'postgres') {
+    await db.run(
+      `INSERT INTO channel_reads (user_id, channel_id, last_read_at) VALUES ($1, $2, ${now})
+       ON CONFLICT (user_id, channel_id) DO UPDATE SET last_read_at = ${now}`,
+      [userId, channelId],
+    )
+  } else {
+    await db.run(
+      `INSERT OR REPLACE INTO channel_reads (user_id, channel_id, last_read_at) VALUES ($1, $2, datetime('now'))`,
+      [userId, channelId],
+    )
+  }
+}
+
+export async function getUnreadCounts(db: Db, userId: string, teamId: string): Promise<Record<string, number>> {
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT c.id AS channel_id, COUNT(m.id)::text AS unread_count
+     FROM chat_channels c
+     INNER JOIN chat_messages m ON m.channel_id = c.id AND m.sender_type != 'human'
+     LEFT JOIN channel_reads cr ON cr.channel_id = c.id AND cr.user_id = $1
+     WHERE c.team_id = $2 AND m.created_at > COALESCE(cr.last_read_at, '1970-01-01')
+     GROUP BY c.id
+     HAVING COUNT(m.id) > 0`,
+    [userId, teamId],
+  )
+  const counts: Record<string, number> = {}
+  for (const r of rows) {
+    counts[r.channel_id as string] = parseInt(r.unread_count as string, 10)
+  }
+  return counts
+}
+
 // ---- Mention Processing ----
 
 const MENTION_REGEX = /@\[([^\]]+)\]\((agent|user|file|everyone):([^)]+)\)/g

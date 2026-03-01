@@ -231,6 +231,12 @@ export const deleteChannel = (channelId: string) =>
 export const renameChannel = (channelId: string, name: string) =>
   request<ChatChannel>(`/api/chat/channels/${channelId}`, { method: 'PATCH', body: JSON.stringify({ name }) })
 
+export const markChannelRead = (channelId: string) =>
+  request<{ ok: boolean }>(`/api/chat/channels/${channelId}/read`, { method: 'POST' })
+
+export const getUnreadCounts = () =>
+  request<{ counts: Record<string, number>; total: number }>('/api/chat/unread')
+
 export const getDmChannel = (agentId: string) =>
   request<ChatChannel>(`/api/chat/dm/${agentId}`)
 

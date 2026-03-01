@@ -106,6 +106,14 @@ const SQLITE_DDL = `
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Channel read tracking (unread indicators)
+  CREATE TABLE IF NOT EXISTS channel_reads (
+    user_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    last_read_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+  );
+
   -- Chat reactions (emoji reactions on messages)
   CREATE TABLE IF NOT EXISTS chat_reactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -506,6 +514,15 @@ const POSTGRES_DDL = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- Channel read tracking (unread indicators)
+  CREATE TABLE IF NOT EXISTS channel_reads (
+    user_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL REFERENCES chat_channels(id) ON DELETE CASCADE,
+    last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, channel_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_channel_reads_user ON channel_reads(user_id);
+
   -- Chat reactions (emoji reactions on messages)
   CREATE TABLE IF NOT EXISTS chat_reactions (
     id BIGSERIAL PRIMARY KEY,
@@ -881,6 +898,7 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS team_profiles ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS team_meetings ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS chat_reactions ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS channel_reads ENABLE ROW LEVEL SECURITY;
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses

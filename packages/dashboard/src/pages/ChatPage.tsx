@@ -21,6 +21,7 @@ export function ChatPage() {
   const [mentionCompletions, setMentionCompletions] = useState<MentionCompletionData | null>(null)
   const [reactions, setReactions] = useState<Record<number, Record<string, string[]>>>({}) // messageId → { emoji → userIds[] }
   const [showReactionPicker, setShowReactionPicker] = useState<number | null>(null) // messageId with picker open
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelInputRef = useRef<HTMLInputElement>(null)
 
@@ -50,18 +51,32 @@ export function ChatPage() {
     } catch { /* offline */ }
   }
 
-  useEffect(() => { loadChannels(); loadMentionCompletions() }, [])
-  useEffect(() => { loadMessages() }, [activeChannelId])
+  const loadUnread = async () => {
+    try {
+      const data = await engine.getUnreadCounts()
+      setUnreadCounts(data.counts)
+    } catch { /* offline */ }
+  }
+
+  useEffect(() => { loadChannels(); loadMentionCompletions(); loadUnread() }, [])
+  useEffect(() => {
+    // Mark channel as read when selecting it
+    if (!activeChannelId) return
+    loadMessages()
+    engine.markChannelRead(activeChannelId).catch(() => {})
+    setUnreadCounts(prev => { const next = { ...prev }; delete next[activeChannelId]; return next })
+  }, [activeChannelId])
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   useEffect(() => {
     if (showCreateChannel) channelInputRef.current?.focus()
   }, [showCreateChannel])
 
-  // Poll for new messages every 5 seconds
+  // Poll for new messages every 5 seconds + unread counts every 15 seconds
   useEffect(() => {
     if (!activeChannelId) return
-    const interval = setInterval(loadMessages, 5000)
-    return () => clearInterval(interval)
+    const msgInterval = setInterval(loadMessages, 5000)
+    const unreadInterval = setInterval(loadUnread, 15000)
+    return () => { clearInterval(msgInterval); clearInterval(unreadInterval) }
   }, [activeChannelId])
 
   const sendMsg = async () => {
@@ -432,11 +447,16 @@ export function ChatPage() {
                       className={`flex flex-1 items-center gap-2 px-2 py-2 text-sm ${
                         ch.id === activeChannelId
                           ? 'text-forest-green font-medium'
-                          : 'text-text-secondary'
+                          : unreadCounts[ch.id] ? 'text-text-main font-semibold' : 'text-text-secondary'
                       }`}
                     >
                       <span className="text-text-muted">#</span>
                       {ch.name}
+                      {unreadCounts[ch.id] && ch.id !== activeChannelId && (
+                        <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-forest-green px-1.5 text-[10px] font-bold text-white">
+                          {unreadCounts[ch.id]}
+                        </span>
+                      )}
                     </button>
                     <button
                       onClick={() => startEditChannel(ch)}
@@ -464,23 +484,34 @@ export function ChatPage() {
             {agents.map((agent) => {
               const dmCh = dmChannels.find((c) => c.name === `dm:${agent.id}`)
               const isActive = dmCh && dmCh.id === activeChannelId
+              const dmUnread = dmCh ? unreadCounts[dmCh.id] : 0
               return (
                 <div key={agent.id} className="group relative">
                   <div className="flex items-center">
                     <button
                       onClick={() => openDm(agent.id)}
                       className={`flex flex-1 items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
-                        isActive ? 'font-medium' : 'text-text-secondary hover:bg-light-surface-alt'
+                        isActive ? 'font-medium' : dmUnread ? 'text-text-main font-semibold' : 'text-text-secondary hover:bg-light-surface-alt'
                       }`}
                       style={isActive ? { backgroundColor: (agent.iconColor ?? '#0F4D26') + '18', color: agent.iconColor ?? '#0F4D26' } : undefined}
                     >
-                      <span
-                        className="material-symbols-outlined text-[16px]"
-                        style={{ color: agent.iconColor ?? '#0F4D26' }}
-                      >
-                        {agent.iconName ?? 'smart_toy'}
+                      <span className="relative">
+                        <span
+                          className="material-symbols-outlined text-[16px]"
+                          style={{ color: agent.iconColor ?? '#0F4D26' }}
+                        >
+                          {agent.iconName ?? 'smart_toy'}
+                        </span>
+                        {dmUnread > 0 && !isActive && (
+                          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-forest-green ring-2 ring-white" />
+                        )}
                       </span>
                       {agent.name}
+                      {dmUnread > 0 && !isActive && (
+                        <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-forest-green px-1.5 text-[10px] font-bold text-white">
+                          {dmUnread}
+                        </span>
+                      )}
                     </button>
                     <button
                       onClick={() => startEditAgent(agent)}
