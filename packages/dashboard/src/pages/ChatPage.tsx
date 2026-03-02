@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, EngineTask, MentionCompletionData } from '@/lib/engine'
 import { MentionInput, renderMentionContent } from '@/components/MentionInput'
 import { supabase } from '@/lib/supabase'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 
 const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 
@@ -128,13 +129,16 @@ export function ChatPage() {
     if (showCreateChannel) channelInputRef.current?.focus()
   }, [showCreateChannel])
 
-  // Poll for new messages every 5 seconds + unread counts every 15 seconds
-  useEffect(() => {
-    if (!activeChannelId) return
-    const msgInterval = setInterval(loadMessages, 5000)
-    const unreadInterval = setInterval(loadUnread, 15000)
-    return () => { clearInterval(msgInterval); clearInterval(unreadInterval) }
-  }, [activeChannelId])
+  // SSE: reload messages when a new message arrives in the active channel
+  useRealtimeEvent('new_message', useCallback((data: unknown) => {
+    const { channelId } = data as { channelId: string }
+    if (channelId === activeChannelId) loadMessages()
+  }, [activeChannelId]))
+
+  // SSE: live unread count updates
+  useRealtimeEvent('unread_counts', useCallback((data: unknown) => {
+    setUnreadCounts(data as Record<string, number>)
+  }, []))
 
   const sendMsg = async () => {
     if (!newMessage.trim() || !activeChannelId) return

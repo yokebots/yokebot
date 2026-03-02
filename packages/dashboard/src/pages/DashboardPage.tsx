@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { StatsRow } from '@/components/StatsRow'
 import { CreateAgentModal } from '@/components/CreateAgentModal'
 import * as engine from '@/lib/engine'
 import type { ActivityLogEntry } from '@/lib/engine'
 import { Link } from 'react-router'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 
 export function DashboardPage() {
   const [agents, setAgents] = useState<engine.EngineAgent[]>([])
@@ -12,6 +13,7 @@ export function DashboardPage() {
   const [tasks, setTasks] = useState<engine.EngineTask[]>([])
   const [projects, setProjects] = useState<engine.Goal[]>([])
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null)
+  const [creditBalance, setCreditBalance] = useState<number>(0)
   const [stats, setStats] = useState({
     activeAgents: 0,
     totalAgents: 0,
@@ -20,7 +22,7 @@ export function DashboardPage() {
     completedTasks: 0,
   })
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [agentList, approvalData, taskList, activity, projectList, billing] = await Promise.all([
         engine.listAgents(),
@@ -32,6 +34,7 @@ export function DashboardPage() {
       ])
 
       setSubscriptionStatus(billing?.subscription?.status ?? null)
+      setCreditBalance(billing?.credits ?? 0)
 
       setAgents(agentList)
       setTasks(taskList)
@@ -45,13 +48,21 @@ export function DashboardPage() {
         completedTasks: taskList.filter((t) => t.status === 'done').length,
       })
     } catch { /* engine offline */ }
-  }
-
-  useEffect(() => {
-    loadData()
-    const interval = setInterval(loadData, 5000)
-    return () => clearInterval(interval)
   }, [])
+
+  // Initial load only — no polling
+  useEffect(() => { loadData() }, [loadData])
+
+  // SSE: reload when agent status or approvals change
+  useRealtimeEvent('agent_status', loadData)
+  useRealtimeEvent('approval_count', useCallback((data: unknown) => {
+    const { count } = data as { count: number }
+    setStats((prev) => ({ ...prev, pendingApprovals: count }))
+  }, []))
+  useRealtimeEvent('credits', useCallback((data: unknown) => {
+    const { credits } = data as { credits: number }
+    setCreditBalance(credits)
+  }, []))
 
   const statusColors: Record<string, string> = {
     running: 'bg-green-500',
@@ -80,7 +91,7 @@ export function DashboardPage() {
       />
 
       {/* Canceled subscription banner */}
-      {(subscriptionStatus === 'canceled' || subscriptionStatus === 'inactive') && (
+      {(subscriptionStatus === 'canceled' || subscriptionStatus === 'inactive') && creditBalance <= 0 && (
         <div className="mb-8">
           <Link
             to="/settings/billing"

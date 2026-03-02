@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import * as engine from '@/lib/engine'
 import type { ActivityLogEntry, EngineAgent } from '@/lib/engine'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 
 const EVENT_CONFIG: Record<string, { icon: string; color: string; bg: string }> = {
   agent_created:          { icon: 'add_circle',    color: 'text-green-600',  bg: 'bg-green-50' },
@@ -83,9 +84,10 @@ export function ActivityPage() {
   useEffect(() => {
     setLoading(true)
     loadData()
-    const interval = setInterval(() => loadData(), 10000)
-    return () => clearInterval(interval)
   }, [filterAgent, filterType])
+
+  // SSE: reload activity when agent status changes (new activity generated)
+  useRealtimeEvent('agent_status', useCallback(() => { loadData() }, []))
 
   const agentName = (id: string | null) => {
     if (!id) return 'System'

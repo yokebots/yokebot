@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { KbDocument, KbSearchResult, KbChunk } from '@/lib/engine'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 
 // ---- File tree types (for Workspace tab) ----
 
@@ -96,11 +97,14 @@ function DocumentsTab() {
 
   useEffect(() => { loadDocuments() }, [loadDocuments])
 
-  // Poll for processing documents
+  // SSE: reload documents when processing completes
+  useRealtimeEvent('kb_update', loadDocuments)
+
+  // Fallback poll for processing documents (only when actively processing)
   useEffect(() => {
     const hasProcessing = documents.some((d) => d.status === 'pending' || d.status === 'processing')
     if (!hasProcessing) return
-    const interval = setInterval(loadDocuments, 3000)
+    const interval = setInterval(loadDocuments, 5000)
     return () => clearInterval(interval)
   }, [documents, loadDocuments])
 

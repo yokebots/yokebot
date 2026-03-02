@@ -15,7 +15,7 @@ import { join } from 'path'
 import { createDb } from './db/index.ts'
 import { createAgent, listAgents, getAgent, updateAgent, deleteAgent, setAgentStatus } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
-import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention } from './scheduler.ts'
+import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention, initSchedulerState } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
 import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts } from './chat.ts'
@@ -114,13 +114,14 @@ async function main() {
   // Body size limit
   app.use(express.json({ limit: '1mb' }))
 
-  // Rate limiting — general (per IP, generous for dashboard usage)
+  // Rate limiting — general (per user/team, generous for dashboard polling)
   app.use(rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 1000,
+    max: 5000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later' },
+    keyGenerator: (req) => req.headers['x-team-id'] as string ?? req.ip ?? 'unknown',
     skip: (req) => req.path === '/health' || req.path === '/api/config',
   }))
 
@@ -160,6 +161,85 @@ async function main() {
 
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', version: '0.0.1' })
+  })
+
+  // ===== Server-Sent Events (SSE) — real-time updates per user =====
+
+  const sseClients = new Map<string, Set<Response>>() // userId → SSE connections
+
+  function broadcastToUser(userId: string, event: string, data: unknown): void {
+    const clients = sseClients.get(userId)
+    if (!clients) return
+    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+    for (const res of clients) {
+      try { res.write(frame) } catch { /* client gone */ }
+    }
+  }
+
+  function broadcastToTeam(teamId: string, event: string, data: unknown): void {
+    // For team-wide broadcasts, we need to look up members.
+    // We cache connected user → teamId associations from their SSE connections.
+    for (const [userId, clients] of sseClients) {
+      if (clients.size === 0) continue
+      // Each client stores its teamId on the response object
+      for (const res of clients) {
+        if ((res as Response & { _sseTeamId?: string })._sseTeamId === teamId) {
+          const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+          try { res.write(frame) } catch { /* client gone */ }
+        }
+      }
+    }
+  }
+
+  app.get('/api/events', async (req, res) => {
+    const userId = req.user!.id
+    const teamId = req.user!.activeTeamId!
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    })
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`)
+
+    // Tag this response with the team ID for team-wide broadcasts
+    ;(res as Response & { _sseTeamId?: string })._sseTeamId = teamId
+
+    if (!sseClients.has(userId)) sseClients.set(userId, new Set())
+    sseClients.get(userId)!.add(res)
+
+    // Send initial state snapshot
+    try {
+      const [notifCount, unreadCounts, approvalCnt, billingStatus] = await Promise.all([
+        countUnread(db, userId),
+        getUnreadCounts(db, userId, teamId),
+        countPendingApprovals(db, teamId),
+        (async () => {
+          const { getSubscription, getCreditBalance } = await import('./billing.ts')
+          const sub = await getSubscription(db, teamId)
+          const credits = await getCreditBalance(db, teamId)
+          return { credits, tier: sub?.tier ?? 'none' }
+        })(),
+      ])
+
+      res.write(`event: notification_count\ndata: ${JSON.stringify({ count: notifCount })}\n\n`)
+      res.write(`event: unread_counts\ndata: ${JSON.stringify(unreadCounts)}\n\n`)
+      res.write(`event: approval_count\ndata: ${JSON.stringify({ count: approvalCnt })}\n\n`)
+      res.write(`event: credits\ndata: ${JSON.stringify(billingStatus)}\n\n`)
+    } catch (err) {
+      console.error('[sse] Failed to send initial state:', err)
+    }
+
+    // Keep-alive every 30s
+    const keepAlive = setInterval(() => {
+      try { res.write(': keepalive\n\n') } catch { clearInterval(keepAlive) }
+    }, 30_000)
+
+    req.on('close', () => {
+      clearInterval(keepAlive)
+      sseClients.get(userId)?.delete(res)
+      if (sseClients.get(userId)?.size === 0) sseClients.delete(userId)
+    })
   })
 
   // ===== Ollama Detection =====
@@ -234,6 +314,7 @@ async function main() {
     scheduleAgent(db, { ...agent, status: 'running' })
 
     await logActivity(db, 'agent_created', agent.id, `Agent "${agent.name}" created`, undefined, teamId)
+    broadcastToTeam(teamId, 'agent_status', { agentId: agent.id, status: 'running' })
     res.status(201).json({ ...agent, status: 'running' })
   })
 
@@ -285,6 +366,7 @@ async function main() {
     await setAgentStatus(db, agent.id, 'running')
     scheduleAgent(db, { ...agent, status: 'running' })
     await logActivity(db, 'agent_started', agent.id, `Agent "${agent.name}" started`, undefined, teamId)
+    broadcastToTeam(teamId, 'agent_status', { agentId: agent.id, status: 'running' })
     res.json({ ...agent, status: 'running' })
   })
 
@@ -297,6 +379,7 @@ async function main() {
     await setAgentStatus(db, agent.id, 'stopped')
     unscheduleAgent(agent.id)
     await logActivity(db, 'agent_stopped', agent.id, `Agent "${agent.name}" stopped`, undefined, teamId)
+    broadcastToTeam(teamId, 'agent_status', { agentId: agent.id, status: 'stopped' })
     res.json({ ...agent, status: 'stopped' })
   })
 
@@ -384,6 +467,9 @@ async function main() {
     const approval = await createApproval(db, teamId, body.agentId, body.actionType, body.actionDetail, body.riskLevel)
     // Notify team about new approval
     void notifyTeam(db, teamId, 'approval_needed', `Approval needed: ${body.actionType}`, body.actionDetail.slice(0, 200), '/approvals')
+    // SSE: broadcast updated approval count to all team members
+    const newApprovalCount = await countPendingApprovals(db, teamId)
+    broadcastToTeam(teamId, 'approval_count', { count: newApprovalCount })
     res.status(201).json(approval)
   })
 
@@ -394,6 +480,9 @@ async function main() {
     const approval = await resolveApproval(db, req.params.id, status)
     if (!approval) return res.status(404).json({ error: 'Approval not found' })
     await logActivity(db, 'approval_resolved', approval.agentId, `Approval ${status}: ${approval.actionType} — ${approval.actionDetail.slice(0, 100)}`, { approvalId: approval.id, status }, teamId)
+    // SSE: broadcast updated approval count
+    const resolvedApprovalCount = await countPendingApprovals(db, teamId)
+    broadcastToTeam(teamId, 'approval_count', { count: resolvedApprovalCount })
     res.json(approval)
   })
 
@@ -660,6 +749,8 @@ async function main() {
     if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
     const { senderType, senderId, content, taskId } = validate(SendChatMessageSchema, req.body)
     const msg = await sendMessage(db, req.params.channelId, senderType, senderId, content, taskId, teamId)
+    // SSE: broadcast new message event to all team members
+    broadcastToTeam(teamId, 'new_message', { channelId: req.params.channelId, messageId: msg.id })
     // Fire-and-forget mention processing (notifications + agent wake)
     processMentions(db, teamId, req.params.channelId, msg).catch((err) =>
       console.error('[chat] Mention processing error:', err),
@@ -874,6 +965,7 @@ async function main() {
         fileSize: buffer.length,
         contentBase64: content,
       })
+      broadcastToTeam(teamId, 'kb_update', { documentId: doc.id, status: doc.status })
       res.status(201).json(doc)
     } catch (err) {
       const status = (err as Error & { status?: number }).status ?? 500
@@ -2309,12 +2401,15 @@ ${truncated}`,
 
   app.post('/api/notifications/:id/read', async (req, res) => {
     await markRead(db, req.params.id, req.user!.id)
+    const unread = await countUnread(db, req.user!.id)
+    broadcastToUser(req.user!.id, 'notification_count', { count: unread })
     res.json({ success: true })
   })
 
   app.post('/api/notifications/read-all', async (req, res) => {
     const teamId = req.query.teamId as string | undefined
     await markAllRead(db, req.user!.id, teamId)
+    broadcastToUser(req.user!.id, 'notification_count', { count: 0 })
     res.json({ success: true })
   })
 
@@ -2663,8 +2758,9 @@ ${truncated}`,
       console.log(`  Fallback:  ${process.env.YOKEBOT_FALLBACK_ENDPOINT}`)
     }
 
-    // Start the scheduler for running agents
-    void startScheduler(db, workspaceConfig, SKILLS_DIR)
+    // Heartbeat timers run in the separate worker process (worker.ts).
+    // But the API server still needs workspace/skills state for respondToMention.
+    initSchedulerState(workspaceConfig, SKILLS_DIR)
   })
 
   // Graceful shutdown

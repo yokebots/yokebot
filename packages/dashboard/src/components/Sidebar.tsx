@@ -1,11 +1,11 @@
 import { NavLink, Link, useLocation } from 'react-router'
 import { useAuth } from '@/lib/auth'
 import { useEffect, useState } from 'react'
-import * as engine from '@/lib/engine'
 import TeamSwitcher from './TeamSwitcher'
 import { useTeam } from '@/lib/team-context'
 import { useSidebar } from '@/lib/sidebar-context'
 import { getUserAvatar } from '@/pages/ProfilePage'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 import type { User } from '@supabase/supabase-js'
 
 function SidebarAvatar({ user, size, hoverable }: { user: User | null; size: number; hoverable?: boolean }) {
@@ -100,22 +100,12 @@ export function Sidebar() {
     })
   }
 
-  useEffect(() => {
-    if (!activeTeam) return
-    const load = async () => {
-      try {
-        const [approvalData, unreadData] = await Promise.all([
-          engine.approvalCount(),
-          engine.getUnreadCounts(),
-        ])
-        setApprovalCount(approvalData.count)
-        setChatUnreadCount(unreadData.total)
-      } catch { /* engine offline */ }
-    }
-    load()
-    const interval = setInterval(load, 10000)
-    return () => clearInterval(interval)
-  }, [activeTeam?.id])
+  // SSE: live approval + unread count updates
+  useRealtimeEvent<{ count: number }>('approval_count', (data) => setApprovalCount(data.count))
+  useRealtimeEvent<Record<string, number>>('unread_counts', (data) => {
+    const total = Object.values(data).reduce((sum, n) => sum + n, 0)
+    setChatUnreadCount(total)
+  })
 
   // On mobile, always show expanded sidebar (not icon-only)
   const showLabels = mobileOpen || !collapsed

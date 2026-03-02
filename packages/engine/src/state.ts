@@ -475,6 +475,8 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
   CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_run ON workflow_run_steps(run_id);
   CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_task ON workflow_run_steps(task_id);
+  CREATE INDEX IF NOT EXISTS idx_approvals_team_status ON approvals(team_id, status);
+  CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
 `
 
 const POSTGRES_DDL = `
@@ -973,6 +975,8 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
   CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_run ON workflow_run_steps(run_id);
   CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_task ON workflow_run_steps(task_id);
+  CREATE INDEX IF NOT EXISTS idx_approvals_team_status ON approvals(team_id, status);
+  CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
 
   -- =====================================================================
   -- Row Level Security (RLS)

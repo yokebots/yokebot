@@ -64,25 +64,53 @@ export async function notifyTeam(
   link?: string,
   excludeUserId?: string,
 ): Promise<Notification[]> {
-  // Get all team members
-  const members = await db.query<{ user_id: string }>(
-    'SELECT user_id FROM team_members WHERE team_id = $1',
-    [teamId],
-  )
-
-  const notifications: Notification[] = []
-  for (const member of members) {
-    if (member.user_id === excludeUserId) continue
-
-    // Check if user has muted this team
-    const pref = await getPreference(db, member.user_id, teamId)
-    if (pref?.muted || pref?.inAppEnabled === false) continue
-
-    const notif = await createNotification(db, teamId, member.user_id, type, title, body, link)
-    notifications.push(notif)
+  // Single query: get eligible members (respects mute settings, excludes user)
+  const params: unknown[] = [teamId]
+  let paramIdx = 2
+  let excludeClause = ''
+  if (excludeUserId) {
+    excludeClause = ` AND tm.user_id != $${paramIdx++}`
+    params.push(excludeUserId)
   }
 
-  return notifications
+  const eligibleMembers = await db.query<{ user_id: string }>(
+    `SELECT tm.user_id FROM team_members tm
+     WHERE tm.team_id = $1${excludeClause}
+       AND NOT EXISTS (
+         SELECT 1 FROM notification_preferences np
+         WHERE np.user_id = tm.user_id AND np.team_id = $1
+           AND (np.muted = 1 OR np.in_app_enabled = 0)
+       )`,
+    params,
+  )
+
+  if (eligibleMembers.length === 0) return []
+
+  // Batch insert all notifications at once
+  const notifications: Notification[] = []
+  const valuePlaceholders: string[] = []
+  const insertParams: unknown[] = []
+  let idx = 1
+
+  for (const member of eligibleMembers) {
+    const id = randomUUID()
+    valuePlaceholders.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`)
+    insertParams.push(id, teamId, member.user_id, type, title, body, link ?? null)
+  }
+
+  await db.run(
+    `INSERT INTO notifications (id, team_id, user_id, type, title, body, link) VALUES ${valuePlaceholders.join(', ')}`,
+    insertParams,
+  )
+
+  // Fetch back all inserted notifications
+  const ids = insertParams.filter((_, i) => i % 7 === 0) as string[]
+  const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ')
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM notifications WHERE id IN (${placeholders})`,
+    ids,
+  )
+  return rows.map(rowToNotification)
 }
 
 // ---- Read ----

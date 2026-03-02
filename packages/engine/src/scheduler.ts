@@ -36,6 +36,39 @@ const state: SchedulerState = {
   skillsDir: '',
 }
 
+/**
+ * Initialize scheduler state (workspaceConfig + skillsDir) WITHOUT starting timers.
+ * Call this from the API server so respondToMention/triggerAgentNow still work
+ * even though heartbeats run in the separate worker process.
+ */
+export function initSchedulerState(workspaceConfig: WorkspaceConfig, skillsDir: string): void {
+  state.workspaceConfig = workspaceConfig
+  state.skillsDir = skillsDir
+}
+
+// Cache team active status to avoid hitting DB on every heartbeat (TTL: 60 seconds)
+const teamActiveCache = new Map<string, { active: boolean; ts: number }>()
+const TEAM_CACHE_TTL = 60_000
+
+// Concurrency limiter — prevents flooding DB + LLM providers
+const MAX_CONCURRENT_HEARTBEATS = 5
+let activeHeartbeats = 0
+
+async function isTeamActiveCached(db: Db, teamId: string): Promise<boolean> {
+  const cached = teamActiveCache.get(teamId)
+  if (cached && Date.now() - cached.ts < TEAM_CACHE_TTL) return cached.active
+  const sub = await getSubscription(db, teamId)
+  const balance = await getCreditBalance(db, teamId)
+  const active = isTeamActive(sub, balance)
+  teamActiveCache.set(teamId, { active, ts: Date.now() })
+  return active
+}
+
+/** Invalidate the cache for a team (call after credit changes). */
+export function invalidateTeamCache(teamId: string): void {
+  teamActiveCache.delete(teamId)
+}
+
 // Email sequence processing interval (check every 5 minutes)
 let sequenceTimer: ReturnType<typeof setInterval> | null = null
 
@@ -53,7 +86,20 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
   if (skillsDir) state.skillsDir = skillsDir
 
   const agents = await listAgents(db)
-  const running = agents.filter((a) => a.status === 'running')
+  let running = agents.filter((a) => a.status === 'running')
+
+  // In hosted mode, only schedule agents whose teams are active
+  if (HOSTED_MODE) {
+    const filtered: Agent[] = []
+    for (const agent of running) {
+      if (await isTeamActiveCached(db, agent.teamId)) {
+        filtered.push(agent)
+      }
+    }
+    const skipped = running.length - filtered.length
+    if (skipped > 0) console.log(`[scheduler] Skipped ${skipped} agent(s) from inactive teams`)
+    running = filtered
+  }
 
   // Group by team + heartbeat interval for staggering
   const groups = new Map<string, Agent[]>()
@@ -88,6 +134,16 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
       void processScheduledWorkflows(db)
     }, 60 * 1000)
   }
+
+  // Periodic cache cleanup (every 5 min) — evict stale entries, unschedule inactive teams
+  setInterval(() => {
+    const now = Date.now()
+    for (const [teamId, entry] of teamActiveCache) {
+      if (now - entry.ts > TEAM_CACHE_TTL * 5) {
+        teamActiveCache.delete(teamId)
+      }
+    }
+  }, 5 * 60 * 1000)
 
   console.log(`[scheduler] Started with ${state.timers.size} agent(s)`)
 }
@@ -320,30 +376,33 @@ async function pickBestChannel(db: Db, agent: { teamId: string; department: stri
  * Single heartbeat cycle for an agent.
  */
 async function heartbeat(db: Db, agent: Agent): Promise<void> {
+  // Concurrency limiter — skip this cycle if too many heartbeats are running
+  if (activeHeartbeats >= MAX_CONCURRENT_HEARTBEATS) {
+    console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — concurrency limit (${activeHeartbeats}/${MAX_CONCURRENT_HEARTBEATS})`)
+    return
+  }
+  activeHeartbeats++
+  try {
+    await heartbeatInner(db, agent)
+  } finally {
+    activeHeartbeats--
+  }
+}
+
+async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   // In hosted mode, skip heartbeat if team has no active subscription and no credits
   if (HOSTED_MODE) {
-    const sub = await getSubscription(db, agent.teamId)
-    const creditBalance = await getCreditBalance(db, agent.teamId)
-    if (!isTeamActive(sub, creditBalance)) {
-      console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — no active subscription or credits`)
-      return
-    }
-  }
+    if (!await isTeamActiveCached(db, agent.teamId)) return
 
-  // Check credit balance before running heartbeat (hosted mode)
-  if (HOSTED_MODE && agent.modelId) {
-    const balance = await getCreditBalance(db, agent.teamId)
-    const cost = await getModelCreditCost(db, agent.modelId)
-    if (cost > 0 && balance < cost) {
-      console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — insufficient credits (${balance} < ${cost})`)
-      return
+    // Check credit balance before running heartbeat
+    if (agent.modelId) {
+      const balance = await getCreditBalance(db, agent.teamId)
+      const cost = await getModelCreditCost(db, agent.modelId)
+      if (cost > 0 && balance < cost) {
+        console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — insufficient credits (${balance} < ${cost})`)
+        return
+      }
     }
-  }
-
-  // Check if within active hours
-  const hour = new Date().getHours()
-  if (hour < agent.activeHoursStart || hour >= agent.activeHoursEnd) {
-    return // Outside active hours, skip
   }
 
   // All agents are proactive — prompt the agent to review its state on each heartbeat

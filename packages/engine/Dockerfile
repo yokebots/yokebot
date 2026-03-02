@@ -59,4 +59,6 @@ RUN mkdir -p /app/data/workspace
 EXPOSE 3001
 
 WORKDIR /app/packages/engine
-CMD ["node", "dist/index.js"]
+
+# Run API server + scheduler worker as separate processes
+CMD ["sh", "-c", "node dist/index.js & node dist/worker.js & wait"]

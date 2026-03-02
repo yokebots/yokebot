@@ -21,25 +21,50 @@ export function getActiveTeamId(): string | null {
 }
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
-  // Get the current Supabase session token for authenticated API calls
-  const { data: { session } } = await supabase.auth.getSession()
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (session?.access_token) {
-    headers['Authorization'] = `Bearer ${session.access_token}`
-  }
-  if (_activeTeamId) {
-    headers['X-Team-Id'] = _activeTeamId
+  const doFetch = async (token?: string) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    if (_activeTeamId) headers['X-Team-Id'] = _activeTeamId
+    return fetch(`${ENGINE_URL}${path}`, {
+      ...opts,
+      headers: { ...headers, ...(opts?.headers as Record<string, string>) },
+    })
   }
 
-  const res = await fetch(`${ENGINE_URL}${path}`, {
-    ...opts,
-    headers: { ...headers, ...(opts?.headers as Record<string, string>) },
-  })
+  const method = opts?.method ?? 'GET'
+  const isGet = method === 'GET'
+
+  let session = (await supabase.auth.getSession()).data.session
+  let res: Response
+
+  try {
+    res = await doFetch(session?.access_token)
+  } catch (err) {
+    // Network error — retry GET requests once after 1s
+    if (isGet) {
+      await new Promise((r) => setTimeout(r, 1000))
+      res = await doFetch(session?.access_token)
+    } else {
+      throw err
+    }
+  }
+
+  // On 401, refresh the token and retry once
+  if (res.status === 401 && session) {
+    const { data } = await supabase.auth.refreshSession()
+    if (data.session) {
+      res = await doFetch(data.session.access_token)
+    }
+  }
+
+  // On 429, wait 2s and retry once (only for GET)
+  if (res.status === 429 && isGet) {
+    await new Promise((r) => setTimeout(r, 2000))
+    res = await doFetch(session?.access_token)
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
-    if (res.status === 401) {
-      console.warn('[engine] 401 — token rejected by engine. Check SUPABASE_JWT_SECRET on Railway.')
-    }
     throw new Error(err.error ?? `Engine error: ${res.status}`)
   }
   if (res.status === 204) return undefined as T
@@ -1295,3 +1320,148 @@ export const approveWorkflowRunStep = (runStepId: string) =>
 
 export const captureWorkflow = (name: string, taskIds: string[]) =>
   request<Workflow>('/api/workflows/capture', { method: 'POST', body: JSON.stringify({ name, taskIds }) })
+
+// ===== Server-Sent Events (SSE) — real-time updates =====
+
+export type SseEventType =
+  | 'notification_count'
+  | 'unread_counts'
+  | 'approval_count'
+  | 'credits'
+  | 'agent_status'
+  | 'new_message'
+  | 'kb_update'
+  | 'activity'
+
+type SseListener = (data: unknown) => void
+
+const sseListeners = new Map<SseEventType, Set<SseListener>>()
+let sseAbort: AbortController | null = null
+let sseConnected = false
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let sseConnectionChangeListeners = new Set<(connected: boolean) => void>()
+
+export function onSseConnectionChange(listener: (connected: boolean) => void): () => void {
+  sseConnectionChangeListeners.add(listener)
+  return () => { sseConnectionChangeListeners.delete(listener) }
+}
+
+export function isSseConnected(): boolean {
+  return sseConnected
+}
+
+function setSseConnected(connected: boolean) {
+  if (sseConnected !== connected) {
+    sseConnected = connected
+    for (const listener of sseConnectionChangeListeners) {
+      try { listener(connected) } catch { /* ignore */ }
+    }
+  }
+}
+
+export function subscribeSse(event: SseEventType, listener: SseListener): () => void {
+  if (!sseListeners.has(event)) sseListeners.set(event, new Set())
+  sseListeners.get(event)!.add(listener)
+  return () => { sseListeners.get(event)?.delete(listener) }
+}
+
+function dispatchSseEvent(event: string, data: unknown) {
+  const listeners = sseListeners.get(event as SseEventType)
+  if (!listeners) return
+  for (const listener of listeners) {
+    try { listener(data) } catch { /* ignore */ }
+  }
+}
+
+export function connectEventStream(): () => void {
+  // Don't reconnect if already connected
+  if (sseAbort) return () => disconnectEventStream()
+
+  const controller = new AbortController()
+  sseAbort = controller
+
+  const connect = async (retryCount = 0) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        // No auth — retry after delay
+        sseReconnectTimer = setTimeout(() => connect(0), 5000)
+        return
+      }
+
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${session.access_token}`,
+      }
+      if (_activeTeamId) headers['X-Team-Id'] = _activeTeamId
+
+      const res = await fetch(`${ENGINE_URL}/api/events`, {
+        headers,
+        signal: controller.signal,
+      })
+
+      if (!res.ok || !res.body) {
+        throw new Error(`SSE connection failed: ${res.status}`)
+      }
+
+      setSseConnected(true)
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let currentEvent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (currentEvent) {
+                dispatchSseEvent(currentEvent, data)
+              }
+            } catch { /* ignore parse errors */ }
+            currentEvent = ''
+          } else if (line === '') {
+            currentEvent = ''
+          }
+        }
+      }
+
+      // Stream ended — reconnect
+      setSseConnected(false)
+      if (!controller.signal.aborted) {
+        sseReconnectTimer = setTimeout(() => connect(0), 1000)
+      }
+    } catch (err) {
+      setSseConnected(false)
+      if ((err as Error).name === 'AbortError') return
+
+      // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
+      const delay = Math.min(1000 * Math.pow(2, retryCount), 30000)
+      sseReconnectTimer = setTimeout(() => connect(retryCount + 1), delay)
+    }
+  }
+
+  void connect()
+  return () => disconnectEventStream()
+}
+
+export function disconnectEventStream(): void {
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer)
+    sseReconnectTimer = null
+  }
+  if (sseAbort) {
+    sseAbort.abort()
+    sseAbort = null
+  }
+  setSseConnected(false)
+}

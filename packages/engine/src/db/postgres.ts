@@ -10,7 +10,7 @@ import type { Db } from './types.ts'
 
 export function createPostgresDb(connectionString: string): Db {
   const sql = postgres(connectionString, {
-    max: 10,
+    max: 50,
     idle_timeout: 30,
     connect_timeout: 10,
   })

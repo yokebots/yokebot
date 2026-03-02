@@ -5,28 +5,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
-import { useTeam } from '@/lib/team-context'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 
 export default function NotificationBell() {
-  const { activeTeam } = useTeam()
   const navigate = useNavigate()
   const [unread, setUnread] = useState(0)
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<engine.EngineNotification[]>([])
   const ref = useRef<HTMLDivElement>(null)
 
-  // Poll unread count
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const { count } = await engine.notificationCount()
-        setUnread(count)
-      } catch { /* ignore */ }
-    }
-    load()
-    const interval = setInterval(load, 10000)
-    return () => clearInterval(interval)
-  }, [activeTeam?.id])
+  // SSE: live notification count updates
+  useRealtimeEvent<{ count: number }>('notification_count', (data) => setUnread(data.count))
 
   // Load notifications when dropdown opens
   useEffect(() => {

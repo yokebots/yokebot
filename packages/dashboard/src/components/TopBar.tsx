@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { UniversalSearch } from '@/components/UniversalSearch'
 import { NotificationCenter } from '@/components/NotificationCenter'
-import { getBillingStatus, notificationCount } from '@/lib/engine'
 import { useSidebar } from '@/lib/sidebar-context'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 
 export function TopBar() {
   const [showSearch, setShowSearch] = useState(false)
@@ -25,20 +25,9 @@ export function TopBar() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Load credit balance
-  useEffect(() => {
-    getBillingStatus()
-      .then((s) => setCredits(s.credits))
-      .catch(() => setCredits(null))
-  }, [])
-
-  // Poll unread notification count
-  useEffect(() => {
-    const load = () => { notificationCount().then((r) => setUnread(r.count)).catch(() => {}) }
-    load()
-    const interval = setInterval(load, 10000)
-    return () => clearInterval(interval)
-  }, [])
+  // SSE: credits + notification count (initial snapshot + live updates)
+  useRealtimeEvent<{ credits: number }>('credits', (data) => setCredits(data.credits))
+  useRealtimeEvent<{ count: number }>('notification_count', (data) => setUnread(data.count))
 
   return (
     <>
