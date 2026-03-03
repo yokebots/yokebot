@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import * as engine from '@/lib/engine'
+import { ApiError } from '@/lib/engine'
 import type { LogicalModel, ModelCreditCost, AgentTemplate } from '@/lib/engine'
+import { UpgradeModal } from './UpgradeModal'
 
 interface Props {
   onClose: () => void
@@ -38,6 +40,8 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
   const [heartbeat, setHeartbeat] = useState(1800) // Default 30 min for all tiers
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showUpgrade, setShowUpgrade] = useState(false)
+  const [upgradeMessage, setUpgradeMessage] = useState('')
 
   useEffect(() => {
     Promise.all([
@@ -86,7 +90,13 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
 
       onCreated()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create agent')
+      if (err instanceof ApiError && err.code === 'AGENT_LIMIT_REACHED') {
+        const max = err.data?.maxAgents ?? 3
+        setUpgradeMessage(`You've reached the maximum of ${max} agents on your current plan. Upgrade to add more.`)
+        setShowUpgrade(true)
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to create agent')
+      }
     } finally {
       setLoading(false)
     }
@@ -345,6 +355,12 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
           </form>
         )}
       </div>
+      <UpgradeModal
+        isOpen={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        title="Agent Limit Reached"
+        message={upgradeMessage}
+      />
     </div>
   )
 }

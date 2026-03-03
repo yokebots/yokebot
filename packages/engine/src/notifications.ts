@@ -9,6 +9,13 @@
 import type { Db } from './db/types.ts'
 import { randomUUID } from 'crypto'
 
+// Global broadcast hook — set by index.ts at startup so notifications push SSE events
+let _onNotification: ((userId: string, unreadCount: number) => void) | null = null
+
+export function setNotificationBroadcast(fn: (userId: string, unreadCount: number) => void): void {
+  _onNotification = fn
+}
+
 export type NotificationType = 'approval_needed' | 'task_assigned' | 'agent_message' | 'mention' | 'system'
 
 export interface Notification {
@@ -48,6 +55,11 @@ export async function createNotification(
     'INSERT INTO notifications (id, team_id, user_id, type, title, body, link) VALUES ($1, $2, $3, $4, $5, $6, $7)',
     [id, teamId, userId, type, title, body, link ?? null],
   )
+  // Push unread count update over SSE
+  if (_onNotification) {
+    const count = await countUnread(db, userId)
+    _onNotification(userId, count)
+  }
   return (await getNotification(db, id))!
 }
 
@@ -110,6 +122,13 @@ export async function notifyTeam(
     `SELECT * FROM notifications WHERE id IN (${placeholders})`,
     ids,
   )
+  // Push unread count updates over SSE for each notified user
+  if (_onNotification) {
+    for (const member of eligibleMembers) {
+      const count = await countUnread(db, member.user_id)
+      _onNotification(member.user_id, count)
+    }
+  }
   return rows.map(rowToNotification)
 }
 

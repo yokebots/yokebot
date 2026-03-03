@@ -20,6 +20,17 @@ export function getActiveTeamId(): string | null {
   return _activeTeamId
 }
 
+export class ApiError extends Error {
+  code?: string
+  data?: Record<string, unknown>
+  constructor(message: string, code?: string, data?: Record<string, unknown>) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+    this.data = data
+  }
+}
+
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const doFetch = async (token?: string) => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -65,7 +76,8 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err.error ?? `Engine error: ${res.status}`)
+    const apiErr = new ApiError(err.error ?? `Engine error: ${res.status}`, err.code, err)
+    throw apiErr
   }
   if (res.status === 204) return undefined as T
   return res.json()

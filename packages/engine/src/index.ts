@@ -242,6 +242,21 @@ async function main() {
     })
   })
 
+  // ===== Wire broadcast hooks into modules =====
+  // This lets sendMessage() and createNotification() push real-time SSE events
+  // without needing direct access to the SSE client map.
+  {
+    const { setNewMessageBroadcast } = await import('./chat.ts')
+    setNewMessageBroadcast((teamId, channelId, messageId) => {
+      broadcastToTeam(teamId, 'new_message', { channelId, messageId })
+    })
+
+    const { setNotificationBroadcast } = await import('./notifications.ts')
+    setNotificationBroadcast((userId, count) => {
+      broadcastToUser(userId, 'notification_count', { count })
+    })
+  }
+
   // ===== Ollama Detection =====
 
   app.get('/api/ollama', async (_req, res) => {
@@ -283,14 +298,16 @@ async function main() {
     }
 
     // Enforce agent count limit in hosted mode (free templates exempt)
-    if (req.subscription && !isTemplFree) {
+    if (process.env.YOKEBOT_HOSTED_MODE === 'true' && !isTemplFree) {
       const existing = await listAgents(db, teamId)
-      // Count only non-free agents
       const paidAgentCount = existing.filter((a) => a.templateId !== 'advisor-bot').length
-      if (paidAgentCount >= req.subscription.maxAgents) {
+      const maxAgents = req.subscription?.maxAgents ?? 3  // Free tier: 3 agents
+      if (paidAgentCount >= maxAgents) {
         return res.status(403).json({
-          error: `Your ${req.subscription.tier} plan allows ${req.subscription.maxAgents} agent(s). Upgrade to add more.`,
+          error: `Your plan allows ${maxAgents} agent(s). Upgrade to add more.`,
           code: 'AGENT_LIMIT_REACHED',
+          currentCount: paidAgentCount,
+          maxAgents,
         })
       }
     }
@@ -752,8 +769,7 @@ async function main() {
     if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
     const { senderType, senderId, content, taskId } = validate(SendChatMessageSchema, req.body)
     const msg = await sendMessage(db, req.params.channelId, senderType, senderId, content, taskId, teamId)
-    // SSE: broadcast new message event to all team members
-    broadcastToTeam(teamId, 'new_message', { channelId: req.params.channelId, messageId: msg.id })
+    // sendMessage() now broadcasts new_message SSE automatically via the hook
     // Fire-and-forget mention processing (notifications + agent wake)
     processMentions(db, teamId, req.params.channelId, msg).catch((err) =>
       console.error('[chat] Mention processing error:', err),

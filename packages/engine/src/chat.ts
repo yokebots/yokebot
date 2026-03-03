@@ -22,6 +22,13 @@ export interface ChatEvent {
 
 const chatSseClients = new Map<string, Set<Response>>() // channelId → SSE clients
 
+// Global broadcast hook — set by index.ts at startup so sendMessage() can push SSE events
+let _onNewMessage: ((teamId: string, channelId: string, messageId: number) => void) | null = null
+
+export function setNewMessageBroadcast(fn: (teamId: string, channelId: string, messageId: number) => void): void {
+  _onNewMessage = fn
+}
+
 export function addChatSseClient(channelId: string, res: Response): void {
   if (!chatSseClients.has(channelId)) chatSseClients.set(channelId, new Set())
   chatSseClients.get(channelId)!.add(res)
@@ -108,7 +115,10 @@ export async function sendMessage(
     [teamId, channelId, senderType, senderId, content, taskId ?? null, attachmentsJson, audioKey ?? null, audioDurationMs ?? null],
     'id',
   )
-  return (await getMessage(db, Number(insertedId)))!
+  const msgId = Number(insertedId)
+  // Broadcast real-time SSE event so all connected clients see the message instantly
+  if (_onNewMessage && teamId) _onNewMessage(teamId, channelId, msgId)
+  return (await getMessage(db, msgId))!
 }
 
 export async function getMessage(db: Db, id: number): Promise<ChatMessage | null> {
