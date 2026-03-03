@@ -55,9 +55,9 @@ const TEAM_CACHE_TTL = 60_000
 const teamTimezoneCache = new Map<string, { tz: string | null; ts: number }>()
 const TZ_CACHE_TTL = 300_000
 
-// Concurrency limiter — prevents flooding DB + LLM providers
-const MAX_CONCURRENT_HEARTBEATS = 5
-let activeHeartbeats = 0
+// Per-team concurrency limiter — prevents one team from starving others
+const MAX_CONCURRENT_PER_TEAM = 35
+const activeHeartbeatsPerTeam = new Map<string, number>()
 
 async function getTeamTimezoneCached(db: Db, teamId: string): Promise<string | null> {
   const cached = teamTimezoneCache.get(teamId)
@@ -433,16 +433,19 @@ async function pickBestChannel(db: Db, agent: { teamId: string; department: stri
  * Single heartbeat cycle for an agent.
  */
 async function heartbeat(db: Db, agent: Agent): Promise<void> {
-  // Concurrency limiter — skip this cycle if too many heartbeats are running
-  if (activeHeartbeats >= MAX_CONCURRENT_HEARTBEATS) {
-    console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — concurrency limit (${activeHeartbeats}/${MAX_CONCURRENT_HEARTBEATS})`)
+  // Per-team concurrency limiter
+  const teamCount = activeHeartbeatsPerTeam.get(agent.teamId) ?? 0
+  if (teamCount >= MAX_CONCURRENT_PER_TEAM) {
+    console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — team concurrency limit (${teamCount}/${MAX_CONCURRENT_PER_TEAM})`)
     return
   }
-  activeHeartbeats++
+  activeHeartbeatsPerTeam.set(agent.teamId, teamCount + 1)
   try {
     await heartbeatInner(db, agent)
   } finally {
-    activeHeartbeats--
+    const current = activeHeartbeatsPerTeam.get(agent.teamId) ?? 1
+    if (current <= 1) activeHeartbeatsPerTeam.delete(agent.teamId)
+    else activeHeartbeatsPerTeam.set(agent.teamId, current - 1)
   }
 }
 
