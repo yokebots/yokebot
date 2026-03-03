@@ -29,9 +29,66 @@ import { deductCredits, getModelCreditCost, getSkillCreditCost } from './billing
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
+// ---- Token Estimation (lightweight, no tokenizer dependency) ----
+const CHARS_PER_TOKEN = 4
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / CHARS_PER_TOKEN)
+}
+
+function estimateMessagesTokens(messages: ChatMessage[]): number {
+  let total = 0
+  for (const msg of messages) {
+    total += estimateTokens(msg.content ?? '') + 4 // 4 tokens overhead per message
+    if (msg.tool_calls) {
+      for (const tc of msg.tool_calls) total += estimateTokens(tc.function.name + tc.function.arguments)
+    }
+  }
+  return total
+}
+
+function estimateToolsTokens(tools: ToolDef[]): number {
+  let total = 0
+  for (const t of tools) {
+    total += estimateTokens(t.function.name + t.function.description + JSON.stringify(t.function.parameters))
+  }
+  return total
+}
+
+/**
+ * Trim messages to fit within token budget.
+ * Always keeps the system message (index 0) and the last `keepLast` messages.
+ * Drops oldest history messages first.
+ */
+function trimMessagesToFit(messages: ChatMessage[], maxTokens: number, toolsTokens: number, keepLast = 5): ChatMessage[] {
+  const totalTokens = estimateMessagesTokens(messages) + toolsTokens
+  if (totalTokens <= maxTokens) return messages
+
+  const systemMsg = messages[0]
+  const rest = messages.slice(1)
+  const tail = rest.slice(-keepLast)
+  let middle = rest.slice(0, -keepLast)
+
+  let currentTokens = estimateMessagesTokens([systemMsg, ...middle, ...tail]) + toolsTokens
+
+  while (currentTokens > maxTokens && middle.length > 0) {
+    middle.shift()
+    currentTokens = estimateMessagesTokens([systemMsg, ...middle, ...tail]) + toolsTokens
+  }
+
+  const dropped = rest.length - keepLast - middle.length
+  if (dropped > 0) {
+    console.log(`[runtime] Context trimmed: dropped ${dropped} messages (was ${totalTokens} tokens, budget ${maxTokens})`)
+  }
+
+  return [systemMsg, ...middle, ...tail]
+}
+
 export interface RuntimeConfig {
   maxIterations: number  // safety limit to prevent infinite loops
   skipCredits?: boolean  // bypass credit deduction (e.g. AdvisorBot is free)
+  taskFocused?: boolean  // enables task-loop exit conditions
+  currentTaskId?: string // for logging
 }
 
 const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -659,6 +716,8 @@ export interface RunResult {
   response: string | null
   iterations: number
   toolCalls: Array<{ name: string; result: string }>
+  taskCompleted?: boolean
+  taskBlocked?: boolean
 }
 
 /**
@@ -666,18 +725,38 @@ export interface RunResult {
  * The CoT instructions ensure agents reason before every action, leading
  * to better prioritization, fewer mistakes, and more thoughtful responses.
  */
-export function buildAgentSystemPrompt(agentName: string, customPrompt?: string | null): string {
-  const identity = customPrompt?.trim()
+export function buildAgentSystemPrompt(agentName: string, customPrompt?: string | null, timezone?: string | null): string {
+  let identity = customPrompt?.trim()
     ? customPrompt.trim()
     : `You are ${agentName}, a proactive AI agent.`
 
-  const today = new Date().toISOString().split('T')[0] // e.g. "2026-03-01"
+  if (identity.length > 8000) {
+    console.log(`[runtime] Custom prompt for "${agentName}" truncated from ${identity.length} to 8000 chars`)
+    identity = identity.slice(0, 8000) + '\n\n[System prompt truncated]'
+  }
+
+  const tz = timezone || 'UTC'
+  const now = new Date()
+  const dateFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  })
+  const timeFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: true,
+  })
+  const today = dateFormatter.format(now)       // "Saturday, March 1, 2026"
+  const time = timeFormatter.format(now)        // "2:30 PM"
+  const isoDate = now.toLocaleDateString('en-CA', { timeZone: tz }) // "2026-03-01"
 
   return `${identity}
 
-## Current Date
+## Current Date & Time
 
-Today is ${today}. Always use this when setting deadlines, scheduling, or reasoning about time. Never set deadlines in the past.
+Today is ${today}. The current time is ${time} (${tz}).
+ISO date: ${isoDate}
+
+CRITICAL: You MUST use this date for ALL scheduling, deadlines, and time-related reasoning.
+Do NOT rely on your training data for the current date — today is ${isoDate}.
+Never set a deadline or meeting in the past. When someone says "next week", calculate from ${isoDate}.
 
 ## How you work
 
@@ -734,15 +813,56 @@ export async function runReactLoop(
   // Save the user message
   await addMessage(db, agentId, 'user', userMessage, teamId)
 
+  // Conversation compaction: summarize old messages if history is long
+  let conversationSummary: string | null = null
+  try {
+    const summaryRow = await db.queryOne<{ summary: string; messages_summarized: number }>(
+      `SELECT summary, messages_summarized FROM conversation_summaries WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [agentId],
+    )
+    const fullHistory = await getMessages(db, agentId, 50)
+    const summarizedCount = summaryRow?.messages_summarized ?? 0
+    const newMessagesSinceSummary = fullHistory.length - summarizedCount
+
+    if (newMessagesSinceSummary >= 30 && fullHistory.length > 10) {
+      // Generate a new summary from older messages
+      const toSummarize = fullHistory.slice(0, -10)
+      const summaryMessages: ChatMessage[] = [
+        { role: 'system', content: 'Summarize the following conversation concisely, preserving key facts, decisions, and context. Output only the summary.' },
+        { role: 'user', content: toSummarize.map((m) => `${m.role}: ${m.content}`).join('\n\n') },
+      ]
+      try {
+        const { chatCompletion } = await import('./model.ts')
+        const summaryResult = await chatCompletion(modelConfig, summaryMessages)
+        if (summaryResult.content) {
+          const summaryId = (await import('crypto')).randomUUID()
+          await db.run(
+            `INSERT INTO conversation_summaries (id, team_id, agent_id, summary, messages_summarized) VALUES ($1, $2, $3, $4, $5)`,
+            [summaryId, teamId, agentId, summaryResult.content, fullHistory.length],
+          )
+          conversationSummary = summaryResult.content
+          console.log(`[runtime] Conversation compacted for agent ${agentId}: ${toSummarize.length} messages summarized`)
+        }
+      } catch (err) {
+        console.error('[runtime] Compaction failed:', err)
+      }
+    } else if (summaryRow) {
+      conversationSummary = summaryRow.summary
+    }
+  } catch { /* compaction is best-effort */ }
+
   // Build the message history
   const history = await getMessages(db, agentId, 50)
-  const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt },
-    ...history.map((m) => ({
-      role: m.role as ChatMessage['role'],
-      content: m.content,
-    })),
-  ]
+  const messages: ChatMessage[] = conversationSummary
+    ? [
+        { role: 'system', content: systemPrompt },
+        { role: 'system', content: `## Previous Conversation Summary\n\n${conversationSummary}` },
+        ...history.slice(-10).map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
+      ]
+    : [
+        { role: 'system', content: systemPrompt },
+        ...history.map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
+      ]
 
   // Merge builtin tools with installed skill tools + MCP tools
   const installedSkills = (await getAgentSkills(db, agentId)).map((s) => s.skillName)
@@ -752,6 +872,25 @@ export async function runReactLoop(
   const toolCtx: ToolContext = { db, agentId, teamId, workspaceConfig, skillsDir, skipCredits: config.skipCredits }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
+
+  // Context window management: trim messages to fit model's context window
+  const logicalModel = logicalModelId ? getLogicalModel(logicalModelId) : undefined
+  const contextWindow = logicalModel?.contextWindow ?? 128_000
+  const maxInputTokens = Math.floor(contextWindow * 0.8) // reserve 20% for response
+  const toolsTokens = estimateToolsTokens(tools)
+
+  // Inject relevant memories into system prompt
+  try {
+    const { searchMemories } = await import('./knowledge-base.ts')
+    const memories = await searchMemories(db, teamId, userMessage, 3)
+    if (memories.length > 0) {
+      const memSection = '\n\n## Relevant Memories\n\n' + memories.map((m) => `- ${m.content}`).join('\n')
+      messages[0] = { ...messages[0], content: (messages[0].content ?? '') + memSection }
+    }
+  } catch { /* never block on memory failure */ }
+
+  // Initial trim before first LLM call
+  let trimmedMessages = trimMessagesToFit(messages, maxInputTokens, toolsTokens)
 
   for (let i = 0; i < config.maxIterations; i++) {
     // Deduct LLM credits before each ReAct iteration (hosted mode only, skip for free agents like AdvisorBot)
@@ -767,7 +906,10 @@ export async function runReactLoop(
       }
     }
 
-    const completion = await chatCompletionWithFallback(modelConfig, messages, tools)
+    // Re-trim before each LLM call (tool results accumulate mid-loop)
+    trimmedMessages = trimMessagesToFit(messages, maxInputTokens, toolsTokens)
+
+    const completion = await chatCompletionWithFallback(modelConfig, trimmedMessages, tools)
 
     // If the model returned tool calls, execute them
     if (completion.tool_calls.length > 0) {
@@ -817,6 +959,32 @@ export async function runReactLoop(
       if (response !== null) {
         await addMessage(db, agentId, 'assistant', response, teamId)
         return { response, iterations: i + 1, toolCalls: toolCallLog }
+      }
+
+      // Task-focused exit conditions: detect when agent completes or gets blocked on its task
+      if (config.taskFocused) {
+        let taskCompleted = false
+        let taskBlocked = false
+
+        for (const tc of completion.tool_calls) {
+          if (tc.function.name === 'update_task') {
+            try {
+              const args = JSON.parse(tc.function.arguments) as { status?: string }
+              if (args.status === 'done' || args.status === 'review') {
+                taskCompleted = true
+              }
+            } catch { /* parse error — ignore */ }
+          }
+          if (tc.function.name === 'request_approval') {
+            taskBlocked = true
+          }
+        }
+
+        if (taskCompleted || taskBlocked) {
+          const fallback = response ?? (taskCompleted ? 'Task completed.' : 'Waiting for approval.')
+          await addMessage(db, agentId, 'assistant', fallback, teamId)
+          return { response: fallback, iterations: i + 1, toolCalls: toolCallLog, taskCompleted, taskBlocked }
+        }
       }
 
       // Otherwise continue the loop (agent thought but didn't respond yet)

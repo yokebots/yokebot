@@ -17,8 +17,9 @@ import { resolveModelConfig } from './model.ts'
 import { getDmChannel, sendMessage, listChannels, createChannel } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
-import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost } from './billing.ts'
-// import { listTasks } from './tasks.ts' // Reserved for future staleness detection
+import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget } from './billing.ts'
+import { listTasks, getSubtasks, isBlocked as isTaskBlocked, type Task } from './tasks.ts'
+import { getTaskThread, getChannelMessages } from './chat.ts'
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
@@ -50,9 +51,24 @@ export function initSchedulerState(workspaceConfig: WorkspaceConfig, skillsDir: 
 const teamActiveCache = new Map<string, { active: boolean; ts: number }>()
 const TEAM_CACHE_TTL = 60_000
 
+// Cache team timezone to avoid repeated DB lookups (TTL: 5 minutes)
+const teamTimezoneCache = new Map<string, { tz: string | null; ts: number }>()
+const TZ_CACHE_TTL = 300_000
+
 // Concurrency limiter — prevents flooding DB + LLM providers
 const MAX_CONCURRENT_HEARTBEATS = 5
 let activeHeartbeats = 0
+
+async function getTeamTimezoneCached(db: Db, teamId: string): Promise<string | null> {
+  const cached = teamTimezoneCache.get(teamId)
+  if (cached && Date.now() - cached.ts < TZ_CACHE_TTL) return cached.tz
+  const row = await db.queryOne<{ timezone: string | null }>(
+    'SELECT timezone FROM team_profiles WHERE team_id = $1', [teamId],
+  )
+  const tz = row?.timezone ?? null
+  teamTimezoneCache.set(teamId, { tz, ts: Date.now() })
+  return tz
+}
 
 async function isTeamActiveCached(db: Db, teamId: string): Promise<boolean> {
   const cached = teamActiveCache.get(teamId)
@@ -264,7 +280,8 @@ export async function respondToMention(
     console.error(`[scheduler] Cannot resolve model for "${agent.name}":`, (err as Error).message)
     return
   }
-  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
+  const teamTz = await getTeamTimezoneCached(db, teamId)
+  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz)
 
   // Get recent channel messages for context
   const recentMessages = await getChannelMessages(db, channelId, 15)
@@ -327,22 +344,62 @@ export function unscheduleAgent(agentId: string): void {
   }
 }
 
-// --- Future: staleness detection ---
-// Uncomment buildStalenessContext() and add to heartbeat prompt when ready to test.
-// See git history for the full implementation.
-//
-// async function buildStalenessContext(db: Db, agentId: string, teamId: string): Promise<string> {
-//   const tasks = await listTasks(db, { agentId, teamId, status: 'in_progress' })
-//   const now = Date.now()
-//   const lines: string[] = []
-//   for (const task of tasks) {
-//     const hours = (now - new Date(task.updatedAt).getTime()) / (1000 * 60 * 60)
-//     if (hours >= 2) {
-//       lines.push(`⚠ STALE: "${task.title}" in-progress ${Math.round(hours)}h with no update.`)
-//     }
-//   }
-//   return lines.join('\n')
-// }
+// ---- Task-focused sprint helpers ----
+
+/** Get actionable tasks assigned to this agent, sorted by priority. */
+async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): Promise<Task[]> {
+  const tasks = await listTasks(db, { agentId, teamId })
+  const actionable: Task[] = []
+  for (const task of tasks) {
+    if (task.status !== 'todo' && task.status !== 'in_progress') continue
+    if (await isTaskBlocked(db, task.id)) continue
+    actionable.push(task)
+  }
+  return actionable
+}
+
+/** Build a task-focused user prompt with full context (subtasks, thread). */
+async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string): Promise<string> {
+  const subtasks = await getSubtasks(db, task.id)
+  const subtaskLines = subtasks.length > 0
+    ? subtasks.map(s => `  - [${s.status}] ${s.title} (${s.id})`).join('\n')
+    : '  (none)'
+
+  // Get recent thread messages for context
+  let threadContext = ''
+  try {
+    const thread = await getTaskThread(db, task.id, teamId)
+    const messages = await getChannelMessages(db, thread.id, 5)
+    if (messages.length > 0) {
+      threadContext = '\n\nRecent thread messages:\n' +
+        messages.map(m => `  [${m.senderType}] ${m.content.slice(0, 300)}`).join('\n')
+    }
+  } catch { /* no thread yet */ }
+
+  const deadlineStr = task.deadline ? `\nDeadline: ${task.deadline}` : ''
+
+  return [
+    `You are sprinting on a task. Focus ALL your effort on making progress.`,
+    ``,
+    `## Current Task`,
+    `Title: ${task.title}`,
+    `ID: ${task.id}`,
+    `Status: ${task.status}`,
+    `Priority: ${task.priority}${deadlineStr}`,
+    task.description ? `\nDescription:\n${task.description}` : '',
+    ``,
+    `## Subtasks`,
+    subtaskLines,
+    threadContext,
+    ``,
+    `## Instructions`,
+    `1. If the task is "todo", set it to "in_progress" first.`,
+    `2. Work through the task step by step — use your tools to make real progress.`,
+    `3. When done, mark the task "done" (or "review" if it needs human review).`,
+    `4. If you're blocked and need human input, use request_approval and explain why.`,
+    `5. Post a brief progress update summarizing what you accomplished.`,
+  ].join('\n')
+}
 
 /**
  * Pick the best group channel for an agent's message based on department match.
@@ -405,11 +462,75 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     }
   }
 
-  // All agents are proactive — prompt the agent to review its state on each heartbeat
+  if (!state.workspaceConfig) {
+    console.error(`[scheduler] No workspace config available for heartbeat`)
+    return
+  }
+
   const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
+  const teamTz = await getTeamTimezoneCached(db, agent.teamId)
+  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz)
+  const isAdvisor = agent.templateId === 'advisor-bot'
 
-  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
+  // ---- Task-focused sprint mode ----
+  // AdvisorBot is always generic (free check-in), all other agents try task sprints first
+  if (!isAdvisor) {
+    try {
+      const assignedTasks = await getAgentAssignedTasks(db, agent.id, agent.teamId)
+      if (assignedTasks.length > 0) {
+        const sprintBudget = HOSTED_MODE
+          ? await getSprintBudget(db, agent.teamId)
+          : 15 // self-hosted default
+        let iterationsUsed = 0
 
+        for (const task of assignedTasks) {
+          const remainingBudget = sprintBudget - iterationsUsed
+          if (remainingBudget < 2) break // need at least 2 iterations for meaningful work
+
+          const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId)
+          const runtimeConfig = {
+            maxIterations: remainingBudget,
+            taskFocused: true,
+            currentTaskId: task.id,
+          }
+
+          const result = await runReactLoop(
+            db, agent.id, agent.teamId, taskPrompt, modelConfig, systemPrompt,
+            state.workspaceConfig!, state.skillsDir, runtimeConfig, agent.modelId || undefined,
+          )
+          iterationsUsed += result.iterations
+
+          // Post sprint result to the task thread
+          try {
+            const thread = await getTaskThread(db, task.id, agent.teamId)
+            if (result.response && !result.response.includes('[no-op]')) {
+              await sendMessage(db, thread.id, 'agent', agent.id, result.response, task.id, agent.teamId)
+            }
+          } catch { /* thread post is best-effort */ }
+
+          const status = result.taskCompleted ? 'DONE' : result.taskBlocked ? 'BLOCKED' : 'continuing'
+          await logActivity(db, 'task_sprint', agent.id,
+            `Sprint on "${task.title}" — ${result.iterations} iters, ${status}`,
+            undefined, agent.teamId)
+          console.log(`[scheduler] "${agent.name}" sprinted on "${task.title}" — ${result.iterations} iters, ${status}`)
+
+          // If task completed, continue to next task with remaining budget
+          if (result.taskCompleted) continue
+          // If blocked, skip to next task
+          if (result.taskBlocked) continue
+          // Otherwise (budget used but task not done) — break, resume next heartbeat
+          break
+        }
+
+        return // task sprint handled this heartbeat
+      }
+    } catch (err) {
+      console.error(`[scheduler] Task sprint error for "${agent.name}":`, err)
+      // Fall through to generic check-in
+    }
+  }
+
+  // ---- Generic check-in (no tasks assigned, or AdvisorBot) ----
   const proactivePrompt = [
     'This is a scheduled check-in. Before taking any action, use the "think" tool to:',
     '1. ASSESS — Review your current tasks, goals, messages, and pending approvals.',
@@ -420,16 +541,10 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     'If you notice pending approvals that need human attention, remind about them.',
   ].join('\n')
 
-  if (!state.workspaceConfig) {
-    console.error(`[scheduler] No workspace config available for heartbeat`)
-    return
-  }
-
   try {
-    // AdvisorBot is always free — skip credit deduction
-    const runtimeConfig = agent.templateId === 'advisor-bot'
+    const runtimeConfig = isAdvisor
       ? { maxIterations: 10, skipCredits: true }
-      : undefined
+      : { maxIterations: 5 }
     const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
     // Skip no-ops and iteration-limit fallback messages — don't spam channels
     const isNoOp = result.response?.includes('[no-op]')

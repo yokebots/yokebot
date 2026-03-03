@@ -117,6 +117,21 @@ export async function upsertSubscription(db: Db, teamId: string, data: Partial<T
   }
 }
 
+// ---- Sprint Budgets (task-loop iteration caps per tier) ----
+
+const SPRINT_BUDGETS: Record<SubscriptionTier | 'none', number> = {
+  none: 5,         // Free
+  team: 10,        // Starter Crew ($29)
+  business: 15,    // Growth Crew ($59)
+  enterprise: 25,  // Power Crew ($149)
+}
+
+export async function getSprintBudget(db: Db, teamId: string): Promise<number> {
+  const sub = await getSubscription(db, teamId)
+  const tier = sub?.tier ?? 'none'
+  return SPRINT_BUDGETS[tier] ?? SPRINT_BUDGETS.none
+}
+
 export function isSubscriptionActive(sub: TeamSubscription | null): boolean {
   return sub?.status === 'active' || sub?.status === 'past_due'
 }
