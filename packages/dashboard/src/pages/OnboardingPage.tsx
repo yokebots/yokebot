@@ -131,6 +131,7 @@ export function OnboardingPage() {
   const chatEndRef = useRef<HTMLDivElement>(null)
   const [agentsDeployed, setAgentsDeployed] = useState(false)
   const [deploying, setDeploying] = useState(false)
+  const [advisorFailed, setAdvisorFailed] = useState(false)
 
   // Meet-and-greet state
   const [meetingId, setMeetingId] = useState<string | null>(null)
@@ -309,7 +310,8 @@ export function OnboardingPage() {
   }, [audioEnabled])
 
   // Start word-level highlight timer from a given word index
-  const startWordTimer = (fromWord: number, totalWords: number, durationMs: number) => {
+  // `screens` parameter avoids stale closure over narrationScreens React state
+  const startWordTimer = (fromWord: number, totalWords: number, durationMs: number, screens: string[][]) => {
     if (narrationTimerRef.current) clearInterval(narrationTimerRef.current)
     const msPerWord = durationMs / totalWords
     let wordIdx = fromWord
@@ -322,8 +324,8 @@ export function OnboardingPage() {
         // Auto-advance screen when highlighted word enters next screen
         setCurrentScreen((prev) => {
           let count = 0
-          for (let s = 0; s < narrationScreens.length; s++) {
-            count += narrationScreens[s].length
+          for (let s = 0; s < screens.length; s++) {
+            count += screens[s].length
             if (wordIdx < count) return s
           }
           return prev
@@ -357,7 +359,16 @@ export function OnboardingPage() {
       narrationAudioRef.current = audio
       audio.muted = !audioEnabled
 
-      startWordTimer(0, allWords.length, audioDurationMs)
+      // Recalibrate word timing when actual audio duration is known
+      audio.onloadedmetadata = () => {
+        if (audio.duration && isFinite(audio.duration)) {
+          const realDurationMs = audio.duration * 1000
+          narrationDurationRef.current = realDurationMs
+          startWordTimer(0, allWords.length, realDurationMs, screens)
+        }
+      }
+
+      startWordTimer(0, allWords.length, audioDurationMs, screens)
 
       setNarrationPlaying(true)
       audio.onended = () => {
@@ -389,7 +400,7 @@ export function OnboardingPage() {
       const totalWords = narrationWordsRef.current.length
       const fraction = audio.currentTime / audio.duration
       const fromWord = Math.floor(fraction * totalWords)
-      startWordTimer(fromWord, totalWords, narrationDurationRef.current)
+      startWordTimer(fromWord, totalWords, narrationDurationRef.current, narrationScreens)
       setNarrationPaused(false)
     } else {
       audio.pause()
@@ -397,7 +408,7 @@ export function OnboardingPage() {
       setNarrationPaused(true)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [narrationPaused])
+  }, [narrationPaused, narrationScreens])
 
   // Navigate to a specific screen (prev/next arrows)
   const goToScreen = useCallback((screenIdx: number) => {
@@ -413,7 +424,7 @@ export function OnboardingPage() {
       const fraction = wordIdx / totalWords
       audio.currentTime = fraction * audio.duration
       if (!narrationPaused) {
-        startWordTimer(wordIdx, totalWords, narrationDurationRef.current)
+        startWordTimer(wordIdx, totalWords, narrationDurationRef.current, narrationScreens)
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -658,9 +669,11 @@ export function OnboardingPage() {
       const result = await engine.chatWithAgent(advisorAgentId, message)
       if (result.response) {
         setMessages((prev) => [...prev, { role: 'agent', content: result.response }])
+        setAdvisorFailed(false)
       }
     } catch {
-      setMessages((prev) => [...prev, { role: 'agent', content: "Sorry, I had trouble processing that. Let's try again — what would you like help with?" }])
+      setAdvisorFailed(true)
+      setMessages((prev) => [...prev, { role: 'agent', content: "Sorry, I had trouble processing that. You can retry or skip to the dashboard." }])
     } finally {
       setChatLoading(false)
     }
@@ -1644,7 +1657,44 @@ export function OnboardingPage() {
                     Go to My Dashboard
                     <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
                   </button>
-                ) : !chatLoading && messages.some((m) => m.role === 'agent') && !deploying ? (
+                ) : advisorFailed && !agentsDeployed ? (
+                  /* Error recovery: Retry + Skip */
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => {
+                        setAdvisorFailed(false)
+                        // Re-send the context message
+                        const contextLines = [
+                          `New user just joined! Here's their business context:`,
+                          scanFields.companyName ? `Company: ${scanFields.companyName}` : '',
+                          scanFields.industry ? `Industry: ${scanFields.industry}` : '',
+                          scanFields.problemSolved ? `Problem solved: ${scanFields.problemSolved}` : '',
+                          scanFields.solution ? `Solution: ${scanFields.solution}` : '',
+                          scanFields.targetMarket ? `Target market: ${scanFields.targetMarket}` : '',
+                          primaryGoal ? `Primary goal: ${primaryGoal}` : '',
+                          ``,
+                          `Based on this business context, recommend 2-3 agents that would help them most. Use the recommend_agents tool.`,
+                        ].filter(Boolean).join('\n')
+                        sendAdvisorMessage(contextLines)
+                      }}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[20px]">refresh</span>
+                      Retry
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (activeTeam) {
+                          await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
+                        }
+                        navigate('/dashboard', { replace: true })
+                      }}
+                      className="text-sm text-text-muted hover:text-text-secondary transition-colors"
+                    >
+                      Skip to Dashboard
+                    </button>
+                  </div>
+                ) : !chatLoading && !advisorFailed && messages.some((m) => m.role === 'agent') && !deploying ? (
                   /* Deploy button */
                   <button
                     onClick={async () => {

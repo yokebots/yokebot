@@ -5,7 +5,7 @@
  * and sets the X-Team-Id header on all API requests.
  */
 
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { listTeams, createTeam, setActiveTeamId, type Team } from './engine'
 import { supabase } from './supabase'
 
@@ -26,6 +26,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
   const [teams, setTeams] = useState<Team[]>([])
   const [activeTeam, setActiveTeam] = useState<Team | null>(null)
   const [loading, setLoading] = useState(true)
+  const creatingTeamRef = useRef(false)
 
   const loadTeams = useCallback(async () => {
     try {
@@ -34,8 +35,10 @@ export function TeamProvider({ children }: { children: ReactNode }) {
       // Auto-create a team only for truly new users who have never had one.
       // Check localStorage — if we've ever stored a team ID, the user is not new;
       // the API might just be returning empty due to a transient issue.
+      // creatingTeamRef prevents double-creation from concurrent calls.
       const stored = localStorage.getItem(STORAGE_KEY)
-      if (userTeams.length === 0 && !stored) {
+      if (userTeams.length === 0 && !stored && !creatingTeamRef.current) {
+        creatingTeamRef.current = true
         const { data: { user } } = await supabase.auth.getUser()
         const name = user?.user_metadata?.full_name
           ? `${user.user_metadata.full_name}'s Team`

@@ -859,6 +859,51 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 17,
+    name: 'add_timezone_to_team_profiles',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS timezone TEXT`)
+      } else {
+        try {
+          await db.exec(`ALTER TABLE team_profiles ADD COLUMN timezone TEXT`)
+        } catch { /* column may already exist */ }
+      }
+    },
+  },
+  {
+    version: 18,
+    name: 'add_conversation_summaries',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS conversation_summaries (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            summary TEXT NOT NULL,
+            messages_summarized INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_conv_summaries_agent ON conversation_summaries(agent_id)`)
+        await db.exec(`ALTER TABLE conversation_summaries ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS conversation_summaries (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            summary TEXT NOT NULL,
+            messages_summarized INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_conv_summaries_agent ON conversation_summaries(agent_id)`)
+      }
+    },
+  },
 ]
 
 /**

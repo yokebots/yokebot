@@ -834,6 +834,7 @@ export interface TeamProfile {
   primaryGoal: string | null
   onboardedAt: string | null
   additionalContext: string | null
+  timezone: string | null
 }
 
 export interface WebsiteScanResult {

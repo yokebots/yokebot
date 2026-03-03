@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, EngineTask, MentionCompletionData } from '@/lib/engine'
+import type { ChatChannel, ChatMessage, ChatAttachment, EngineAgent, MentionCompletionData } from '@/lib/engine'
 import { MentionInput, renderMentionContent } from '@/components/MentionInput'
 import { supabase } from '@/lib/supabase'
 import { useRealtimeEvent } from '@/lib/use-realtime'
@@ -53,16 +53,13 @@ export function ChatPage() {
   const justSentRef = useRef(false)
   const [hasNewMessages, setHasNewMessages] = useState(false)
   const channelInputRef = useRef<HTMLInputElement>(null)
-  const [tasks, setTasks] = useState<EngineTask[]>([])
-
   const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀', '💯', '🙌']
 
   const loadChannels = async () => {
     try {
-      const [ch, ag, t] = await Promise.all([engine.listChannels(), engine.listAgents(), engine.listTasks()])
+      const [ch, ag] = await Promise.all([engine.listChannels(), engine.listAgents()])
       setChannels(ch)
       setAgents(ag)
-      setTasks(t)
       if (!activeChannelId && ch.length > 0) setActiveChannelId(ch[0].id)
     } catch { /* offline */ }
   }
@@ -198,7 +195,7 @@ export function ChatPage() {
 
   const activeChannel = channels.find((c) => c.id === activeChannelId)
   const dmChannels = channels.filter((c) => c.type === 'dm')
-  const taskThreads = channels.filter((c) => c.type === 'task_thread')
+
   const groupChannels = channels.filter((c) => c.type === 'group')
 
   const getAgentName = (ch: ChatChannel) => {
@@ -211,20 +208,6 @@ export function ChatPage() {
     if (!ch.name.startsWith('dm:')) return null
     const agentId = ch.name.replace('dm:', '')
     return agents.find((a) => a.id === agentId) ?? null
-  }
-
-  // Build taskId → title map for task thread display
-  const taskTitleMap = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const t of tasks) map.set(t.id, t.title)
-    return map
-  }, [tasks])
-
-  const getTaskThreadName = (ch: ChatChannel) => {
-    // If the channel was renamed (name no longer starts with 'task:'), show the custom name
-    if (!ch.name.startsWith('task:')) return ch.name
-    const taskId = ch.name.replace('task:', '')
-    return taskTitleMap.get(taskId) ?? taskId.slice(0, 8) + '...'
   }
 
   // Build agent color/icon map for mention rendering
@@ -660,66 +643,6 @@ export function ChatPage() {
             )}
           </div>
 
-          {/* Task Threads */}
-          {taskThreads.length > 0 && (
-            <div>
-              <p className="mb-2 px-2 text-xs font-bold uppercase tracking-wider text-text-muted">Task Threads</p>
-              {taskThreads.map((ch) => (
-                <div
-                  key={ch.id}
-                  className={`group flex w-full items-center rounded-lg transition-colors ${
-                    ch.id === activeChannelId
-                      ? 'bg-forest-green/10'
-                      : 'hover:bg-light-surface-alt'
-                  }`}
-                >
-                  {editingChannelId === ch.id ? (
-                    <div className="flex flex-1 items-center gap-1 px-2 py-1">
-                      <span className="material-symbols-outlined text-[16px] text-text-muted">task_alt</span>
-                      <input
-                        ref={renameInputRef}
-                        type="text"
-                        value={editChannelName}
-                        onChange={(e) => setEditChannelName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleRenameChannel(ch.id)
-                          if (e.key === 'Escape') setEditingChannelId(null)
-                        }}
-                        onBlur={() => handleRenameChannel(ch.id)}
-                        className="flex-1 min-w-0 bg-white border border-forest-green rounded px-1.5 py-0.5 text-sm outline-none"
-                      />
-                    </div>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => { setActiveChannelId(ch.id); setShowChannelsMobile(false) }}
-                        className={`flex flex-1 items-center gap-2 px-2 py-2 text-sm ${
-                          ch.id === activeChannelId
-                            ? 'text-forest-green font-medium'
-                            : unreadCounts[ch.id] ? 'text-text-main font-semibold' : 'text-text-secondary'
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-[16px]">task_alt</span>
-                        <span className="truncate">{getTaskThreadName(ch)}</span>
-                        {unreadCounts[ch.id] && ch.id !== activeChannelId && (
-                          <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-forest-green px-1.5 text-[10px] font-bold text-white">
-                            {unreadCounts[ch.id]}
-                          </span>
-                        )}
-                      </button>
-                      <button
-                        onClick={() => startEditChannel(ch)}
-                        className="mr-1 hidden rounded p-0.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main group-hover:block"
-                        title="Rename thread"
-                      >
-                        <span className="material-symbols-outlined text-[13px]">edit</span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
@@ -741,7 +664,7 @@ export function ChatPage() {
                   {activeChannel.type === 'dm' ? 'smart_toy' : activeChannel.type === 'task_thread' ? 'task_alt' : 'tag'}
                 </span>
                 <h3 className="font-medium text-text-main">
-                  {activeChannel.type === 'dm' ? getAgentName(activeChannel) : activeChannel.type === 'task_thread' ? getTaskThreadName(activeChannel) : activeChannel.name}
+                  {activeChannel.type === 'dm' ? getAgentName(activeChannel) : activeChannel.name}
                 </h3>
                 {activeChannel.type === 'dm' && (() => {
                   const ag = getAgentForChannel(activeChannel)

@@ -416,7 +416,10 @@ async function main() {
 
     await sendMessage(db, dmChannel.id, 'human', 'user', body.message, undefined, teamId)
 
-    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt)
+    const tzRow = await db.queryOne<{ timezone: string | null }>(
+      'SELECT timezone FROM team_profiles WHERE team_id = $1', [teamId],
+    )
+    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, tzRow?.timezone)
 
     try {
       const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
@@ -1590,7 +1593,7 @@ async function main() {
       'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
     )
     if (!profile) {
-      return res.json({ teamId: req.params.id, companyName: null, companyUrl: null, industry: null, companySize: null, businessSummary: null, targetMarket: null, primaryGoal: null, onboardedAt: null })
+      return res.json({ teamId: req.params.id, companyName: null, companyUrl: null, industry: null, companySize: null, businessSummary: null, targetMarket: null, primaryGoal: null, onboardedAt: null, timezone: null })
     }
     res.json({
       teamId: profile.team_id,
@@ -1602,6 +1605,7 @@ async function main() {
       targetMarket: profile.target_market,
       primaryGoal: profile.primary_goal,
       onboardedAt: profile.onboarded_at,
+      timezone: profile.timezone ?? null,
     })
   })
 
@@ -1623,6 +1627,7 @@ async function main() {
     const primaryGoal = body.primaryGoal ?? null
     const onboardedAt = body.onboardedAt ?? null
     const additionalContext = body.additionalContext ?? null
+    const timezone = body.timezone ?? null
 
     const existing = await db.queryOne<Record<string, unknown>>(
       'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
@@ -1640,15 +1645,16 @@ async function main() {
           primary_goal = COALESCE($7, primary_goal),
           onboarded_at = COALESCE($8, onboarded_at),
           additional_context = COALESCE($9, additional_context),
+          timezone = COALESCE($10, timezone),
           updated_at = ${db.now()}
-        WHERE team_id = $10`,
-        [companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext, req.params.id],
+        WHERE team_id = $11`,
+        [companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext, timezone, req.params.id],
       )
     } else {
       await db.run(
-        `INSERT INTO team_profiles (team_id, company_name, company_url, industry, company_size, business_summary, target_market, primary_goal, onboarded_at, additional_context)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [req.params.id, companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext],
+        `INSERT INTO team_profiles (team_id, company_name, company_url, industry, company_size, business_summary, target_market, primary_goal, onboarded_at, additional_context, timezone)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [req.params.id, companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext, timezone],
       )
     }
     res.json({ success: true })

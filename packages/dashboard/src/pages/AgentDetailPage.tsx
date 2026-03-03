@@ -274,34 +274,8 @@ export function AgentDetailPage() {
                     <p className="mt-1 text-[11px] text-text-muted">How often the agent checks in and does work</p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-text-secondary">Shift Start</label>
-                      <select
-                        value={editHoursStart}
-                        onChange={(e) => setEditHoursStart(Number(e.target.value))}
-                        className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
-                      >
-                        {Array.from({ length: 24 }, (_, i) => (
-                          <option key={i} value={i}>{i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-text-secondary">Shift End</label>
-                      <select
-                        value={editHoursEnd}
-                        onChange={(e) => setEditHoursEnd(Number(e.target.value))}
-                        className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
-                      >
-                        {Array.from({ length: 24 }, (_, i) => i + 1).map((i) => (
-                          <option key={i} value={i}>{i === 24 ? '12:00 AM (next day)' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
                   <p className="text-[11px] text-text-muted">
-                    {activeHours > 0 ? `${activeHours} active hours/day` : 'No active hours'} &middot; {Math.round(activeHours * 7)} hrs/week equivalent
+                    Agents run 24/7 on their heartbeat schedule
                   </p>
                 </div>
               </div>

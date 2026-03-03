@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, Link, useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { EngineTask, EngineAgent, ChatMessage } from '@/lib/engine'
+import type { EngineTask, EngineAgent, ChatMessage, MentionCompletionData } from '@/lib/engine'
+import { MentionInput, renderMentionContent } from '@/components/MentionInput'
 
 const statusOptions = ['backlog', 'todo', 'in_progress', 'review', 'done'] as const
 const priorityOptions = ['low', 'medium', 'high', 'urgent'] as const
@@ -53,20 +54,26 @@ export function TaskDetailPage() {
   const [newSubtask, setNewSubtask] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [mentionCompletions, setMentionCompletions] = useState<MentionCompletionData | null>(null)
+  const [reactions, setReactions] = useState<Record<number, Record<string, string[]>>>({})
+  const [showReactionPicker, setShowReactionPicker] = useState<number | null>(null)
+  const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀', '💯', '🙌']
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const headerImageInputRef = useRef<HTMLInputElement>(null)
 
   const loadData = async () => {
     if (!taskId) return
     try {
-      const [t, a, subs] = await Promise.all([
+      const [t, a, subs, mentions] = await Promise.all([
         engine.listTasks().then((ts) => ts.find((t) => t.id === taskId) ?? null),
         engine.listAgents(),
         engine.listTasks({ parentId: taskId }),
+        engine.getMentionCompletions(),
       ])
       setTask(t)
       setAgents(a)
       setSubtasks(subs)
+      setMentionCompletions(mentions)
 
       const thread = await engine.getTaskThread(taskId)
       setChannelId(thread.id)
@@ -145,6 +152,53 @@ export function TaskDetailPage() {
     await engine.deleteTask(taskId)
     navigate('/tasks')
   }
+
+  const agentColorMap = useMemo(() => {
+    const map = new Map<string, { color: string; icon: string }>()
+    for (const a of agents) map.set(a.id, { color: a.iconColor ?? '#0F4D26', icon: a.iconName ?? 'smart_toy' })
+    return map
+  }, [agents])
+
+  // Load reactions for visible messages
+  useEffect(() => {
+    if (messages.length === 0) return
+    const loadReactions = async () => {
+      const reactionMap: Record<number, Record<string, string[]>> = {}
+      await Promise.all(
+        messages.map(async (msg) => {
+          try {
+            const r = await engine.getReactions(msg.id)
+            if (Object.keys(r).length > 0) reactionMap[msg.id] = r
+          } catch { /* ignore */ }
+        }),
+      )
+      setReactions(reactionMap)
+    }
+    loadReactions()
+  }, [messages])
+
+  const handleToggleReaction = async (messageId: number, emoji: string) => {
+    try {
+      const result = await engine.toggleReaction(messageId, emoji)
+      setReactions((prev) => {
+        const msgReactions = { ...(prev[messageId] ?? {}) }
+        const userId = 'me'
+        if (result.action === 'added') {
+          msgReactions[emoji] = [...(msgReactions[emoji] ?? []), userId]
+        } else {
+          msgReactions[emoji] = (msgReactions[emoji] ?? []).filter((u) => u !== userId)
+          if (msgReactions[emoji].length === 0) delete msgReactions[emoji]
+        }
+        return { ...prev, [messageId]: msgReactions }
+      })
+      const fresh = await engine.getReactions(messageId)
+      setReactions((prev) => ({ ...prev, [messageId]: fresh }))
+    } catch { /* ignore */ }
+    setShowReactionPicker(null)
+  }
+
+  const onAgentClick = (agentId: string) => navigate(`/agents/${agentId}`)
+  const onFileClick = (docId: string) => navigate(`/knowledge-base?doc=${docId}`)
 
   if (!task) {
     return (
@@ -337,15 +391,23 @@ export function TaskDetailPage() {
           {/* Discussion */}
           <div className="rounded-lg border border-border-subtle bg-white p-4">
             <h3 className="mb-3 text-sm font-bold text-text-main">Discussion</h3>
-            <div className="mb-4 max-h-64 space-y-3 overflow-y-auto">
+            <div className="mb-4 max-h-80 space-y-3 overflow-y-auto">
               {messages.length === 0 && (
                 <p className="py-4 text-center text-xs text-text-muted">No messages yet. Start the conversation.</p>
               )}
               {messages.map((msg) => (
-                <div key={msg.id} className={`flex gap-3 ${msg.senderType === 'human' ? 'justify-end' : ''}`}>
+                <div key={msg.id} className={`group/msg flex gap-3 ${msg.senderType === 'human' ? 'justify-end' : ''}`}>
                   {msg.senderType !== 'human' && (
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-forest-green/10 text-forest-green">
-                      <span className="material-symbols-outlined text-[14px]">smart_toy</span>
+                    <div
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                      style={{
+                        backgroundColor: (agentColorMap.get(msg.senderId)?.color ?? '#0F4D26') + '18',
+                        color: agentColorMap.get(msg.senderId)?.color ?? '#0F4D26',
+                      }}
+                    >
+                      <span className="material-symbols-outlined text-[14px]">
+                        {agentColorMap.get(msg.senderId)?.icon ?? 'smart_toy'}
+                      </span>
                     </div>
                   )}
                   <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
@@ -353,25 +415,81 @@ export function TaskDetailPage() {
                       ? 'bg-forest-green/10 text-text-main'
                       : 'bg-light-surface-alt text-text-main'
                   }`}>
-                    {msg.content}
-                    <div className="mt-1 text-[10px] text-text-muted">{new Date(msg.createdAt).toLocaleTimeString()}</div>
+                    <p className="whitespace-pre-wrap break-words">
+                      {renderMentionContent(msg.content, onAgentClick, onFileClick, agentColorMap)}
+                    </p>
+
+                    {/* Render inline images/GIFs from markdown syntax */}
+                    {(() => {
+                      const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g
+                      const images: Array<{ alt: string; url: string }> = []
+                      let imgMatch
+                      while ((imgMatch = imgRegex.exec(msg.content)) !== null) {
+                        images.push({ alt: imgMatch[1], url: imgMatch[2] })
+                      }
+                      return images.length > 0 ? (
+                        <div className="mt-1.5 space-y-1">
+                          {images.map((img, idx) => (
+                            <img key={idx} src={img.url} alt={img.alt} className="max-w-full rounded-lg" style={{ maxHeight: '200px' }} loading="lazy" />
+                          ))}
+                        </div>
+                      ) : null
+                    })()}
+
+                    <p className="mt-1 text-[10px] text-text-muted">{new Date(msg.createdAt).toLocaleTimeString()}</p>
+
+                    {/* Reactions row */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      {reactions[msg.id] && Object.entries(reactions[msg.id]).map(([emoji, users]) => (
+                        <button
+                          key={emoji}
+                          onClick={() => handleToggleReaction(msg.id, emoji)}
+                          className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-light-surface px-2 py-0.5 text-xs hover:bg-light-surface-alt transition-colors"
+                        >
+                          <span>{emoji}</span>
+                          <span className="text-text-muted">{users.length}</span>
+                        </button>
+                      ))}
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)}
+                          className="inline-flex items-center rounded-full border border-dashed border-border-subtle px-1.5 py-0.5 text-text-muted hover:bg-light-surface-alt hover:text-text-main opacity-0 group-hover/msg:opacity-100 transition-all"
+                          title="Add reaction"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">add_reaction</span>
+                        </button>
+                        {showReactionPicker === msg.id && (
+                          <div className="absolute bottom-full left-0 mb-1 z-50 flex gap-1 rounded-xl border border-border-subtle bg-white p-2 shadow-lg">
+                            {QUICK_EMOJIS.map((emoji) => (
+                              <button
+                                key={emoji}
+                                onClick={() => handleToggleReaction(msg.id, emoji)}
+                                className="rounded-md p-1 text-lg hover:bg-light-surface-alt transition-colors"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Type a message..."
-                className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
-                onKeyDown={(e) => e.key === 'Enter' && sendMsg()}
-              />
-              <button onClick={sendMsg} className="rounded-lg bg-forest-green px-4 py-2 text-sm text-white">
-                <span className="material-symbols-outlined text-[18px]">send</span>
-              </button>
-            </div>
+            <MentionInput
+              value={newMessage}
+              onChange={setNewMessage}
+              onSubmit={sendMsg}
+              placeholder="Message this thread..."
+              completions={mentionCompletions}
+              onGifSelect={(gifUrl: string, title: string) => {
+                engine.sendMessage(channelId, {
+                  senderType: 'human', senderId: 'user',
+                  content: `![${title}](${gifUrl})`, taskId,
+                }).then(() => loadData())
+              }}
+            />
           </div>
         </div>
 

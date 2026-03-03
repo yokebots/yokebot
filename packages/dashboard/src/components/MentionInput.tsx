@@ -285,8 +285,8 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className={`w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-16 text-sm focus:border-forest-green focus:outline-none disabled:opacity-50 ${
-            hasMentions && value.trim() ? 'text-transparent caret-text-main' : ''
+          className={`w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-16 text-sm caret-text-main focus:border-forest-green focus:ring-1 focus:ring-forest-green/30 focus:outline-none disabled:opacity-50 ${
+            hasMentions && value.trim() ? 'text-transparent' : ''
           }`}
           style={{ minHeight: '40px', maxHeight: '120px' }}
           onInput={(e) => {
@@ -459,7 +459,7 @@ export function renderMentionContent(
         parts.push(
           <span
             key={key}
-            className="inline-flex items-center gap-0.5 rounded px-1 text-[13px] font-medium cursor-pointer"
+            className="inline-flex items-center align-middle gap-0.5 rounded px-1 text-[13px] font-medium cursor-pointer"
             style={{ backgroundColor: color + '18', color }}
             onClick={() => onAgentClick?.(id)}
           >
@@ -473,7 +473,7 @@ export function renderMentionContent(
         parts.push(
           <span
             key={key}
-            className="inline-flex items-center gap-0.5 rounded bg-blue-100 text-blue-700 px-1 text-[13px] font-medium"
+            className="inline-flex items-center align-middle gap-0.5 rounded bg-blue-100 text-blue-700 px-1 text-[13px] font-medium"
           >
             <span className="material-symbols-outlined text-[12px]">person</span>
             @{displayName}
@@ -484,7 +484,7 @@ export function renderMentionContent(
         parts.push(
           <span
             key={key}
-            className="inline-flex items-center gap-0.5 rounded bg-amber-100 text-amber-700 px-1 text-[13px] font-medium cursor-pointer hover:bg-amber-200"
+            className="inline-flex items-center align-middle gap-0.5 rounded bg-amber-100 text-amber-700 px-1 text-[13px] font-medium cursor-pointer hover:bg-amber-200"
             onClick={() => onFileClick?.(id)}
           >
             <span className="material-symbols-outlined text-[12px]">description</span>
@@ -496,7 +496,7 @@ export function renderMentionContent(
         parts.push(
           <span
             key={key}
-            className="inline-flex items-center gap-0.5 rounded bg-indigo-100 text-indigo-700 px-1 text-[13px] font-medium"
+            className="inline-flex items-center align-middle gap-0.5 rounded bg-indigo-100 text-indigo-700 px-1 text-[13px] font-medium"
           >
             <span className="material-symbols-outlined text-[12px]">groups</span>
             @Everyone
