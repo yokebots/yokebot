@@ -8,9 +8,11 @@ import * as engine from '@/lib/engine'
 
 interface TeamChatProps {
   teamChannelId: string | null
+  onFileClick?: (docId: string) => void
+  onTaskClick?: (taskId: string) => void
 }
 
-export function TeamChat({ teamChannelId }: TeamChatProps) {
+export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatProps) {
   const [messages, setMessages] = useState<engine.ChatMessage[]>([])
   const [messageText, setMessageText] = useState('')
   const [sending, setSending] = useState(false)
@@ -145,6 +147,8 @@ export function TeamChat({ teamChannelId }: TeamChatProps) {
             message={msg}
             agentColorMap={agentColorMap}
             onThreadClick={setThreadParent}
+            onFileClick={onFileClick}
+            onTaskClick={onTaskClick}
           />
         ))}
       </div>

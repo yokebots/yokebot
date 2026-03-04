@@ -14,7 +14,7 @@ import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
-import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel } from './chat.ts'
+import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
 import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget } from './billing.ts'
@@ -553,10 +553,11 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           // Cross-post brief summary to team channel
           try {
             const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'
-            const snippet = cleanResponse ? cleanResponse.slice(0, 200) : ''
-            const teamSummary = `**${task.title}** — ${statusLabel} (${result.iterations} iterations)${snippet ? `\n${snippet}${cleanResponse && cleanResponse.length > 200 ? '...' : ''}` : ''}`
+            const teamSummary = `@[${task.title}](task:${task.id}) — ${statusLabel} (${result.iterations} iterations)${cleanResponse ? `\n${cleanResponse}` : ''}`
             const teamChannel = await getTeamChannel(db, agent.teamId)
-            await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, undefined, agent.teamId)
+            const existingMsg = await findLatestTaskMessage(db, teamChannel.id, task.id)
+            const parentId = existingMsg?.id ? Number(existingMsg.id) : undefined
+            await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, task.id, agent.teamId, undefined, undefined, undefined, parentId)
           } catch { /* best-effort */ }
 
           await logActivity(db, 'task_sprint', agent.id,

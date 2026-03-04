@@ -436,8 +436,9 @@ export function renderMentionContent(
   onAgentClick?: (agentId: string) => void,
   onFileClick?: (docId: string) => void,
   agentColorMap?: Map<string, { color: string; icon: string }>,
+  onTaskClick?: (taskId: string) => void,
 ): React.ReactNode[] {
-  const regex = /@\[([^\]]+)\]\((agent|user|file|everyone):([^)]+)\)/g
+  const regex = /@\[([^\]]+)\]\((agent|user|file|task|everyone):([^)]+)\)/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let match
@@ -489,6 +490,18 @@ export function renderMentionContent(
           >
             <span className="material-symbols-outlined text-[12px]">description</span>
             @{displayName}
+          </span>,
+        )
+        break
+      case 'task':
+        parts.push(
+          <span
+            key={key}
+            className="inline-flex items-center align-middle gap-0.5 rounded bg-emerald-100 text-emerald-700 px-1 text-[13px] font-medium cursor-pointer hover:bg-emerald-200"
+            onClick={() => onTaskClick?.(id)}
+          >
+            <span className="material-symbols-outlined text-[12px]">task_alt</span>
+            {displayName}
           </span>,
         )
         break

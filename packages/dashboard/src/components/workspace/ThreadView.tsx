@@ -94,12 +94,17 @@ export function MessageBubble({
   agentColorMap,
   compact,
   onThreadClick,
+  onFileClick,
+  onTaskClick,
 }: {
   message: engine.ChatMessage
   agentColorMap: Map<string, { color: string; icon: string; name: string }>
   compact?: boolean
   onThreadClick?: (msg: engine.ChatMessage) => void
+  onFileClick?: (docId: string) => void
+  onTaskClick?: (taskId: string) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
   const isAgent = message.senderType === 'agent'
   const isSystem = message.senderType === 'system'
   const agent = isAgent ? agentColorMap.get(message.senderId) : null
@@ -113,6 +118,12 @@ export function MessageBubble({
     .trim()
 
   if (!displayContent) return null
+
+  const COLLAPSE_THRESHOLD = 300
+  const isLong = displayContent.length > COLLAPSE_THRESHOLD
+  const visibleContent = isLong && !expanded
+    ? displayContent.slice(0, COLLAPSE_THRESHOLD)
+    : displayContent
 
   const timeStr = new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
@@ -133,9 +144,20 @@ export function MessageBubble({
           <span className="text-[10px] text-text-muted">{timeStr}</span>
         </div>
         {/* Content */}
-        <div className="text-sm text-text-main leading-relaxed break-words">
-          {renderMentionContent(displayContent)}
+        <div className="relative text-sm text-text-main leading-relaxed break-words">
+          {renderMentionContent(visibleContent, undefined, onFileClick, undefined, onTaskClick)}
+          {isLong && !expanded && (
+            <span className="bg-gradient-to-l from-white via-white/80 to-transparent pl-6 text-[12px] text-forest-green cursor-pointer hover:underline" onClick={() => setExpanded(true)}>... Read more</span>
+          )}
         </div>
+        {isLong && expanded && (
+          <button
+            onClick={() => setExpanded(false)}
+            className="mt-0.5 text-[12px] text-forest-green hover:underline"
+          >
+            Show less
+          </button>
+        )}
         {/* Thread badge */}
         {!compact && message.replyCount > 0 && onThreadClick && (
           <button

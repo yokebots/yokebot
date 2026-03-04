@@ -163,6 +163,18 @@ export async function getThreadReplies(db: Db, parentMessageId: number, limit = 
   return rows.map(rowToMessage)
 }
 
+/** Find the latest top-level message for a given task in a channel (for threading). */
+export async function findLatestTaskMessage(
+  db: Db, channelId: string, taskId: string,
+): Promise<ChatMessage | null> {
+  const row = await db.queryOne<Record<string, unknown>>(
+    `SELECT * FROM chat_messages WHERE channel_id = $1 AND task_id = $2
+     AND parent_message_id IS NULL ORDER BY created_at DESC LIMIT 1`,
+    [channelId, taskId],
+  )
+  return row ? rowToMessage(row) : null
+}
+
 /** Get or create the single team-wide chat channel. */
 export async function getTeamChannel(db: Db, teamId: string): Promise<ChatChannel> {
   const existing = await db.queryOne<Record<string, unknown>>(
@@ -251,11 +263,11 @@ export async function getUnreadCounts(db: Db, userId: string, teamId: string): P
 
 // ---- Mention Processing ----
 
-const MENTION_PATTERN = /@\[([^\]]+)\]\((agent|user|file|everyone):([^)]+)\)/g
+const MENTION_PATTERN = /@\[([^\]]+)\]\((agent|user|file|task|everyone):([^)]+)\)/g
 
 interface ParsedMention {
   displayName: string
-  type: 'agent' | 'user' | 'file' | 'everyone'
+  type: 'agent' | 'user' | 'file' | 'task' | 'everyone'
   id: string
 }
 

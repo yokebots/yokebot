@@ -151,7 +151,10 @@ export function WorkspacePage() {
             <FilesPanel workspace={workspaceState} unreadFileIds={unreadFileIds} />
           )}
           {mobileTab === 'Chat' && (
-            <TeamChat teamChannelId={teamChannelId} />
+            <TeamChat
+              teamChannelId={teamChannelId}
+              onTaskClick={(taskId) => { setSelectedTaskId(taskId); setMobileTab('Tasks') }}
+            />
           )}
           {mobileTab === 'Tasks' && (
             <TasksPanel workspace={workspaceState} unreadTaskIds={unreadTaskIds} agents={agents} />
