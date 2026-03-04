@@ -118,9 +118,9 @@ export async function upsertSubscription(db: Db, teamId: string, data: Partial<T
 }
 
 // ---- Sprint Budget ----
-// Single generous limit for all tiers. Credits-per-iteration is the real cost control —
-// no need to artificially cap iterations and make agents do a worse job.
-const SPRINT_BUDGET = 40
+// Max iterations per heartbeat for task sprints. At 10 credits/iteration (deepseek-v3.2),
+// 15 iterations = 150 credits max per heartbeat — sustainable for starter credit balances.
+const SPRINT_BUDGET = 15
 
 export async function getSprintBudget(_db: Db, _teamId: string): Promise<number> {
   return SPRINT_BUDGET
@@ -181,17 +181,31 @@ export async function deductCredits(
   db: Db, teamId: string, amount: number,
   type: CreditTransactionType, description: string,
 ): Promise<{ success: boolean; balance: number }> {
-  // Atomic deduct — only succeeds if balance is sufficient
+  // Pre-check: read balance before attempting deduction to avoid phantom transactions
+  const pre = await db.queryOne<{ balance: number }>(
+    'SELECT balance FROM team_credits WHERE team_id = $1', [teamId],
+  )
+  if (!pre || pre.balance < amount) {
+    return { success: false, balance: pre?.balance ?? 0 }
+  }
+
+  // Atomic deduct — only succeeds if balance is still sufficient (race-safe)
   await db.run(
     `UPDATE team_credits SET balance = balance - $1, updated_at = ${db.now()} WHERE team_id = $2 AND balance >= $1`,
     [amount, teamId],
   )
 
+  // Re-read to confirm the deduction actually applied
   const row = await db.queryOne<{ balance: number; purchased_balance: number }>(
     'SELECT balance, purchased_balance FROM team_credits WHERE team_id = $1', [teamId],
   )
-  if (!row || row.balance < 0) {
-    return { success: false, balance: row?.balance ?? 0 }
+  if (!row) {
+    return { success: false, balance: 0 }
+  }
+
+  // If balance didn't actually decrease, another concurrent deduction consumed the credits first
+  if (row.balance >= pre.balance) {
+    return { success: false, balance: row.balance }
   }
 
   // Base credits are consumed first, purchased credits consumed last.

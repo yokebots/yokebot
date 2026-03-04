@@ -479,12 +479,13 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   if (HOSTED_MODE) {
     if (!await isTeamActiveCached(db, agent.teamId)) return
 
-    // Check credit balance before running heartbeat
+    // Check credit balance before running heartbeat — require enough for at least 3 iterations
     if (agent.modelId) {
       const balance = await getCreditBalance(db, agent.teamId)
       const cost = await getModelCreditCost(db, agent.modelId)
-      if (cost > 0 && balance < cost) {
-        console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — insufficient credits (${balance} < ${cost})`)
+      const minRequired = cost * 3
+      if (cost > 0 && balance < minRequired) {
+        console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — insufficient credits (${balance} < ${minRequired} needed)`)
         return
       }
     }
@@ -620,7 +621,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   const proactivePrompt = isAdvisor ? advisorPrompt : genericPrompt
 
   try {
-    const runtimeConfig = { maxIterations: isAdvisor ? 5 : 40 }
+    const runtimeConfig = { maxIterations: isAdvisor ? 5 : 10 }
     const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
     // Skip no-ops and iteration-limit fallback messages — don't spam channels
     const cleanedResponse = result.response ? stripToolSyntax(result.response) : null
