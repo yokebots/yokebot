@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { PanelHeader } from './PanelHeader'
 import { TaskDetail } from './TaskDetail'
 import TagFilterBar from '@/components/TagFilterBar'
@@ -18,6 +18,45 @@ const PRIORITY_BADGES: Record<string, string> = {
   medium: 'bg-yellow-100 text-yellow-700',
   low: 'bg-gray-100 text-gray-600',
 }
+const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 }
+
+type ColumnKey = 'deadline' | 'createdAt' | 'updatedAt' | 'agent' | 'priority'
+type SortKey = 'priority' | 'createdAt' | 'updatedAt' | 'deadline' | 'title'
+
+const COLUMN_LABELS: Record<ColumnKey, string> = {
+  deadline: 'Deadline',
+  createdAt: 'Created',
+  updatedAt: 'Updated',
+  agent: 'Agent',
+  priority: 'Priority',
+}
+const SORT_LABELS: Record<SortKey, string> = {
+  priority: 'Priority',
+  createdAt: 'Created',
+  updatedAt: 'Updated',
+  deadline: 'Deadline',
+  title: 'Title',
+}
+
+function formatRelativeDate(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return '—'
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffDays = Math.floor(diffMs / 86400000)
+  if (diffDays < 0) {
+    const futureDays = Math.abs(diffDays)
+    if (futureDays === 0) return 'today'
+    if (futureDays === 1) return 'tomorrow'
+    if (futureDays < 7) return `in ${futureDays}d`
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+  if (diffDays === 0) return 'today'
+  if (diffDays === 1) return 'yesterday'
+  if (diffDays < 7) return `${diffDays}d ago`
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 interface TasksPanelProps {
   workspace: WorkspaceState
@@ -35,6 +74,37 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
   const [showCreate, setShowCreate] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newPriority, setNewPriority] = useState('medium')
+
+  // Column & sort state (persisted)
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(() => {
+    try {
+      const saved = localStorage.getItem('workspace-tasks-columns')
+      return saved ? JSON.parse(saved) : ['priority', 'agent']
+    } catch { return ['priority', 'agent'] }
+  })
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    return (localStorage.getItem('workspace-tasks-sort-key') as SortKey) ?? 'priority'
+  })
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(() => {
+    return (localStorage.getItem('workspace-tasks-sort-dir') as 'asc' | 'desc') ?? 'desc'
+  })
+  const [showColumnMenu, setShowColumnMenu] = useState(false)
+  const columnMenuRef = useRef<HTMLDivElement>(null)
+
+  // Persist settings
+  useEffect(() => { localStorage.setItem('workspace-tasks-columns', JSON.stringify(visibleColumns)) }, [visibleColumns])
+  useEffect(() => { localStorage.setItem('workspace-tasks-sort-key', sortKey) }, [sortKey])
+  useEffect(() => { localStorage.setItem('workspace-tasks-sort-dir', sortDir) }, [sortDir])
+
+  // Close column menu on outside click
+  useEffect(() => {
+    if (!showColumnMenu) return
+    const handler = (e: MouseEvent) => {
+      if (columnMenuRef.current && !columnMenuRef.current.contains(e.target as Node)) setShowColumnMenu(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showColumnMenu])
 
   const loadTasks = useCallback(async () => {
     try {
@@ -68,6 +138,43 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
     workspace.setSelectedTaskId(taskId)
   }
 
+  const toggleColumn = (col: ColumnKey) => {
+    setVisibleColumns(prev =>
+      prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
+    )
+  }
+
+  // Sorted tasks
+  const sortedTasks = useMemo(() => {
+    const sorted = [...tasks]
+    sorted.sort((a, b) => {
+      let cmp = 0
+      switch (sortKey) {
+        case 'priority':
+          cmp = (PRIORITY_RANK[a.priority] ?? 0) - (PRIORITY_RANK[b.priority] ?? 0)
+          break
+        case 'title':
+          cmp = a.title.localeCompare(b.title)
+          break
+        case 'createdAt':
+          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          break
+        case 'updatedAt':
+          cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()
+          break
+        case 'deadline':
+          // Tasks without deadlines sort last
+          if (!a.deadline && !b.deadline) cmp = 0
+          else if (!a.deadline) cmp = 1
+          else if (!b.deadline) cmp = -1
+          else cmp = new Date(a.deadline).getTime() - new Date(b.deadline).getTime()
+          break
+      }
+      return sortDir === 'desc' ? -cmp : cmp
+    })
+    return sorted
+  }, [tasks, sortKey, sortDir])
+
   // Show TaskDetail if a task is selected
   if (workspace.selectedTaskId) {
     return (
@@ -80,7 +187,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
     )
   }
 
-  const tasksByStatus = (status: string) => tasks.filter(t => t.status === status)
+  const tasksByStatus = (status: string) => sortedTasks.filter(t => t.status === status)
 
   return (
     <div className="flex flex-col h-full">
@@ -136,6 +243,54 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
         <TagFilterBar selectedTags={filterTags} onSelectionChange={setFilterTags} />
       </div>
 
+      {/* Sort & column toolbar (list view only) */}
+      {view === 'list' && (
+        <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-subtle shrink-0">
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            className="rounded border border-border-subtle px-1.5 py-0.5 text-[10px] focus:border-forest-green focus:outline-none"
+          >
+            {Object.entries(SORT_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>{label}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+            className="rounded p-0.5 text-text-muted hover:bg-light-surface-alt"
+            title={sortDir === 'asc' ? 'Ascending' : 'Descending'}
+          >
+            <span className="material-symbols-outlined text-[14px]">
+              {sortDir === 'asc' ? 'arrow_upward' : 'arrow_downward'}
+            </span>
+          </button>
+          <div className="relative ml-auto" ref={columnMenuRef}>
+            <button
+              onClick={() => setShowColumnMenu(v => !v)}
+              className="rounded p-0.5 text-text-muted hover:bg-light-surface-alt"
+              title="Column settings"
+            >
+              <span className="material-symbols-outlined text-[14px]">settings</span>
+            </button>
+            {showColumnMenu && (
+              <div className="absolute right-0 top-full mt-1 z-20 rounded-lg border border-border-subtle bg-white shadow-lg py-1 min-w-[130px]">
+                {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map(col => (
+                  <label key={col} className="flex items-center gap-2 px-3 py-1 text-[11px] hover:bg-light-surface-alt cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns.includes(col)}
+                      onChange={() => toggleColumn(col)}
+                      className="rounded"
+                    />
+                    {COLUMN_LABELS[col]}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Quick create */}
       {showCreate && (
         <div className="px-2 py-2 border-b border-border-subtle shrink-0 space-y-2">
@@ -180,10 +335,11 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
       <div className="flex-1 overflow-auto">
         {view === 'list' ? (
           <ListView
-            tasks={tasks}
+            tasks={sortedTasks}
             onTaskClick={handleTaskClick}
             unreadTaskIds={unreadTaskIds}
             agents={agents}
+            visibleColumns={visibleColumns}
           />
         ) : (
           <KanbanView
@@ -203,11 +359,13 @@ function ListView({
   onTaskClick,
   unreadTaskIds,
   agents,
+  visibleColumns,
 }: {
   tasks: engine.EngineTask[]
   onTaskClick: (id: string) => void
   unreadTaskIds?: Set<string>
   agents: engine.EngineAgent[]
+  visibleColumns: ColumnKey[]
 }) {
   const agentMap = new Map(agents.map(a => [a.id, a]))
 
@@ -244,14 +402,32 @@ function ListView({
                 {task.tags.length > 3 && <span className="text-[8px] text-text-muted">+{task.tags.length - 3}</span>}
               </div>
             )}
+            {/* Deadline column */}
+            {visibleColumns.includes('deadline') && (
+              <span className={`shrink-0 text-[10px] tabular-nums ${task.deadline && new Date(task.deadline) < new Date() ? 'text-red-600 font-semibold' : 'text-text-muted'}`}>
+                {formatRelativeDate(task.deadline)}
+              </span>
+            )}
+            {/* Created column */}
+            {visibleColumns.includes('createdAt') && (
+              <span className="shrink-0 text-[10px] text-text-muted tabular-nums">
+                {formatRelativeDate(task.createdAt)}
+              </span>
+            )}
+            {/* Updated column */}
+            {visibleColumns.includes('updatedAt') && (
+              <span className="shrink-0 text-[10px] text-text-muted tabular-nums">
+                {formatRelativeDate(task.updatedAt)}
+              </span>
+            )}
             {/* Priority badge */}
-            {task.priority && task.priority !== 'medium' && (
+            {visibleColumns.includes('priority') && task.priority && task.priority !== 'medium' && (
               <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${PRIORITY_BADGES[task.priority] ?? ''}`}>
                 {task.priority}
               </span>
             )}
             {/* Agent avatar */}
-            {agent && (
+            {visibleColumns.includes('agent') && agent && (
               <span
                 className="material-symbols-outlined text-[14px] shrink-0"
                 style={{ color: agent.iconColor ?? '#0F4D26' }}
@@ -322,6 +498,11 @@ function KanbanView({
                     {task.priority && task.priority !== 'medium' && (
                       <span className={`rounded px-1 py-0.5 text-[8px] font-semibold ${PRIORITY_BADGES[task.priority] ?? ''}`}>
                         {task.priority}
+                      </span>
+                    )}
+                    {task.deadline && (
+                      <span className={`text-[8px] ${new Date(task.deadline) < new Date() ? 'text-red-600' : 'text-text-muted'}`}>
+                        {formatRelativeDate(task.deadline)}
                       </span>
                     )}
                     {agent && (

@@ -14,7 +14,7 @@ import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
-import { getDmChannel, sendMessage, listChannels, createChannel } from './chat.ts'
+import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
 import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget } from './billing.ts'
@@ -35,6 +35,8 @@ function stripToolSyntax(text: string): string {
   cleaned = cleaned.replace(/\[\/?[a-z_]+\]/g, '')
   // Remove [/think] blocks that weren't caught by the chat renderer
   cleaned = cleaned.replace(/\[think\][\s\S]*?\[\/think\]/g, '')
+  // Remove raw JSON tool-call arrays that weak models emit as text (e.g. [{"name":"think","parameters":{...}}])
+  cleaned = cleaned.replace(/\[\s*\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"parameters"\s*:\s*\{[\s\S]*?\}\s*\}\s*\]/g, '')
   // Clean up excessive whitespace left behind
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim()
   return cleaned
@@ -331,9 +333,7 @@ export async function respondToMention(
   ].join('\n')
 
   try {
-    const runtimeConfig = agent.templateId === 'advisor-bot'
-      ? { maxIterations: 10, skipCredits: true }
-      : undefined
+    const runtimeConfig = { maxIterations: 10 }
     const result = await runReactLoop(
       db, agent.id, teamId, mentionPrompt, modelConfig, systemPrompt,
       state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined,
@@ -548,6 +548,16 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           } catch { /* thread post is best-effort */ }
 
           const status = result.taskCompleted ? 'DONE' : result.taskBlocked ? 'BLOCKED' : 'continuing'
+
+          // Cross-post brief summary to team channel
+          try {
+            const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'
+            const snippet = cleanResponse ? cleanResponse.slice(0, 200) : ''
+            const teamSummary = `**${task.title}** — ${statusLabel} (${result.iterations} iterations)${snippet ? `\n${snippet}${cleanResponse && cleanResponse.length > 200 ? '...' : ''}` : ''}`
+            const teamChannel = await getTeamChannel(db, agent.teamId)
+            await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, undefined, agent.teamId)
+          } catch { /* best-effort */ }
+
           await logActivity(db, 'task_sprint', agent.id,
             `Sprint on "${task.title}" — ${result.iterations} iters, ${status}`,
             undefined, agent.teamId)
@@ -570,7 +580,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   }
 
   // ---- Generic check-in (no tasks assigned, or AdvisorBot) ----
-  const proactivePrompt = [
+  const genericPrompt = [
     'This is a scheduled check-in. Before taking any action, use the "think" tool to:',
     '1. ASSESS — Review your current tasks, goals, messages, and pending approvals.',
     '2. PRIORITIZE — Decide what is most important right now (urgent tasks first, then messages, then proactive ideas).',
@@ -580,10 +590,37 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     'If you notice pending approvals that need human attention, remind about them.',
   ].join('\n')
 
+  const advisorPrompt = [
+    'You are the TEAM MANAGER. This is your management check-in cycle. Follow these phases in order:',
+    '',
+    'PHASE 1 — AUDIT: Use list_tasks to see ALL tasks across all agents. Categorize them: stalled (no update in 24h+), overdue (past deadline), unassigned, blocked.',
+    '',
+    'PHASE 2 — ANALYZE: For any stalled or blocked tasks, check their task threads for context. Determine root causes (wrong agent? unclear requirements? dependency?).',
+    '',
+    'PHASE 3 — ACT: Take concrete management actions:',
+    '- Reassign tasks to better-suited agents (use update_task)',
+    '- Reprioritize based on deadlines and business impact',
+    '- Break down stuck tasks into smaller subtasks (use add_subtask)',
+    '- Unblock work by clarifying requirements in task threads',
+    '',
+    'PHASE 4 — COMMUNICATE: Post a concise management summary covering:',
+    '- Tasks completed since last check-in',
+    '- Currently active work and who is on it',
+    '- Items needing human attention (with specific ask)',
+    '- Actions you took this cycle (reassignments, reprioritizations)',
+    '',
+    'PHASE 5 — PLAN: Think about the next cycle. If nothing needs managing, respond with "no-op".',
+    '',
+    'KEY RULES:',
+    '- You are a MANAGER, not a worker. NEVER do the work yourself — reassign it to the right agent.',
+    '- Keep summaries actionable and brief (bullet points, not paragraphs).',
+    '- Only escalate to humans when an agent genuinely cannot handle something.',
+  ].join('\n')
+
+  const proactivePrompt = isAdvisor ? advisorPrompt : genericPrompt
+
   try {
-    const runtimeConfig = isAdvisor
-      ? { maxIterations: 40, skipCredits: true }
-      : { maxIterations: 40 }
+    const runtimeConfig = { maxIterations: isAdvisor ? 5 : 40 }
     const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
     // Skip no-ops and iteration-limit fallback messages — don't spam channels
     const cleanedResponse = result.response ? stripToolSyntax(result.response) : null
@@ -593,6 +630,13 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
       // Route proactive messages to the best-matching group channel
       const groupChannel = await pickBestChannel(db, agent)
       await sendMessage(db, groupChannel.id, 'agent', agent.id, cleanedResponse, undefined, agent.teamId)
+      // Cross-post to team channel
+      try {
+        const teamChannel = await getTeamChannel(db, agent.teamId)
+        if (teamChannel.id !== groupChannel.id) {
+          await sendMessage(db, teamChannel.id, 'agent', agent.id, cleanedResponse, undefined, agent.teamId)
+        }
+      } catch { /* best-effort */ }
       await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${cleanedResponse.slice(0, 150)}`, undefined, agent.teamId)
       console.log(`[scheduler] Proactive message from "${agent.name}" posted to #${groupChannel.name}`)
     }

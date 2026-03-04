@@ -47,7 +47,7 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
             {/* Tab content */}
             <div className="flex-1 overflow-hidden flex flex-col">
               {activeTab?.type === 'file' && (
-                <FileViewer filePath={activeTab.resourceId} />
+                <FileViewer filePath={activeTab.resourceId} onTaskClick={(taskId) => workspace.setSelectedTaskId(taskId)} />
               )}
               {activeTab?.type === 'data-table' && (
                 <DataTablePlaceholder tableId={activeTab.resourceId} />

@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 
 interface FileViewerProps {
   filePath: string
+  onTaskClick?: (taskId: string) => void
 }
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'])
@@ -16,11 +17,12 @@ function getExt(path: string): string {
   return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : ''
 }
 
-export function FileViewer({ filePath }: FileViewerProps) {
+export function FileViewer({ filePath, onTaskClick }: FileViewerProps) {
   const ext = getExt(filePath)
   const [content, setContent] = useState<string | null>(null)
   const [createdBy, setCreatedBy] = useState('')
   const [authorType, setAuthorType] = useState<'agent' | 'human'>('human')
+  const [linkedTask, setLinkedTask] = useState<{ id: string; title: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -35,6 +37,7 @@ export function FileViewer({ filePath }: FileViewerProps) {
       setEditContent(res.content)
       setCreatedBy(res.createdBy ?? '')
       setAuthorType(res.authorType ?? 'human')
+      setLinkedTask(res.task ?? null)
     } catch {
       setContent(null)
     }
@@ -126,6 +129,15 @@ export function FileViewer({ filePath }: FileViewerProps) {
             <span className="material-symbols-outlined text-[14px] align-middle mr-0.5">edit</span>
             Edit
           </button>
+          {linkedTask && onTaskClick && (
+            <button
+              onClick={() => onTaskClick(linkedTask.id)}
+              className="flex items-center gap-1 text-[11px] text-forest-green hover:underline"
+            >
+              <span className="material-symbols-outlined text-[14px]">task_alt</span>
+              {linkedTask.title}
+            </button>
+          )}
           {createdBy && (
             <span className="ml-auto flex items-center gap-1 text-[11px] text-text-muted">
               <span className="material-symbols-outlined text-[14px]">{authorType === 'agent' ? 'smart_toy' : 'person'}</span>
@@ -176,6 +188,15 @@ export function FileViewer({ filePath }: FileViewerProps) {
               Cancel
             </button>
           </>
+        )}
+        {linkedTask && onTaskClick && (
+          <button
+            onClick={() => onTaskClick(linkedTask.id)}
+            className="flex items-center gap-1 text-[11px] text-forest-green hover:underline"
+          >
+            <span className="material-symbols-outlined text-[14px]">task_alt</span>
+            {linkedTask.title}
+          </button>
         )}
         {createdBy && (
           <span className="ml-auto flex items-center gap-1 text-[11px] text-text-muted">

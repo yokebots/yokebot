@@ -26,7 +26,7 @@ import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from 
 import { logActivity, listActivity, countActivity } from './activity.ts'
 import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS, chatCompletion, type ChatMessage as LlmMessage } from './model.ts'
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
-import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, findUserByEmail } from './teams.ts'
+import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, getTeamAgentIds, findUserByEmail } from './teams.ts'
 import { authMiddleware } from './auth-middleware.ts'
 import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
@@ -1078,7 +1078,13 @@ async function main() {
         authorType = 'agent'
       }
     }
-    res.json({ path, content: file.content, createdBy: authorName, authorType })
+    // Resolve linked task
+    let task: { id: string; title: string } | null = null
+    if (file.taskId) {
+      const t = await getTask(db, file.taskId)
+      if (t) task = { id: t.id, title: t.title }
+    }
+    res.json({ path, content: file.content, createdBy: authorName, authorType, task })
   })
 
   app.put('/api/workspace/file', async (req, res) => {
@@ -1648,6 +1654,11 @@ async function main() {
     const members = await getTeamMembers(db, req.params.id)
     const caller = members.find((m) => m.userId === req.user!.id)
     if (!caller || caller.role !== 'admin') return res.status(403).json({ error: 'Only team admins can delete a team' })
+    // Unschedule all agents before deleting to prevent orphaned heartbeats
+    const agentIds = await getTeamAgentIds(db, req.params.id)
+    for (const agentId of agentIds) {
+      unscheduleAgent(agentId)
+    }
     await deleteTeam(db, req.params.id)
     res.status(204).end()
   })

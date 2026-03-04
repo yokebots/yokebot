@@ -114,14 +114,14 @@ export async function listFiles(db: Db, teamId: string, dirPath = '', recursive 
 /**
  * Read a file from the workspace.
  */
-export async function readFile(db: Db, teamId: string, filePath: string): Promise<{ content: string; createdBy: string } | null> {
+export async function readFile(db: Db, teamId: string, filePath: string): Promise<{ content: string; createdBy: string; taskId: string | null } | null> {
   const normalizedPath = filePath.replace(/^\/+/, '')
   const row = await db.queryOne<Record<string, unknown>>(
-    'SELECT content, created_by FROM workspace_files WHERE team_id = $1 AND path = $2',
+    'SELECT content, created_by, task_id FROM workspace_files WHERE team_id = $1 AND path = $2',
     [teamId, normalizedPath],
   )
   if (!row) return null
-  return { content: row.content as string, createdBy: (row.created_by as string) ?? '' }
+  return { content: row.content as string, createdBy: (row.created_by as string) ?? '', taskId: (row.task_id as string) ?? null }
 }
 
 /**

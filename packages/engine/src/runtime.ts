@@ -415,7 +415,23 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (args.agentId) filters.agentId = args.agentId
       const tasks = await listTasks(ctx.db, filters as Parameters<typeof listTasks>[1])
       if (tasks.length === 0) return 'No tasks found.'
-      return tasks.map((t) => `- [${t.status}] ${t.title} (${t.priority}, id: ${t.id})`).join('\n')
+      // Resolve agent names for richer output
+      const agentNameCache = new Map<string, string>()
+      const lines: string[] = []
+      for (const t of tasks) {
+        let agentLabel = ''
+        if (t.assignedAgentId) {
+          if (!agentNameCache.has(t.assignedAgentId)) {
+            const a = await getAgent(ctx.db, t.assignedAgentId)
+            agentNameCache.set(t.assignedAgentId, a?.name ?? t.assignedAgentId)
+          }
+          agentLabel = `, agent: ${agentNameCache.get(t.assignedAgentId)}`
+        }
+        const deadlineLabel = t.deadline ? `, deadline: ${t.deadline}` : ''
+        const updatedLabel = t.updatedAt ? `, updated: ${t.updatedAt}` : ''
+        lines.push(`- [${t.status}] ${t.title} (${t.priority}, id: ${t.id}${agentLabel}${deadlineLabel}${updatedLabel})`)
+      }
+      return lines.join('\n')
     }
 
     // ---- Chat ----
