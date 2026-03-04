@@ -69,16 +69,31 @@ export function AgentDetailPage() {
     loadData()
   }
 
+  const [saving, setSaving] = useState(false)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
   const saveConfig = async () => {
-    if (!agentId) return
-    await engine.updateAgent(agentId, {
-      systemPrompt: editPrompt,
-      modelId: editModelId,
-      heartbeatSeconds: editHeartbeat,
-      activeHoursStart: editHoursStart,
-      activeHoursEnd: editHoursEnd,
-    })
-    loadData()
+    if (!agentId || saving) return
+    setSaving(true)
+    setSaveSuccess(false)
+    try {
+      const selectedModel = models.find((m) => m.id === editModelId)
+      await engine.updateAgent(agentId, {
+        systemPrompt: editPrompt,
+        modelId: editModelId,
+        modelName: selectedModel?.name,
+        heartbeatSeconds: editHeartbeat,
+        activeHoursStart: editHoursStart,
+        activeHoursEnd: editHoursEnd,
+      })
+      await loadData()
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 2000)
+    } catch (err) {
+      alert(`Failed to save: ${(err as Error).message}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const selectedCost = modelCatalog.find((c) => c.modelId === editModelId)
@@ -335,8 +350,8 @@ export function AgentDetailPage() {
                 />
               </div>
 
-              <button onClick={saveConfig} className="rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white">
-                Save Changes
+              <button onClick={saveConfig} disabled={saving} className="rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                {saving ? 'Saving...' : saveSuccess ? 'Saved!' : 'Save Changes'}
               </button>
             </div>
           )}

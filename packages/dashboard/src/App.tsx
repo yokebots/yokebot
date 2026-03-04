@@ -17,6 +17,7 @@ import { TemplatesPage } from '@/pages/TemplatesPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { IntegrationsPage } from '@/pages/IntegrationsPage'
 import { BillingPage } from '@/pages/BillingPage'
+import { UsagePage } from '@/pages/UsagePage'
 import { TeamPage } from '@/pages/TeamPage'
 import { ProfilePage } from '@/pages/ProfilePage'
 import { ActivityPage } from '@/pages/ActivityPage'
@@ -27,6 +28,7 @@ import { GoalsPage } from '@/pages/GoalsPage'
 import { WorkflowsPage } from '@/pages/WorkflowsPage'
 import { WorkflowBuilderPage } from '@/pages/WorkflowBuilderPage'
 import { WorkflowRunPage } from '@/pages/WorkflowRunPage'
+import { WorkspacePage } from '@/pages/WorkspacePage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
@@ -150,6 +152,7 @@ function AppRoutes() {
         }
       >
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="workspace" element={<WorkspacePage />} />
         <Route path="tasks" element={<MissionControlPage />} />
         <Route path="tasks/:taskId" element={<TaskDetailPage />} />
         <Route path="projects" element={<ProjectsPage />} />
@@ -174,6 +177,7 @@ function AppRoutes() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/notifications" element={<SettingsPage />} />
         <Route path="settings/billing" element={<BillingPage />} />
+        <Route path="settings/usage" element={<UsagePage />} />
         <Route path="settings/integrations" element={<IntegrationsPage />} />
         <Route path="settings/team" element={<TeamPage />} />
         <Route path="settings/user" element={<ProfilePage />} />

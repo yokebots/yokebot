@@ -23,6 +23,23 @@ import { getTaskThread, getChannelMessages } from './chat.ts'
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
+/**
+ * Strip tool-call-like syntax from agent responses before posting to chat.
+ * Weak models sometimes output [tool_name]...[/tool_name] as text instead of
+ * actual function calls. This cleans it up so users see human-readable text only.
+ */
+function stripToolSyntax(text: string): string {
+  // Remove [tag]...[/tag] blocks (update_task, respond, discord_post, draft_welcome_message, etc.)
+  let cleaned = text.replace(/\[([a-z_]+)\][\s\S]*?\[\/\1\]/g, '')
+  // Remove standalone [/tag] and [tag] that weren't matched as pairs
+  cleaned = cleaned.replace(/\[\/?[a-z_]+\]/g, '')
+  // Remove [/think] blocks that weren't caught by the chat renderer
+  cleaned = cleaned.replace(/\[think\][\s\S]*?\[\/think\]/g, '')
+  // Clean up excessive whitespace left behind
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim()
+  return cleaned
+}
+
 interface SchedulerState {
   timers: Map<string, ReturnType<typeof setTimeout>>
   running: boolean
@@ -321,7 +338,7 @@ export async function respondToMention(
       db, agent.id, teamId, mentionPrompt, modelConfig, systemPrompt,
       state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined,
     )
-    if (result.response && !result.response.includes('[no-op]')) {
+    if (result.response && !result.response.includes('[no-op]') && result.response.trim() !== 'no-op') {
       // Reply in the SAME channel where the mention happened
       await sendMessage(db, channelId, 'agent', agent.id, result.response, undefined, teamId)
       await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${result.response.slice(0, 150)}`, undefined, teamId)
@@ -346,6 +363,8 @@ export function unscheduleAgent(agentId: string): void {
 
 // ---- Task-focused sprint helpers ----
 
+const MAX_SPRINT_ATTEMPTS = 3 // Stop retrying a task after this many sprints with no progress
+
 /** Get actionable tasks assigned to this agent, sorted by priority. */
 async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): Promise<Task[]> {
   const tasks = await listTasks(db, { agentId, teamId })
@@ -353,6 +372,12 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
   for (const task of tasks) {
     if (task.status !== 'todo' && task.status !== 'in_progress') continue
     if (await isTaskBlocked(db, task.id)) continue
+    // Skip tasks that have been sprinted on too many times without progress
+    const row = await db.queryOne<{ sprint_count: number }>(`SELECT sprint_count FROM tasks WHERE id = $1`, [task.id])
+    if ((row?.sprint_count ?? 0) >= MAX_SPRINT_ATTEMPTS) {
+      console.log(`[scheduler] Skipping task "${task.title}" — ${row?.sprint_count} sprints with no progress (max ${MAX_SPRINT_ATTEMPTS})`)
+      continue
+    }
     actionable.push(task)
   }
   return actionable
@@ -503,11 +528,22 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           )
           iterationsUsed += result.iterations
 
+          // Track sprint attempts — reset on completion, increment otherwise
+          if (result.taskCompleted) {
+            await db.run(`UPDATE tasks SET sprint_count = 0 WHERE id = $1`, [task.id])
+          } else {
+            const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
+            await db.run(`UPDATE tasks SET sprint_count = sprint_count + 1, last_sprint_at = ${now} WHERE id = $1`, [task.id])
+          }
+
+          // Clean tool-call syntax from response before posting to chat
+          const cleanResponse = result.response ? stripToolSyntax(result.response) : null
+
           // Post sprint result to the task thread
           try {
             const thread = await getTaskThread(db, task.id, agent.teamId)
-            if (result.response && !result.response.includes('[no-op]')) {
-              await sendMessage(db, thread.id, 'agent', agent.id, result.response, task.id, agent.teamId)
+            if (cleanResponse && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op' && cleanResponse.trim().length > 0) {
+              await sendMessage(db, thread.id, 'agent', agent.id, cleanResponse, task.id, agent.teamId)
             }
           } catch { /* thread post is best-effort */ }
 
@@ -540,23 +576,24 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     '2. PRIORITIZE — Decide what is most important right now (urgent tasks first, then messages, then proactive ideas).',
     '3. PLAN — Outline the specific actions you will take this check-in and in what order.',
     'Then execute your plan step by step. Use "think" again before any complex or multi-step action.',
-    'If after assessment there is genuinely nothing to do, respond with "[no-op]".',
+    'If after assessment there is genuinely nothing to do, call the "respond" tool with the message "no-op".',
     'If you notice pending approvals that need human attention, remind about them.',
   ].join('\n')
 
   try {
     const runtimeConfig = isAdvisor
-      ? { maxIterations: 10, skipCredits: true }
-      : { maxIterations: 5 }
+      ? { maxIterations: 40, skipCredits: true }
+      : { maxIterations: 40 }
     const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
     // Skip no-ops and iteration-limit fallback messages — don't spam channels
-    const isNoOp = result.response?.includes('[no-op]')
-    const isIterationLimit = result.response?.includes('unable to complete the task within the iteration limit')
-    if (result.response && !isNoOp && !isIterationLimit) {
+    const cleanedResponse = result.response ? stripToolSyntax(result.response) : null
+    const isNoOp = cleanedResponse?.includes('[no-op]') || cleanedResponse?.trim() === 'no-op' || (cleanedResponse?.trim().length ?? 0) === 0
+    const isIterationLimit = cleanedResponse?.includes('unable to complete the task within the iteration limit')
+    if (cleanedResponse && !isNoOp && !isIterationLimit) {
       // Route proactive messages to the best-matching group channel
       const groupChannel = await pickBestChannel(db, agent)
-      await sendMessage(db, groupChannel.id, 'agent', agent.id, result.response, undefined, agent.teamId)
-      await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${result.response.slice(0, 150)}`, undefined, agent.teamId)
+      await sendMessage(db, groupChannel.id, 'agent', agent.id, cleanedResponse, undefined, agent.teamId)
+      await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${cleanedResponse.slice(0, 150)}`, undefined, agent.teamId)
       console.log(`[scheduler] Proactive message from "${agent.name}" posted to #${groupChannel.name}`)
     }
   } catch (err) {

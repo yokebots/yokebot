@@ -85,7 +85,7 @@ export async function listAgents(db: Db, teamId?: string): Promise<Agent[]> {
 export async function updateAgent(
   db: Db,
   id: string,
-  updates: Partial<Pick<AgentConfig, 'name' | 'department' | 'systemPrompt' | 'proactive' | 'heartbeatSeconds'>> & { modelId?: string; modelEndpoint?: string; modelName?: string; iconName?: string; iconColor?: string },
+  updates: Partial<Pick<AgentConfig, 'name' | 'department' | 'systemPrompt' | 'proactive' | 'heartbeatSeconds' | 'activeHoursStart' | 'activeHoursEnd'>> & { modelId?: string; modelEndpoint?: string; modelName?: string; iconName?: string; iconColor?: string },
 ): Promise<Agent | null> {
   const fields: string[] = []
   const values: unknown[] = []
@@ -99,6 +99,8 @@ export async function updateAgent(
   if (updates.modelId !== undefined) { fields.push(`model_id = $${paramIdx++}`); values.push(updates.modelId) }
   if (updates.modelEndpoint !== undefined) { fields.push(`model_endpoint = $${paramIdx++}`); values.push(updates.modelEndpoint) }
   if (updates.modelName !== undefined) { fields.push(`model_name = $${paramIdx++}`); values.push(updates.modelName) }
+  if (updates.activeHoursStart !== undefined) { fields.push(`active_hours_start = $${paramIdx++}`); values.push(updates.activeHoursStart) }
+  if (updates.activeHoursEnd !== undefined) { fields.push(`active_hours_end = $${paramIdx++}`); values.push(updates.activeHoursEnd) }
   if (updates.iconName !== undefined) { fields.push(`icon_name = $${paramIdx++}`); values.push(updates.iconName) }
   if (updates.iconColor !== undefined) { fields.push(`icon_color = $${paramIdx++}`); values.push(updates.iconColor) }
 

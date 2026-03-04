@@ -19,18 +19,19 @@ const __dirname = path.dirname(__filename)
 // Load dashboard env for Supabase URL + anon key
 const dashEnvPath = path.resolve(__dirname, '../.env')
 if (fs.existsSync(dashEnvPath)) {
-  dotenv.config({ path: dashEnvPath, override: true })
+  dotenv.config({ path: dashEnvPath, override: true, quiet: true } as dotenv.DotenvConfigOptions)
 }
 
 // Load engine env for secrets (service role key, JWT secret) — override wins
 const engineEnvPath = path.resolve(__dirname, '../../engine/.env')
 if (fs.existsSync(engineEnvPath)) {
-  dotenv.config({ path: engineEnvPath, override: true })
+  dotenv.config({ path: engineEnvPath, override: true, quiet: true } as dotenv.DotenvConfigOptions)
 }
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || ''
+const ENGINE_URL = process.env.ENGINE_URL || 'https://yokebot-engine-production.up.railway.app'
 
 if (!SUPABASE_URL) throw new Error('Missing SUPABASE_URL or VITE_SUPABASE_URL')
 if (!SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY in packages/engine/.env')
@@ -46,6 +47,7 @@ export interface TestUser {
   email: string
   accessToken: string
   refreshToken: string
+  teamId: string
 }
 
 /**
@@ -90,7 +92,56 @@ export async function createTestUser(): Promise<TestUser> {
   // Use a dummy refresh token (we won't actually refresh)
   const refreshToken = `e2e-refresh-${timestamp}`
 
-  return { id: userId, email, accessToken, refreshToken }
+  // Provision a team so user doesn't get stuck on onboarding
+  const teamId = await provisionTestTeam(userId, email, accessToken)
+
+  return { id: userId, email, accessToken, refreshToken, teamId }
+}
+
+/**
+ * Provision a team for the test user via the engine API.
+ * Creates team, which auto-adds user as admin, auto-creates #general channel.
+ * Then marks onboarding as complete so the OnboardingGuard passes.
+ */
+async function provisionTestTeam(userId: string, email: string, accessToken: string): Promise<string> {
+  // Create team via engine API
+  const createRes = await fetch(`${ENGINE_URL}/api/teams`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ name: 'E2E Test Team' }),
+  })
+
+  if (!createRes.ok) {
+    const text = await createRes.text()
+    throw new Error(`Failed to create test team: ${createRes.status} ${text}`)
+  }
+
+  const team = await createRes.json() as { id: string }
+
+  // Mark onboarding complete via team profile API
+  const profileRes = await fetch(`${ENGINE_URL}/api/teams/${team.id}/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+      'X-Team-Id': team.id,
+    },
+    body: JSON.stringify({
+      companyName: 'E2E Test Co',
+      industry: 'Technology',
+      companySize: '1-10',
+      onboardedAt: new Date().toISOString(),
+    }),
+  })
+
+  if (!profileRes.ok) {
+    console.warn(`[e2e] Failed to set team profile: ${profileRes.status}`)
+  }
+
+  return team.id
 }
 
 /**

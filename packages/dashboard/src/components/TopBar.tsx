@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { UniversalSearch } from '@/components/UniversalSearch'
 import { NotificationCenter } from '@/components/NotificationCenter'
+import { ActivityDropdown } from '@/components/workspace/ActivityDropdown'
 import { useSidebar } from '@/lib/sidebar-context'
 import { useRealtimeEvent } from '@/lib/use-realtime'
 
@@ -66,6 +67,9 @@ export function TopBar() {
           </button>
 
           <div className="hidden sm:block h-6 w-px bg-border-subtle" />
+
+          {/* Activity Log */}
+          <ActivityDropdown />
 
           {/* Notifications */}
           <button

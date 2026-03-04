@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import * as engine from '@/lib/engine'
-import type { SorTable, SorRow, SorPermission, EngineAgent, Workflow } from '@/lib/engine'
+import type { SorTable, SorRow, SorPermission, EngineAgent, Workflow, TaskTag } from '@/lib/engine'
+import TagManager from '@/components/TagManager'
+import TagFilterBar from '@/components/TagFilterBar'
 
 const statusStyle: Record<string, string> = {
   Qualified: 'bg-green-50 text-green-700',
@@ -57,6 +59,10 @@ export function DataTablesPage() {
   // Search
   const [searchQuery, setSearchQuery] = useState('')
 
+  // Tags
+  const [filterTags, setFilterTags] = useState<string[]>([])
+  const [rowTags, setRowTags] = useState<Record<string, TaskTag[]>>({})
+
   const loadTables = async () => {
     try {
       const [t, ag, wf] = await Promise.all([engine.listSorTables(), engine.listAgents(), engine.listWorkflows()])
@@ -73,6 +79,12 @@ export function DataTablesPage() {
       const [r, p] = await Promise.all([engine.listSorRows(activeTableId), engine.getSorPermissions(activeTableId)])
       setRows(r)
       setPermissions(p)
+      // Initialize tag entries for loaded rows (tags are loaded on demand by TagManager)
+      const tagMap: Record<string, TaskTag[]> = {}
+      for (const row of r) {
+        if (!tagMap[row.id]) tagMap[row.id] = []
+      }
+      setRowTags((prev) => ({ ...prev, ...tagMap }))
     } catch { /* offline */ }
   }
 
@@ -272,13 +284,18 @@ export function DataTablesPage() {
   const dataColumns = columnNames.length > 0 ? columnNames
     : rows.length > 0 ? Object.keys(rows[0].data) : []
 
-  const filteredRows = searchQuery
-    ? rows.filter((row) =>
-        dataColumns.some((col) =>
-          String(row.data[col] ?? '').toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      )
-    : rows
+  const filteredRows = rows.filter((row) => {
+    // Text search
+    if (searchQuery && !dataColumns.some((col) =>
+      String(row.data[col] ?? '').toLowerCase().includes(searchQuery.toLowerCase())
+    )) return false
+    // Tag filter
+    if (filterTags.length > 0) {
+      const tags = rowTags[row.id] ?? []
+      if (!filterTags.some((ft) => tags.some((t) => t.name === ft))) return false
+    }
+    return true
+  })
 
   // ---- Render ----
 
@@ -458,8 +475,8 @@ export function DataTablesPage() {
 
           {activeTable && (
             <>
-              {/* Search */}
-              <div className="mb-4">
+              {/* Search + Tag Filter */}
+              <div className="mb-4 space-y-2">
                 <input
                   type="text"
                   value={searchQuery}
@@ -467,6 +484,7 @@ export function DataTablesPage() {
                   placeholder="Search records..."
                   className="w-full max-w-md rounded-lg border border-border-subtle px-4 py-2 text-sm focus:border-forest-green focus:outline-none"
                 />
+                <TagFilterBar selectedTags={filterTags} onSelectionChange={setFilterTags} />
               </div>
 
               {/* No columns defined yet */}
@@ -495,6 +513,7 @@ export function DataTablesPage() {
                         {dataColumns.map((col) => (
                           <th key={col} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">{col}</th>
                         ))}
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted w-40">Tags</th>
                         <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted w-20">Actions</th>
                       </tr>
                     </thead>
@@ -560,6 +579,14 @@ export function DataTablesPage() {
                             )
                           })}
                           <td className="px-4 py-3">
+                            <TagManager
+                              resourceType="sor_row"
+                              resourceId={row.id}
+                              currentTags={rowTags[row.id] ?? []}
+                              onTagsChange={(tags) => setRowTags((prev) => ({ ...prev, [row.id]: tags }))}
+                            />
+                          </td>
+                          <td className="px-4 py-3">
                             <div className="flex gap-1 relative">
                               {workflows.length > 0 && (
                                 <button
@@ -579,7 +606,7 @@ export function DataTablesPage() {
                       ))}
                       {filteredRows.length === 0 && !showAddRow && (
                         <tr>
-                          <td colSpan={dataColumns.length + 2} className="px-4 py-8 text-center text-sm text-text-muted">
+                          <td colSpan={dataColumns.length + 3} className="px-4 py-8 text-center text-sm text-text-muted">
                             {searchQuery ? 'No matching records.' : 'No rows yet. Click "Add Row" to start entering data.'}
                           </td>
                         </tr>

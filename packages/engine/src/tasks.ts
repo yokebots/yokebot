@@ -12,10 +12,15 @@ export interface TaskAttachment {
   name: string; url: string; type: string; size: number
 }
 
+export interface TaskTag {
+  id: string; name: string; color: string
+}
+
 export interface Task {
   id: string; title: string; description: string | null; status: TaskStatus; priority: TaskPriority
   assignedAgentId: string | null; parentTaskId: string | null; deadline: string | null
   headerImage: string | null; attachments: TaskAttachment[]
+  tags: TaskTag[]
   createdAt: string; updatedAt: string
 }
 
@@ -33,26 +38,49 @@ export async function createTask(db: Db, teamId: string, title: string, opts?: {
 export async function getTask(db: Db, id: string): Promise<Task | null> {
   const row = await db.queryOne<Record<string, unknown>>('SELECT * FROM tasks WHERE id = $1', [id])
   if (!row) return null
-  return rowToTask(row)
+  const task = rowToTask(row)
+  task.tags = await getTaskTags(db, id)
+  return task
 }
 
-export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; parentId?: string | null; teamId?: string }): Promise<Task[]> {
-  let sql = 'SELECT * FROM tasks WHERE 1=1'
+export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; parentId?: string | null; teamId?: string; tags?: string }): Promise<Task[]> {
+  let sql = 'SELECT DISTINCT t.* FROM tasks t'
   const params: unknown[] = []
   let paramIdx = 1
 
-  if (filters?.teamId) { sql += ` AND team_id = $${paramIdx++}`; params.push(filters.teamId) }
-  if (filters?.status) { sql += ` AND status = $${paramIdx++}`; params.push(filters.status) }
-  if (filters?.agentId) { sql += ` AND assigned_agent_id = $${paramIdx++}`; params.push(filters.agentId) }
-  if (filters?.parentId !== undefined) {
-    if (filters.parentId === null) { sql += ' AND parent_task_id IS NULL' }
-    else { sql += ` AND parent_task_id = $${paramIdx++}`; params.push(filters.parentId) }
+  // If filtering by tags, join resource_tags + tags tables
+  const tagNames = filters?.tags ? filters.tags.split(',').map((t) => t.trim()).filter(Boolean) : []
+  if (tagNames.length > 0) {
+    sql += ' JOIN resource_tags rt ON rt.resource_id = t.id AND rt.resource_type = \'task\''
+    sql += ' JOIN tags tg ON tg.id = rt.tag_id'
   }
 
-  sql += " ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC"
+  sql += ' WHERE 1=1'
+
+  if (filters?.teamId) { sql += ` AND t.team_id = $${paramIdx++}`; params.push(filters.teamId) }
+  if (filters?.status) { sql += ` AND t.status = $${paramIdx++}`; params.push(filters.status) }
+  if (filters?.agentId) { sql += ` AND t.assigned_agent_id = $${paramIdx++}`; params.push(filters.agentId) }
+  if (filters?.parentId !== undefined) {
+    if (filters.parentId === null) { sql += ' AND t.parent_task_id IS NULL' }
+    else { sql += ` AND t.parent_task_id = $${paramIdx++}`; params.push(filters.parentId) }
+  }
+  if (tagNames.length > 0) {
+    const placeholders = tagNames.map(() => `$${paramIdx++}`).join(', ')
+    sql += ` AND tg.name IN (${placeholders})`
+    params.push(...tagNames)
+  }
+
+  sql += " ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at DESC"
 
   const rows = await db.query<Record<string, unknown>>(sql, params)
-  return rows.map(rowToTask)
+  const tasks = rows.map(rowToTask)
+
+  // Hydrate tags for each task
+  for (const task of tasks) {
+    task.tags = await getTaskTags(db, task.id)
+  }
+
+  return tasks
 }
 
 export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'deadline' | 'headerImage'>> & { attachments?: string }): Promise<Task | null> {
@@ -102,6 +130,14 @@ export async function getSubtasks(db: Db, parentId: string): Promise<Task[]> {
   return listTasks(db, { parentId })
 }
 
+async function getTaskTags(db: Db, taskId: string): Promise<TaskTag[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    'SELECT t.id, t.name, t.color FROM tags t JOIN resource_tags rt ON rt.tag_id = t.id WHERE rt.resource_type = \'task\' AND rt.resource_id = $1 ORDER BY t.name',
+    [taskId],
+  )
+  return rows.map((r) => ({ id: r.id as string, name: r.name as string, color: r.color as string }))
+}
+
 function rowToTask(row: Record<string, unknown>): Task {
   let attachments: TaskAttachment[] = []
   try {
@@ -113,6 +149,6 @@ function rowToTask(row: Record<string, unknown>): Task {
     status: row.status as TaskStatus, priority: row.priority as TaskPriority,
     assignedAgentId: row.assigned_agent_id as string | null, parentTaskId: row.parent_task_id as string | null,
     deadline: row.deadline as string | null, headerImage: (row.header_image as string | null) ?? null,
-    attachments, createdAt: row.created_at as string, updatedAt: row.updated_at as string,
+    attachments, tags: [], createdAt: row.created_at as string, updatedAt: row.updated_at as string,
   }
 }

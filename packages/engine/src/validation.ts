@@ -39,6 +39,8 @@ export const UpdateAgentSchema = z.object({
   modelName: z.string().max(200).optional(),
   proactive: z.boolean().optional(),
   heartbeatSeconds: z.number().int().min(60).max(86400).optional(),
+  activeHoursStart: z.number().int().min(0).max(23).optional(),
+  activeHoursEnd: z.number().int().min(0).max(23).optional(),
   iconName: z.string().max(50).optional(),
   iconColor: z.string().max(20).optional(),
 })
@@ -90,6 +92,7 @@ export const SendChatMessageSchema = z.object({
   senderId: z.string().min(1).max(200),
   content: z.string().min(1).max(10000),
   taskId: z.string().max(200).optional(),
+  parentMessageId: z.number().int().positive().optional(),
 })
 
 // ---- Approvals ----
@@ -238,6 +241,30 @@ export const UpdateWorkflowStepSchema = z.object({
 
 export const ReorderWorkflowStepsSchema = z.object({
   stepIds: z.array(z.string().max(200)).min(1).max(100),
+})
+
+// ---- Tags ----
+
+export const CreateTagSchema = z.object({
+  name: z.string().min(1).max(50).trim(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+})
+
+export const UpdateTagSchema = z.object({
+  name: z.string().min(1).max(50).trim().optional(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+})
+
+export const TagResourceSchema = z.object({
+  tagId: z.string().min(1).max(200),
+  resourceType: z.string().min(1).max(50),
+  resourceId: z.string().min(1).max(200),
+})
+
+export const BulkSetTagsSchema = z.object({
+  tagIds: z.array(z.string().max(200)),
+  resourceType: z.string().min(1).max(50),
+  resourceId: z.string().min(1).max(200),
 })
 
 // ---- Validation helper ----

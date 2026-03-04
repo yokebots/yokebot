@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { EngineTask, EngineAgent } from '@/lib/engine'
+import TagFilterBar from '@/components/TagFilterBar'
 
 type ViewMode = 'kanban' | 'list' | 'calendar'
 
@@ -41,6 +42,7 @@ export function MissionControlPage() {
   const [newTitle, setNewTitle] = useState('')
   const [newPriority, setNewPriority] = useState('medium')
   const [filterAgent, setFilterAgent] = useState('')
+  const [filterTags, setFilterTags] = useState<string[]>([])
   const [selectedForCapture, setSelectedForCapture] = useState<Set<string>>(new Set())
   const [captureMode, setCaptureMode] = useState(false)
   const [captureName, setCaptureName] = useState('')
@@ -51,13 +53,14 @@ export function MissionControlPage() {
 
   const loadData = async () => {
     try {
-      const [t, a] = await Promise.all([engine.listTasks(), engine.listAgents()])
+      const filters = filterTags.length > 0 ? { tags: filterTags.join(',') } : undefined
+      const [t, a] = await Promise.all([engine.listTasks(filters), engine.listAgents()])
       setTasks(t)
       setAgents(a)
     } catch { /* offline */ }
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData() }, [filterTags])
 
   const setViewMode = (mode: ViewMode) => {
     setView(mode)
@@ -151,6 +154,7 @@ export function MissionControlPage() {
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
+          <TagFilterBar selectedTags={filterTags} onSelectionChange={setFilterTags} />
           <button
             onClick={() => setShowCreate(true)}
             className="flex items-center gap-2 rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-forest-green/90"
@@ -254,7 +258,19 @@ export function MissionControlPage() {
                     )}
                     {/* Mobile: stacked card layout */}
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-text-main truncate">{task.title}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium text-text-main truncate">{task.title}</p>
+                        {task.tags?.length > 0 && (
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            {task.tags.slice(0, 3).map((tag) => (
+                              <span key={tag.id} className="rounded-full px-1.5 py-0 text-[9px] font-medium text-white" style={{ backgroundColor: tag.color }}>
+                                {tag.name}
+                              </span>
+                            ))}
+                            {task.tags.length > 3 && <span className="text-[9px] text-text-muted">+{task.tags.length - 3}</span>}
+                          </div>
+                        )}
+                      </div>
                       {task.description && (
                         <p className="text-xs text-text-muted truncate mt-0.5">{task.description}</p>
                       )}
@@ -437,6 +453,16 @@ function TaskCard({ task, agents, captureMode, selected, onToggleCapture }: {
       </div>
       {task.description && (
         <p className="mb-2 text-xs text-text-muted line-clamp-2">{task.description}</p>
+      )}
+      {task.tags?.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {task.tags.slice(0, 4).map((tag) => (
+            <span key={tag.id} className="rounded-full px-1.5 py-0 text-[9px] font-medium text-white" style={{ backgroundColor: tag.color }}>
+              {tag.name}
+            </span>
+          ))}
+          {task.tags.length > 4 && <span className="text-[9px] text-text-muted">+{task.tags.length - 4}</span>}
+        </div>
       )}
       <div className="flex items-center justify-between">
         {agent ? (

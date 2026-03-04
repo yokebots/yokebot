@@ -904,6 +904,189 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 19,
+    name: 'add_workspace_files_table',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS workspace_files (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
+            binary_content BYTEA,
+            mime_type TEXT NOT NULL DEFAULT 'text/plain',
+            size INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_files_team_path ON workspace_files(team_id, path)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_workspace_files_team ON workspace_files(team_id)`)
+        await db.exec(`ALTER TABLE workspace_files ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS workspace_files (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
+            binary_content BLOB,
+            mime_type TEXT NOT NULL DEFAULT 'text/plain',
+            size INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(team_id, path)
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_workspace_files_team ON workspace_files(team_id)`)
+      }
+    },
+  },
+  {
+    version: 20,
+    name: 'remove_weak_models_add_sprint_tracking',
+    async up(db: Db) {
+      // Remove weak models from credit costs table
+      await db.run(`DELETE FROM model_credit_costs WHERE model_id IN ('gemma-3-27b', 'llama-4-scout', 'devstral-small')`)
+
+      // Add sprint attempt tracking column to tasks
+      if (db.driver === 'postgres') {
+        await db.run(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sprint_count INTEGER NOT NULL DEFAULT 0`)
+        await db.run(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS last_sprint_at TIMESTAMPTZ`)
+      } else {
+        await db.run(`ALTER TABLE tasks ADD COLUMN sprint_count INTEGER NOT NULL DEFAULT 0`)
+        await db.run(`ALTER TABLE tasks ADD COLUMN last_sprint_at TEXT`)
+      }
+    },
+  },
+  {
+    version: 21,
+    name: 'workspace_threading_file_task_link_read_tracking',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        // 1. Add threading to chat_messages
+        await db.run(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS parent_message_id INTEGER REFERENCES chat_messages(id)`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_chat_messages_parent ON chat_messages(parent_message_id)`)
+
+        // 2. Add task linking to workspace_files
+        await db.run(`ALTER TABLE workspace_files ADD COLUMN IF NOT EXISTS task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_workspace_files_task ON workspace_files(task_id)`)
+
+        // 3. Track file reads (unread indicators)
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS workspace_file_reads (
+            user_id TEXT NOT NULL,
+            file_id TEXT NOT NULL REFERENCES workspace_files(id) ON DELETE CASCADE,
+            last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, file_id)
+          )
+        `)
+        await db.run(`ALTER TABLE workspace_file_reads ENABLE ROW LEVEL SECURITY`)
+
+        // 4. Track task reads (unread indicators)
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS task_reads (
+            user_id TEXT NOT NULL,
+            task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, task_id)
+          )
+        `)
+        await db.run(`ALTER TABLE task_reads ENABLE ROW LEVEL SECURITY`)
+
+        // 5. Add 'team' channel type — auto-created per team for the single team chat feed
+        // No schema change needed: type column is TEXT, we just use 'team' as a new value
+      } else {
+        // SQLite equivalents
+        await db.run(`ALTER TABLE chat_messages ADD COLUMN parent_message_id INTEGER REFERENCES chat_messages(id)`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_chat_messages_parent ON chat_messages(parent_message_id)`)
+
+        await db.run(`ALTER TABLE workspace_files ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_workspace_files_task ON workspace_files(task_id)`)
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS workspace_file_reads (
+            user_id TEXT NOT NULL,
+            file_id TEXT NOT NULL REFERENCES workspace_files(id) ON DELETE CASCADE,
+            last_read_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (user_id, file_id)
+          )
+        `)
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS task_reads (
+            user_id TEXT NOT NULL,
+            task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            last_read_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (user_id, task_id)
+          )
+        `)
+      }
+    },
+  },
+  {
+    version: 22,
+    name: 'tags_and_resource_tags',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS tags (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '#6B7280',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(team_id, name)
+          )
+        `)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_tags_team ON tags(team_id)`)
+        await db.run(`ALTER TABLE tags ENABLE ROW LEVEL SECURITY`)
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS resource_tags (
+            tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            resource_type TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            team_id TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (tag_id, resource_type, resource_id)
+          )
+        `)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_resource_tags_resource ON resource_tags(resource_type, resource_id)`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_resource_tags_team ON resource_tags(team_id)`)
+        await db.run(`ALTER TABLE resource_tags ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS tags (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '#6B7280',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(team_id, name)
+          )
+        `)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_tags_team ON tags(team_id)`)
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS resource_tags (
+            tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            resource_type TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            team_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (tag_id, resource_type, resource_id)
+          )
+        `)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_resource_tags_resource ON resource_tags(resource_type, resource_id)`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_resource_tags_team ON resource_tags(team_id)`)
+      }
+    },
+  },
 ]
 
 /**

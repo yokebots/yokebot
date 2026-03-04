@@ -18,8 +18,10 @@ import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention, initSchedulerState } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
-import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, sendMessage, getChannelMessages, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts } from './chat.ts'
-import { initWorkspace, listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
+import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getChannelMessages, getThreadReplies, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
+import { initWorkspace, listFiles, readFile, writeFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
+// Note: WorkspaceConfig kept for backward compat — workspace is now DB-backed
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
 import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS, chatCompletion, type ChatMessage as LlmMessage } from './model.ts'
@@ -30,7 +32,7 @@ import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
 import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
 import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
-import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema, CreateWorkflowSchema, UpdateWorkflowSchema, CaptureWorkflowSchema, AddWorkflowStepSchema, UpdateWorkflowStepSchema, ReorderWorkflowStepsSchema } from './validation.ts'
+import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema, CreateWorkflowSchema, UpdateWorkflowSchema, CaptureWorkflowSchema, AddWorkflowStepSchema, UpdateWorkflowStepSchema, ReorderWorkflowStepsSchema, CreateTagSchema, UpdateTagSchema, TagResourceSchema, BulkSetTagsSchema } from './validation.ts'
 import { createWorkflow, getWorkflow, listWorkflows, updateWorkflow, deleteWorkflow, addStep, updateStep, deleteStep, listSteps, reorderSteps, startRun, getRun, listRuns, cancelRun, listRunSteps, captureWorkflow, findWorkflowsByTableTrigger } from './workflows.ts'
 import { advanceWorkflow, onTaskCompleted, approveWorkflowStep } from './workflow-executor.ts'
 import { uploadDocument, listDocuments, getDocument, deleteDocument, getDocumentChunks, searchKb } from './knowledge-base.ts'
@@ -506,6 +508,58 @@ async function main() {
     res.json(approval)
   })
 
+  // ===== Tags =====
+
+  app.get('/api/tags', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    res.json(await listTags(db, teamId))
+  })
+
+  app.post('/api/tags', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const body = validate(CreateTagSchema, req.body)
+    const tag = await createTag(db, teamId, body.name, body.color)
+    res.status(201).json(tag)
+  })
+
+  app.patch('/api/tags/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const body = validate(UpdateTagSchema, req.body)
+    const tag = await updateTag(db, req.params.id, body)
+    if (!tag) return res.status(404).json({ error: 'Tag not found' })
+    res.json(tag)
+  })
+
+  app.delete('/api/tags/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    await deleteTag(db, req.params.id)
+    res.status(204).end()
+  })
+
+  app.post('/api/tags/resource', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const body = validate(TagResourceSchema, req.body)
+    await tagResource(db, teamId, body.tagId, body.resourceType, body.resourceId)
+    res.status(201).json({ ok: true })
+  })
+
+  app.delete('/api/tags/resource', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const body = validate(TagResourceSchema, req.body)
+    await untagResource(db, body.tagId, body.resourceType, body.resourceId)
+    res.status(204).end()
+  })
+
+  app.put('/api/tags/resource/bulk', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const body = validate(BulkSetTagsSchema, req.body)
+    await bulkSetResourceTags(db, teamId, body.tagIds, body.resourceType, body.resourceId)
+    res.json({ ok: true })
+  })
+
   // ===== Tasks (Mission Control) =====
 
   app.get('/api/tasks', async (req, res) => {
@@ -515,6 +569,7 @@ async function main() {
     if (req.query.agentId) filters.agentId = req.query.agentId
     if (req.query.parentId === 'null') filters.parentId = null
     else if (req.query.parentId) filters.parentId = req.query.parentId
+    if (req.query.tags) filters.tags = req.query.tags
     res.json(await listTasks(db, filters as Parameters<typeof listTasks>[1]))
   })
 
@@ -761,14 +816,15 @@ async function main() {
     if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
     const limit = Number(req.query.limit ?? 50)
     const before = req.query.before ? Number(req.query.before) : undefined
-    res.json(await getChannelMessages(db, req.params.channelId, limit, before))
+    const includeThreads = req.query.includeThreads === 'true'
+    res.json(await getChannelMessages(db, req.params.channelId, limit, before, includeThreads))
   })
 
   app.post('/api/chat/channels/:channelId/messages', async (req, res) => {
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
-    const { senderType, senderId, content, taskId } = validate(SendChatMessageSchema, req.body)
-    const msg = await sendMessage(db, req.params.channelId, senderType, senderId, content, taskId, teamId)
+    const { senderType, senderId, content, taskId, parentMessageId } = validate(SendChatMessageSchema, req.body)
+    const msg = await sendMessage(db, req.params.channelId, senderType, senderId, content, taskId, teamId, undefined, undefined, undefined, parentMessageId)
     // sendMessage() now broadcasts new_message SSE automatically via the hook
     // Fire-and-forget mention processing (notifications + agent wake)
     processMentions(db, teamId, req.params.channelId, msg).catch((err) =>
@@ -878,6 +934,63 @@ async function main() {
     res.json(results)
   })
 
+  // ===== Thread Replies =====
+
+  app.get('/api/chat/messages/:messageId/replies', async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 100, 200)
+    const replies = await getThreadReplies(db, Number(req.params.messageId), limit)
+    res.json(replies)
+  })
+
+  // ===== Team Channel =====
+
+  app.get('/api/chat/team', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const channel = await getTeamChannel(db, teamId)
+    res.json(channel)
+  })
+
+  // ===== Workspace Read Tracking =====
+
+  app.post('/api/workspace/file/read', async (req, res) => {
+    const userId = req.user!.id
+    const teamId = req.user!.activeTeamId!
+    const { path } = req.body as { path: string }
+    if (!path) return res.status(400).json({ error: 'path is required' })
+    const file = await getFileByPath(db, teamId, path)
+    if (!file) return res.status(404).json({ error: 'File not found' })
+    await markFileRead(db, userId, file.id)
+    res.json({ ok: true })
+  })
+
+  app.get('/api/workspace/unread', async (req, res) => {
+    const userId = req.user!.id
+    const teamId = req.user!.activeTeamId!
+    const fileIds = await getUnreadFileIds(db, userId, teamId)
+    res.json({ fileIds })
+  })
+
+  app.get('/api/workspace/files-by-task/:taskId', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const files = await getFilesByTask(db, teamId, req.params.taskId)
+    res.json(files)
+  })
+
+  // ===== Task Read Tracking =====
+
+  app.post('/api/tasks/:taskId/read', async (req, res) => {
+    const userId = req.user!.id
+    await markTaskRead(db, userId, req.params.taskId)
+    res.json({ ok: true })
+  })
+
+  app.get('/api/tasks/unread', async (req, res) => {
+    const userId = req.user!.id
+    const teamId = req.user!.activeTeamId!
+    const taskIds = await getUnreadTaskIds(db, userId, teamId)
+    res.json({ taskIds })
+  })
+
   // ===== Emoji Reactions =====
 
   // Toggle a reaction (add if not exists, remove if exists)
@@ -942,23 +1055,37 @@ async function main() {
 
   // ===== Workspace =====
 
-  app.get('/api/workspace/files', (req, res) => {
+  app.get('/api/workspace/files', async (req, res) => {
+    const teamId = req.user?.activeTeamId ?? ''
     const dir = (req.query.dir as string) ?? ''
-    res.json(listFiles(workspaceConfig, dir))
+    const recursive = req.query.recursive === 'true'
+    res.json(await listFiles(db, teamId, dir, recursive))
   })
 
-  app.get('/api/workspace/file', (req, res) => {
+  app.get('/api/workspace/file', async (req, res) => {
+    const teamId = req.user?.activeTeamId ?? ''
     const path = req.query.path as string
     if (!path) return res.status(400).json({ error: 'path is required' })
-    const content = readFile(workspaceConfig, path)
-    if (content === null) return res.status(404).json({ error: 'File not found' })
-    res.json({ path, content })
+    const file = await readFile(db, teamId, path)
+    if (!file) return res.status(404).json({ error: 'File not found' })
+    // Resolve author: agent UUID → agent name
+    let authorName = file.createdBy ?? ''
+    let authorType = 'human'
+    if (authorName) {
+      const agent = await getAgent(db, authorName)
+      if (agent) {
+        authorName = agent.name
+        authorType = 'agent'
+      }
+    }
+    res.json({ path, content: file.content, createdBy: authorName, authorType })
   })
 
-  app.put('/api/workspace/file', (req, res) => {
+  app.put('/api/workspace/file', async (req, res) => {
     if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user?.activeTeamId ?? ''
     const { path, content, agentId } = validate(WriteFileSchema, req.body)
-    const result = writeFile(workspaceConfig, path, content, agentId)
+    const result = await writeFile(db, teamId, path, content, agentId)
     if (!result.success) return res.status(423).json({ error: result.error })
     res.json({ success: true })
   })

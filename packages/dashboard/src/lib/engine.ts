@@ -109,6 +109,10 @@ export interface TaskAttachment {
   name: string; url: string; type: string; size: number
 }
 
+export interface TaskTag {
+  id: string; name: string; color: string
+}
+
 export interface EngineTask {
   id: string
   title: string
@@ -120,8 +124,13 @@ export interface EngineTask {
   deadline: string | null
   headerImage: string | null
   attachments: TaskAttachment[]
+  tags: TaskTag[]
   createdAt: string
   updatedAt: string
+}
+
+export interface Tag {
+  id: string; teamId: string; name: string; color: string; createdAt: string
 }
 
 export interface EngineApproval {
@@ -163,6 +172,9 @@ export interface ChatMessage {
   audioKey: string | null
   audioDurationMs: number | null
   taskId: string | null
+  parentMessageId: number | null
+  replyCount: number
+  latestReplyAt: string | null
   createdAt: string
 }
 
@@ -222,11 +234,12 @@ export const chatWithAgent = (id: string, message: string) =>
 
 // ===== Tasks =====
 
-export const listTasks = (filters?: { status?: string; agentId?: string; parentId?: string }) => {
+export const listTasks = (filters?: { status?: string; agentId?: string; parentId?: string; tags?: string }) => {
   const params = new URLSearchParams()
   if (filters?.status) params.set('status', filters.status)
   if (filters?.agentId) params.set('agentId', filters.agentId)
   if (filters?.parentId !== undefined) params.set('parentId', filters.parentId)
+  if (filters?.tags) params.set('tags', filters.tags)
   const qs = params.toString()
   return request<EngineTask[]>(`/api/tasks${qs ? `?${qs}` : ''}`)
 }
@@ -267,6 +280,22 @@ export const setTaskHeaderImage = async (taskId: string, file: File): Promise<{ 
 
 export const removeTaskHeaderImage = (taskId: string) =>
   request<void>(`/api/tasks/${taskId}/header-image`, { method: 'DELETE' })
+
+// ===== Tags =====
+
+export const listTags = () => request<Tag[]>('/api/tags')
+
+export const createTag = (name: string, color?: string) =>
+  request<Tag>('/api/tags', { method: 'POST', body: JSON.stringify({ name, color }) })
+
+export const updateTag = (id: string, data: { name?: string; color?: string }) =>
+  request<Tag>(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deleteTag = (id: string) =>
+  request<void>(`/api/tags/${id}`, { method: 'DELETE' })
+
+export const setResourceTags = (tagIds: string[], resourceType: string, resourceId: string) =>
+  request<{ ok: boolean }>('/api/tags/resource/bulk', { method: 'PUT', body: JSON.stringify({ tagIds, resourceType, resourceId }) })
 
 async function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -328,6 +357,7 @@ export const sendMessage = (channelId: string, data: {
   senderId: string
   content: string
   taskId?: string
+  parentMessageId?: number
 }) => request<ChatMessage>(`/api/chat/channels/${channelId}/messages`, {
   method: 'POST',
   body: JSON.stringify(data),
@@ -335,13 +365,13 @@ export const sendMessage = (channelId: string, data: {
 
 // ===== Workspace =====
 
-export const listFiles = (dir = '') =>
-  request<Array<{ path: string; name: string; isDirectory: boolean; size: number; modifiedAt: string }>>(
-    `/api/workspace/files?dir=${encodeURIComponent(dir)}`,
+export const listFiles = (dir = '', recursive = false) =>
+  request<Array<{ path: string; name: string; isDirectory: boolean; size: number; modifiedAt: string; createdBy?: string; taskId?: string | null }>>(
+    `/api/workspace/files?dir=${encodeURIComponent(dir)}${recursive ? '&recursive=true' : ''}`,
   )
 
 export const readFile = (path: string) =>
-  request<{ path: string; content: string }>(`/api/workspace/file?path=${encodeURIComponent(path)}`)
+  request<{ path: string; content: string; createdBy: string; authorType?: 'agent' | 'human' }>(`/api/workspace/file?path=${encodeURIComponent(path)}`)
 
 export const writeFile = (path: string, content: string, agentId: string) =>
   request<{ success: boolean }>('/api/workspace/file', {
@@ -727,6 +757,15 @@ export const getBillingStatus = () => request<BillingStatus>('/api/billing/statu
 
 export const getCreditTransactions = (limit = 50) =>
   request<CreditTransaction[]>(`/api/billing/transactions?limit=${limit}`)
+
+export interface UsageSummary {
+  byModel: Array<{ model: string; credits: number; calls: number }>
+  byType: Array<{ type: string; credits: number; calls: number }>
+  totalSpent: number
+  totalTransactions: number
+}
+
+export const getUsageSummary = () => request<UsageSummary>('/api/billing/usage-summary')
 
 export const createSubscriptionCheckout = (priceId: string) =>
   request<{ url: string }>('/api/billing/checkout/subscription', {
@@ -1345,6 +1384,10 @@ export type SseEventType =
   | 'new_message'
   | 'kb_update'
   | 'activity'
+  | 'file_written'
+  | 'task_created'
+  | 'task_updated'
+  | 'task_completed'
 
 type SseListener = (data: unknown) => void
 
@@ -1477,4 +1520,36 @@ export function disconnectEventStream(): void {
     sseAbort = null
   }
   setSseConnected(false)
+}
+
+// ---- Workspace: Team Chat ----
+
+export async function getTeamChannel(): Promise<ChatChannel> {
+  return request('/api/chat/team')
+}
+
+export async function getThreadReplies(messageId: number, limit = 100): Promise<ChatMessage[]> {
+  return request(`/api/chat/messages/${messageId}/replies?limit=${limit}`)
+}
+
+// ---- Workspace: Read Tracking ----
+
+export async function markFileRead(path: string): Promise<{ ok: boolean }> {
+  return request('/api/workspace/file/read', { method: 'POST', body: JSON.stringify({ path }) })
+}
+
+export async function getUnreadFileIds(): Promise<{ fileIds: string[] }> {
+  return request('/api/workspace/unread')
+}
+
+export async function getFilesByTask(taskId: string): Promise<Array<{ path: string; name: string; size: number; modifiedAt: string }>> {
+  return request(`/api/workspace/files-by-task/${taskId}`)
+}
+
+export async function markTaskRead(taskId: string): Promise<{ ok: boolean }> {
+  return request(`/api/tasks/${taskId}/read`, { method: 'POST' })
+}
+
+export async function getUnreadTaskIds(): Promise<{ taskIds: string[] }> {
+  return request('/api/tasks/unread')
 }

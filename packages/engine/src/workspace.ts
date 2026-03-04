@@ -1,38 +1,19 @@
 /**
- * workspace.ts — File system manager for workspace files + global context
+ * workspace.ts — DB-backed file manager for workspace files + global context
  *
  * Manages the knowledge base: SOPs, strategy docs, brand guidelines,
- * agent-specific notes. Includes file-level locking to prevent
- * collision when two agents edit the same file.
+ * agent-specific notes. All files stored in PostgreSQL so they persist
+ * across Railway container restarts (ephemeral filesystem).
+ *
+ * Includes file-level locking to prevent collision when two agents
+ * edit the same file.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync, lstatSync } from 'fs'
-import { join, relative, resolve, normalize } from 'path'
-
-/**
- * Resolve a user-provided path and ensure it stays within the workspace root.
- * Prevents path traversal attacks (e.g. ../../etc/passwd).
- */
-function safePath(rootDir: string, userPath: string): string {
-  const normalizedRoot = normalize(resolve(rootDir))
-  const resolved = normalize(resolve(rootDir, userPath))
-  // Resolved path must start with the root directory
-  if (!resolved.startsWith(normalizedRoot + '/') && resolved !== normalizedRoot) {
-    throw new Error('Path traversal denied')
-  }
-  // Block null bytes (used to bypass path checks in some runtimes)
-  if (userPath.includes('\0')) {
-    throw new Error('Path traversal denied')
-  }
-  // Block symlinks that point outside workspace
-  if (existsSync(resolved) && lstatSync(resolved).isSymbolicLink()) {
-    throw new Error('Symlinks are not allowed in workspace')
-  }
-  return resolved
-}
+import type { Db } from './db/types.ts'
+import { randomUUID } from 'crypto'
 
 export interface WorkspaceConfig {
-  rootDir: string  // e.g. ~/yokebot/workspace
+  rootDir: string  // kept for backward compat but no longer used for storage
 }
 
 export interface FileEntry {
@@ -41,6 +22,8 @@ export interface FileEntry {
   isDirectory: boolean
   size: number
   modifiedAt: string
+  createdBy?: string
+  taskId?: string | null
 }
 
 // Simple in-memory file locks
@@ -48,67 +31,131 @@ const locks = new Map<string, { agentId: string; expiresAt: number }>()
 const LOCK_TTL_MS = 30_000 // 30 seconds
 
 /**
- * Initialize the workspace directory structure.
+ * Initialize the workspace — no-op for DB-backed storage.
  */
-export function initWorkspace(config: WorkspaceConfig): void {
-  const dirs = [
-    config.rootDir,
-    join(config.rootDir, 'global'),
-    join(config.rootDir, 'global', 'sops'),
-    join(config.rootDir, 'global', 'strategy'),
-    join(config.rootDir, 'agents'),
-  ]
-
-  for (const dir of dirs) {
-    mkdirSync(dir, { recursive: true })
-  }
+export function initWorkspace(_config: WorkspaceConfig): void {
+  // Nothing to do — tables created by migration
 }
 
 /**
  * List files in a directory (relative to workspace root).
+ * Simulates a directory tree from flat paths stored in DB.
  */
-export function listFiles(config: WorkspaceConfig, dirPath = ''): FileEntry[] {
-  const fullPath = safePath(config.rootDir, dirPath)
-  if (!existsSync(fullPath)) return []
+export async function listFiles(db: Db, teamId: string, dirPath = '', recursive = false): Promise<FileEntry[]> {
+  const normalizedDir = dirPath.replace(/^\/+|\/+$/g, '')
+  const prefix = normalizedDir ? normalizedDir + '/' : ''
+  const depth = normalizedDir ? normalizedDir.split('/').length : 0
 
-  const entries = readdirSync(fullPath, { withFileTypes: true })
-  return entries
-    .filter((e) => !e.name.startsWith('.'))
-    .map((e) => {
-      const filePath = join(fullPath, e.name)
-      const stats = statSync(filePath)
-      return {
-        path: relative(config.rootDir, filePath),
-        name: e.name,
-        isDirectory: e.isDirectory(),
-        size: stats.size,
-        modifiedAt: stats.mtime.toISOString(),
+  // Get all files for this team
+  const rows = await db.query<Record<string, unknown>>(
+    'SELECT path, size, mime_type, updated_at, created_by, task_id FROM workspace_files WHERE team_id = $1 ORDER BY path',
+    [teamId],
+  )
+
+  // Recursive mode: return all files flat (frontend builds the tree)
+  if (recursive) {
+    return rows.map(row => ({
+      path: row.path as string,
+      name: (row.path as string).split('/').pop() ?? '',
+      isDirectory: false,
+      size: row.size as number,
+      modifiedAt: row.updated_at as string,
+      createdBy: (row.created_by as string) ?? '',
+      taskId: (row.task_id as string) ?? null,
+    }))
+  }
+
+  // Non-recursive: direct children of the requested directory
+  const seen = new Set<string>()
+  const entries: FileEntry[] = []
+
+  for (const row of rows) {
+    const filePath = row.path as string
+
+    // Must be under the requested directory
+    if (prefix && !filePath.startsWith(prefix)) continue
+    // Must not be the directory itself
+    if (filePath === normalizedDir) continue
+
+    const parts = filePath.split('/')
+    const fileDepth = parts.length - 1 // depth of this file (0-indexed)
+
+    if (fileDepth === depth) {
+      // Direct child file
+      entries.push({
+        path: filePath,
+        name: parts[parts.length - 1],
+        isDirectory: false,
+        size: row.size as number,
+        modifiedAt: row.updated_at as string,
+        createdBy: (row.created_by as string) ?? '',
+        taskId: (row.task_id as string) ?? null,
+      })
+    } else if (fileDepth > depth) {
+      // This file is in a subdirectory — show the subdirectory
+      const dirName = parts[depth]
+      const dirFullPath = parts.slice(0, depth + 1).join('/')
+      if (!seen.has(dirFullPath)) {
+        seen.add(dirFullPath)
+        entries.push({
+          path: dirFullPath,
+          name: dirName,
+          isDirectory: true,
+          size: 0,
+          modifiedAt: row.updated_at as string,
+        })
       }
-    })
+    }
+  }
+
+  return entries
 }
 
 /**
  * Read a file from the workspace.
  */
-export function readFile(config: WorkspaceConfig, filePath: string): string | null {
-  const fullPath = safePath(config.rootDir, filePath)
-  if (!existsSync(fullPath)) return null
-  return readFileSync(fullPath, 'utf-8')
+export async function readFile(db: Db, teamId: string, filePath: string): Promise<{ content: string; createdBy: string } | null> {
+  const normalizedPath = filePath.replace(/^\/+/, '')
+  const row = await db.queryOne<Record<string, unknown>>(
+    'SELECT content, created_by FROM workspace_files WHERE team_id = $1 AND path = $2',
+    [teamId, normalizedPath],
+  )
+  if (!row) return null
+  return { content: row.content as string, createdBy: (row.created_by as string) ?? '' }
+}
+
+/**
+ * Read binary file content from the workspace.
+ */
+export async function readBinaryFile(db: Db, teamId: string, filePath: string): Promise<Buffer | null> {
+  const normalizedPath = filePath.replace(/^\/+/, '')
+  const row = await db.queryOne<Record<string, unknown>>(
+    'SELECT binary_content, content FROM workspace_files WHERE team_id = $1 AND path = $2',
+    [teamId, normalizedPath],
+  )
+  if (!row) return null
+  if (row.binary_content) return row.binary_content as Buffer
+  // Fallback to text content
+  return Buffer.from(row.content as string, 'utf-8')
 }
 
 /**
  * Write a file to the workspace (with lock check).
  */
-export function writeFile(
-  config: WorkspaceConfig,
+export async function writeFile(
+  db: Db,
+  teamId: string,
   filePath: string,
   content: string,
   agentId: string,
-): { success: boolean; error?: string } {
+  taskId?: string,
+): Promise<{ success: boolean; error?: string }> {
   // Clean expired locks
   cleanExpiredLocks()
 
-  const lock = locks.get(filePath)
+  const normalizedPath = filePath.replace(/^\/+/, '')
+
+  const lock = locks.get(`${teamId}:${normalizedPath}`)
   if (lock && lock.agentId !== agentId) {
     return {
       success: false,
@@ -116,26 +163,70 @@ export function writeFile(
     }
   }
 
-  const fullPath = safePath(config.rootDir, filePath)
-  const dir = fullPath.substring(0, fullPath.lastIndexOf('/'))
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(fullPath, content, 'utf-8')
+  const id = randomUUID()
+  const size = Buffer.byteLength(content, 'utf-8')
+
+  if (db.driver === 'postgres') {
+    await db.run(
+      `INSERT INTO workspace_files (id, team_id, path, content, size, created_by, task_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       ON CONFLICT (team_id, path) DO UPDATE SET content = $4, size = $5, created_by = $6, task_id = COALESCE($7, workspace_files.task_id), updated_at = NOW()`,
+      [id, teamId, normalizedPath, content, size, agentId, taskId ?? null],
+    )
+  } else {
+    await db.run(
+      `INSERT OR REPLACE INTO workspace_files (id, team_id, path, content, size, created_by, task_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, datetime('now'))`,
+      [id, teamId, normalizedPath, content, size, agentId, taskId ?? null],
+    )
+  }
 
   return { success: true }
 }
 
 /**
+ * Write binary content to the workspace (for media files).
+ */
+export async function writeBinaryFile(
+  db: Db,
+  teamId: string,
+  filePath: string,
+  content: Buffer,
+  mimeType: string,
+  createdBy = '',
+): Promise<void> {
+  const normalizedPath = filePath.replace(/^\/+/, '')
+  const id = randomUUID()
+
+  if (db.driver === 'postgres') {
+    await db.run(
+      `INSERT INTO workspace_files (id, team_id, path, content, binary_content, mime_type, size, created_by, updated_at)
+       VALUES ($1, $2, $3, '', $4, $5, $6, $7, NOW())
+       ON CONFLICT (team_id, path) DO UPDATE SET binary_content = $4, mime_type = $5, size = $6, created_by = $7, updated_at = NOW()`,
+      [id, teamId, normalizedPath, content, mimeType, content.length, createdBy],
+    )
+  } else {
+    await db.run(
+      `INSERT OR REPLACE INTO workspace_files (id, team_id, path, content, binary_content, mime_type, size, created_by, updated_at)
+       VALUES ($1, $2, $3, '', $4, $5, $6, $7, datetime('now'))`,
+      [id, teamId, normalizedPath, content, mimeType, content.length, createdBy],
+    )
+  }
+}
+
+/**
  * Acquire a write lock on a file.
  */
-export function acquireLock(filePath: string, agentId: string): boolean {
+export function acquireLock(teamId: string, filePath: string, agentId: string): boolean {
   cleanExpiredLocks()
 
-  const existing = locks.get(filePath)
+  const key = `${teamId}:${filePath}`
+  const existing = locks.get(key)
   if (existing && existing.agentId !== agentId) {
     return false // locked by another agent
   }
 
-  locks.set(filePath, {
+  locks.set(key, {
     agentId,
     expiresAt: Date.now() + LOCK_TTL_MS,
   })
@@ -145,10 +236,11 @@ export function acquireLock(filePath: string, agentId: string): boolean {
 /**
  * Release a write lock.
  */
-export function releaseLock(filePath: string, agentId: string): void {
-  const lock = locks.get(filePath)
+export function releaseLock(teamId: string, filePath: string, agentId: string): void {
+  const key = `${teamId}:${filePath}`
+  const lock = locks.get(key)
   if (lock && lock.agentId === agentId) {
-    locks.delete(filePath)
+    locks.delete(key)
   }
 }
 
@@ -157,11 +249,65 @@ export function releaseLock(filePath: string, agentId: string): void {
  */
 export function getActiveLocks(): Array<{ path: string; agentId: string; expiresAt: number }> {
   cleanExpiredLocks()
-  return Array.from(locks.entries()).map(([path, lock]) => ({
-    path,
+  return Array.from(locks.entries()).map(([key, lock]) => ({
+    path: key.includes(':') ? key.split(':').slice(1).join(':') : key,
     agentId: lock.agentId,
     expiresAt: lock.expiresAt,
   }))
+}
+
+/** Get all files linked to a specific task. */
+export async function getFilesByTask(db: Db, teamId: string, taskId: string): Promise<FileEntry[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    'SELECT path, size, updated_at FROM workspace_files WHERE team_id = $1 AND task_id = $2 ORDER BY updated_at DESC',
+    [teamId, taskId],
+  )
+  return rows.map(row => ({
+    path: row.path as string,
+    name: (row.path as string).split('/').pop() ?? '',
+    isDirectory: false,
+    size: row.size as number,
+    modifiedAt: row.updated_at as string,
+  }))
+}
+
+/** Mark a file as read by a user. */
+export async function markFileRead(db: Db, userId: string, fileId: string): Promise<void> {
+  const now = db.now()
+  if (db.driver === 'postgres') {
+    await db.run(
+      `INSERT INTO workspace_file_reads (user_id, file_id, last_read_at) VALUES ($1, $2, ${now})
+       ON CONFLICT (user_id, file_id) DO UPDATE SET last_read_at = ${now}`,
+      [userId, fileId],
+    )
+  } else {
+    await db.run(
+      `INSERT OR REPLACE INTO workspace_file_reads (user_id, file_id, last_read_at) VALUES ($1, $2, datetime('now'))`,
+      [userId, fileId],
+    )
+  }
+}
+
+/** Get IDs of files updated since user last read them. */
+export async function getUnreadFileIds(db: Db, userId: string, teamId: string): Promise<string[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT f.id FROM workspace_files f
+     LEFT JOIN workspace_file_reads fr ON fr.file_id = f.id AND fr.user_id = $1
+     WHERE f.team_id = $2 AND f.updated_at > COALESCE(fr.last_read_at, '1970-01-01')`,
+    [userId, teamId],
+  )
+  return rows.map(r => r.id as string)
+}
+
+/** Get file metadata by path (for read tracking). */
+export async function getFileByPath(db: Db, teamId: string, filePath: string): Promise<{ id: string; taskId: string | null } | null> {
+  const normalizedPath = filePath.replace(/^\/+/, '')
+  const row = await db.queryOne<Record<string, unknown>>(
+    'SELECT id, task_id FROM workspace_files WHERE team_id = $1 AND path = $2',
+    [teamId, normalizedPath],
+  )
+  if (!row) return null
+  return { id: row.id as string, taskId: (row.task_id as string) ?? null }
 }
 
 function cleanExpiredLocks(): void {

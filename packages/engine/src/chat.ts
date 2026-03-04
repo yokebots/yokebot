@@ -6,7 +6,7 @@ import type { Db } from './db/types.ts'
 import type { Response } from 'express'
 import { randomUUID } from 'crypto'
 
-export type ChannelType = 'dm' | 'group' | 'task_thread'
+export type ChannelType = 'dm' | 'group' | 'task_thread' | 'team'
 export type SenderType = 'human' | 'agent' | 'system'
 
 // ---- Chat SSE (typing indicators + real-time events) ----
@@ -59,7 +59,7 @@ export interface ChatAttachment {
   duration?: number  // milliseconds (for audio/video)
 }
 
-export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; attachments: ChatAttachment[]; audioKey: string | null; audioDurationMs: number | null; taskId: string | null; createdAt: string }
+export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; attachments: ChatAttachment[]; audioKey: string | null; audioDurationMs: number | null; taskId: string | null; parentMessageId: number | null; replyCount: number; latestReplyAt: string | null; createdAt: string }
 
 // ---- Channels ----
 
@@ -107,12 +107,12 @@ export async function getTaskThread(db: Db, taskId: string, teamId = ''): Promis
 export async function sendMessage(
   db: Db, channelId: string, senderType: SenderType, senderId: string, content: string,
   taskId?: string, teamId = '', attachments?: ChatAttachment[],
-  audioKey?: string, audioDurationMs?: number,
+  audioKey?: string, audioDurationMs?: number, parentMessageId?: number,
 ): Promise<ChatMessage> {
   const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null
   const insertedId = await db.insert(
-    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id, attachments, audio_key, audio_duration_ms) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-    [teamId, channelId, senderType, senderId, content, taskId ?? null, attachmentsJson, audioKey ?? null, audioDurationMs ?? null],
+    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id, attachments, audio_key, audio_duration_ms, parent_message_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+    [teamId, channelId, senderType, senderId, content, taskId ?? null, attachmentsJson, audioKey ?? null, audioDurationMs ?? null, parentMessageId ?? null],
     'id',
   )
   const msgId = Number(insertedId)
@@ -127,21 +127,52 @@ export async function getMessage(db: Db, id: number): Promise<ChatMessage | null
   return rowToMessage(row)
 }
 
-export async function getChannelMessages(db: Db, channelId: string, limit = 50, before?: number): Promise<ChatMessage[]> {
-  let sql = 'SELECT * FROM chat_messages WHERE channel_id = $1'
+export async function getChannelMessages(db: Db, channelId: string, limit = 50, before?: number, includeThreads = false): Promise<ChatMessage[]> {
+  let sql = 'SELECT m.*'
+  // Add reply count and latest reply timestamp via subquery
+  sql += `, COALESCE((SELECT COUNT(*) FROM chat_messages r WHERE r.parent_message_id = m.id), 0) AS reply_count`
+  sql += `, (SELECT MAX(r.created_at) FROM chat_messages r WHERE r.parent_message_id = m.id) AS latest_reply_at`
+  sql += ' FROM chat_messages m WHERE m.channel_id = $1'
+
   const params: unknown[] = [channelId]
   let paramIdx = 2
 
+  // By default, only return top-level messages (no thread replies)
+  if (!includeThreads) {
+    sql += ' AND m.parent_message_id IS NULL'
+  }
+
   if (before) {
-    sql += ` AND id < $${paramIdx++}`
+    sql += ` AND m.id < $${paramIdx++}`
     params.push(before)
   }
 
-  sql += ` ORDER BY id DESC LIMIT $${paramIdx}`
+  sql += ` ORDER BY m.id DESC LIMIT $${paramIdx}`
   params.push(limit)
 
   const rows = await db.query<Record<string, unknown>>(sql, params)
   return rows.map(rowToMessage).reverse()
+}
+
+/** Get all replies to a specific message (thread view). */
+export async function getThreadReplies(db: Db, parentMessageId: number, limit = 100): Promise<ChatMessage[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    'SELECT *, 0 AS reply_count, NULL AS latest_reply_at FROM chat_messages WHERE parent_message_id = $1 ORDER BY id ASC LIMIT $2',
+    [parentMessageId, limit],
+  )
+  return rows.map(rowToMessage)
+}
+
+/** Get or create the single team-wide chat channel. */
+export async function getTeamChannel(db: Db, teamId: string): Promise<ChatChannel> {
+  const existing = await db.queryOne<Record<string, unknown>>(
+    `SELECT * FROM chat_channels WHERE team_id = $1 AND type = 'team'`,
+    [teamId],
+  )
+  if (existing) {
+    return { id: existing.id as string, name: existing.name as string, type: existing.type as ChannelType, createdAt: existing.created_at as string }
+  }
+  return createChannel(db, teamId, 'Team Chat', 'team')
 }
 
 // ---- Search ----
@@ -365,6 +396,34 @@ export async function processMentions(
   }
 }
 
+// ---- Task Read Tracking ----
+
+export async function markTaskRead(db: Db, userId: string, taskId: string): Promise<void> {
+  const now = db.now()
+  if (db.driver === 'postgres') {
+    await db.run(
+      `INSERT INTO task_reads (user_id, task_id, last_read_at) VALUES ($1, $2, ${now})
+       ON CONFLICT (user_id, task_id) DO UPDATE SET last_read_at = ${now}`,
+      [userId, taskId],
+    )
+  } else {
+    await db.run(
+      `INSERT OR REPLACE INTO task_reads (user_id, task_id, last_read_at) VALUES ($1, $2, datetime('now'))`,
+      [userId, taskId],
+    )
+  }
+}
+
+export async function getUnreadTaskIds(db: Db, userId: string, teamId: string): Promise<string[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT t.id FROM tasks t
+     LEFT JOIN task_reads tr ON tr.task_id = t.id AND tr.user_id = $1
+     WHERE t.team_id = $2 AND t.updated_at > COALESCE(tr.last_read_at, '1970-01-01')`,
+    [userId, teamId],
+  )
+  return rows.map(r => r.id as string)
+}
+
 function rowToMessage(row: Record<string, unknown>): ChatMessage {
   let attachments: ChatAttachment[] = []
   if (row.attachments) {
@@ -376,6 +435,10 @@ function rowToMessage(row: Record<string, unknown>): ChatMessage {
     id: row.id as number, channelId: row.channel_id as string, senderType: row.sender_type as SenderType,
     senderId: row.sender_id as string, content: row.content as string, attachments,
     audioKey: (row.audio_key as string) ?? null, audioDurationMs: (row.audio_duration_ms as number) ?? null,
-    taskId: row.task_id as string | null, createdAt: row.created_at as string,
+    taskId: row.task_id as string | null,
+    parentMessageId: (row.parent_message_id as number) ?? null,
+    replyCount: Number(row.reply_count ?? 0),
+    latestReplyAt: (row.latest_reply_at as string) ?? null,
+    createdAt: row.created_at as string,
   }
 }

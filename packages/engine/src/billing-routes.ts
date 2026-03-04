@@ -10,7 +10,7 @@ import type { Db } from './db/types.ts'
 import {
   getSubscription, upsertSubscription, getCreditBalance,
   addCredits, listCreditTransactions, listModelCreditCosts,
-  resetMonthlyCredits,
+  resetMonthlyCredits, getUsageSummary,
   type SubscriptionTier,
 } from './billing.ts'
 
@@ -87,6 +87,13 @@ export function registerBillingRoutes(app: Express, db: Db): void {
     if (!teamId) { res.status(400).json({ error: 'Team context required' }); return }
     const limit = Math.min(Number(req.query.limit ?? 50), 200)
     res.json(await listCreditTransactions(db, teamId, limit))
+  })
+
+  // ---- GET /api/billing/usage-summary ----
+  app.get('/api/billing/usage-summary', async (req: Request, res: Response) => {
+    const teamId = req.user?.activeTeamId
+    if (!teamId) { res.status(400).json({ error: 'Team context required' }); return }
+    res.json(await getUsageSummary(db, teamId))
   })
 
   // ---- POST /api/billing/checkout/subscription ----

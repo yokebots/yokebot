@@ -82,38 +82,6 @@ export interface LogicalModel {
  * Users see this list. Providers are invisible.
  */
 export const MODEL_CATALOG: LogicalModel[] = [
-  // ---- Text/Chat — Budget tier ----
-  {
-    id: 'gemma-3-27b',
-    name: 'Gemma 3 27B',
-    description: 'Quick worker for simple repetitive tasks',
-    type: 'chat',
-    category: 'efficient',
-    contextWindow: 128000,
-    backends: [{ providerId: 'deepinfra', providerModelId: 'google/gemma-3-27b-it', priority: 1 }],
-  },
-  {
-    id: 'llama-4-scout',
-    name: 'Llama 4 Scout',
-    description: 'Reliable assistant for everyday tasks',
-    type: 'chat',
-    category: 'efficient',
-    contextWindow: 524288,
-    backends: [{ providerId: 'deepinfra', providerModelId: 'meta-llama/Llama-4-Scout-17B-16E-Instruct', priority: 1 }],
-  },
-  {
-    id: 'devstral-small',
-    name: 'Devstral Small',
-    description: 'Code specialist for technical work',
-    type: 'chat',
-    category: 'efficient',
-    contextWindow: 128000,
-    backends: [
-      { providerId: 'deepinfra', providerModelId: 'mistralai/Devstral-Small-2505', priority: 1 },
-      { providerId: 'fireworks', providerModelId: 'accounts/fireworks/models/devstral-small', priority: 2 },
-    ],
-  },
-
   // ---- Text/Chat — Mid tier ----
   {
     id: 'llama-4-maverick',
@@ -582,7 +550,7 @@ export async function chatCompletion(
 ): Promise<CompletionResponse> {
   const url = `${config.endpoint}/chat/completions`
   const body: Record<string, unknown> = { model: config.model, messages, stream: false }
-  if (tools && tools.length > 0) { body.tools = tools; body.tool_choice = 'auto' }
+  if (tools && tools.length > 0) { body.tools = tools; body.tool_choice = 'required' }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
 

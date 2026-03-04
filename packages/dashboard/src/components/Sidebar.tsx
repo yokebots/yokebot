@@ -46,6 +46,7 @@ interface NavItem {
 
 const mainNav: NavItem[] = [
   { to: '/dashboard', icon: 'dashboard', label: 'Dashboard', end: true },
+  { to: '/workspace', icon: 'workspaces', label: 'Workspace' },
   { to: '/chat', icon: 'forum', label: 'Chat', badgeKey: 'chat' },
   { to: '/agents', icon: 'smart_toy', label: 'Agents', children: [
     { to: '/templates', icon: 'library_books', label: 'Pre-Built' },

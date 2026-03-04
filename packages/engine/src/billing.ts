@@ -117,19 +117,13 @@ export async function upsertSubscription(db: Db, teamId: string, data: Partial<T
   }
 }
 
-// ---- Sprint Budgets (task-loop iteration caps per tier) ----
+// ---- Sprint Budget ----
+// Single generous limit for all tiers. Credits-per-iteration is the real cost control —
+// no need to artificially cap iterations and make agents do a worse job.
+const SPRINT_BUDGET = 40
 
-const SPRINT_BUDGETS: Record<SubscriptionTier | 'none', number> = {
-  none: 5,         // Free
-  team: 10,        // Starter Crew ($29)
-  business: 15,    // Growth Crew ($59)
-  enterprise: 25,  // Power Crew ($149)
-}
-
-export async function getSprintBudget(db: Db, teamId: string): Promise<number> {
-  const sub = await getSubscription(db, teamId)
-  const tier = sub?.tier ?? 'none'
-  return SPRINT_BUDGETS[tier] ?? SPRINT_BUDGETS.none
+export async function getSprintBudget(_db: Db, _teamId: string): Promise<number> {
+  return SPRINT_BUDGET
 }
 
 export function isSubscriptionActive(sub: TeamSubscription | null): boolean {
@@ -225,6 +219,57 @@ export async function listCreditTransactions(db: Db, teamId: string, limit = 50)
     [teamId, limit],
   )
   return rows.map(rowToTransaction)
+}
+
+export interface UsageSummary {
+  byModel: Array<{ model: string; credits: number; calls: number }>
+  byType: Array<{ type: string; credits: number; calls: number }>
+  totalSpent: number
+  totalTransactions: number
+}
+
+export async function getUsageSummary(db: Db, teamId: string): Promise<UsageSummary> {
+  // Aggregate by model (extract model name from description like "LLM: deepseek-v3.2 (iteration 1)")
+  const modelRows = await db.query<Record<string, unknown>>(
+    `SELECT
+       CASE WHEN description LIKE 'LLM: %' THEN split_part(split_part(description, 'LLM: ', 2), ' (', 1)
+            WHEN description LIKE 'Skill: %' THEN split_part(description, 'Skill: ', 2)
+            ELSE description END AS model,
+       SUM(ABS(amount)) AS credits,
+       COUNT(*) AS calls
+     FROM credit_transactions
+     WHERE team_id = $1 AND amount < 0
+     GROUP BY model
+     ORDER BY credits DESC`,
+    [teamId],
+  )
+
+  const byModel = modelRows.map(r => ({
+    model: r.model as string,
+    credits: Number(r.credits),
+    calls: Number(r.calls),
+  }))
+
+  // Aggregate by transaction type
+  const typeRows = await db.query<Record<string, unknown>>(
+    `SELECT type, SUM(ABS(amount)) AS credits, COUNT(*) AS calls
+     FROM credit_transactions
+     WHERE team_id = $1 AND amount < 0
+     GROUP BY type
+     ORDER BY credits DESC`,
+    [teamId],
+  )
+
+  const byType = typeRows.map(r => ({
+    type: r.type as string,
+    credits: Number(r.credits),
+    calls: Number(r.calls),
+  }))
+
+  const totalSpent = byType.reduce((sum, t) => sum + t.credits, 0)
+  const totalTransactions = byType.reduce((sum, t) => sum + t.calls, 0)
+
+  return { byModel, byType, totalSpent, totalTransactions }
 }
 
 // ---- Row mappers ----

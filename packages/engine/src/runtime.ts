@@ -11,8 +11,9 @@
 import type { Db } from './db/types.ts'
 import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCall, type ModelConfig } from './model.ts'
 import { getMessages, addMessage, getAgent } from './agent.ts'
-import { listFiles, readFile, writeFile, type WorkspaceConfig } from './workspace.ts'
+import { listFiles, readFile, writeFile } from './workspace.ts'
 import { createTask, listTasks, updateTask } from './tasks.ts'
+import { applyTagsByName } from './tags.ts'
 import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel } from './chat.ts'
 import { createApproval } from './approval.ts'
 import { listSorTables, listSorRows, addSorRow, updateSorRow, getSorTableByName, checkSorPermission } from './sor.ts'
@@ -23,7 +24,7 @@ import { loadMcpTools, callMcpTool, isMcpTool } from './mcp-client.ts'
 import { logActivity } from './activity.ts'
 import { falGenerate } from './fal.ts'
 import { getLogicalModel } from './model.ts'
-import { downloadAndSave, guessMimeType, type MediaAttachment } from './media.ts'
+import { downloadAndSave, guessMimeType } from './media.ts'
 import type { ChatAttachment } from './chat.ts'
 import { deductCredits, getModelCreditCost, getSkillCreditCost } from './billing.ts'
 
@@ -101,9 +102,9 @@ export interface ToolContext {
   agentId: string
   teamId: string
   channelId?: string
-  workspaceConfig: WorkspaceConfig
   skillsDir: string
   skipCredits?: boolean
+  currentTaskId?: string
 }
 
 /** Helper to reduce boilerplate when defining tool schemas. */
@@ -158,6 +159,7 @@ function getBuiltinTools(): ToolDef[] {
       description: { type: 'string', description: 'Task description' },
       priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Task priority' },
       deadline: { type: 'string', description: 'Deadline in ISO 8601 format (e.g. 2026-03-15). Set a reasonable deadline based on task complexity and urgency.' },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Tag names to apply (e.g. ["VIP", "follow-up"]). Tags are auto-created if they don\'t exist.' },
     }, ['title']),
 
     toolDef('update_task', 'Update an existing task. Can change any field: status, priority, description, title, assigned agent, or deadline.', {
@@ -290,22 +292,22 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Workspace ----
     case 'read_workspace_file': {
-      const content = readFile(ctx.workspaceConfig, args.path as string)
-      if (content === null) return `File not found: ${args.path as string}`
-      return content
+      const file = await readFile(ctx.db, ctx.teamId, args.path as string)
+      if (!file) return `File not found: ${args.path as string}`
+      return file.content
     }
 
     case 'write_workspace_file': {
       const content = args.content as string
       // Limit agent file writes to 100KB (API endpoint allows 1MB for human uploads)
       if (content.length > 100_000) return `Error: File content too large (${content.length} chars). Maximum is 100,000 characters for agent writes.`
-      const result = writeFile(ctx.workspaceConfig, args.path as string, content, ctx.agentId)
+      const result = await writeFile(ctx.db, ctx.teamId, args.path as string, content, ctx.agentId, ctx.currentTaskId)
       return result.success ? `File written: ${args.path as string}` : `Error: ${result.error}`
     }
 
     case 'list_workspace_files': {
       const dir = (args.directory as string) ?? ''
-      const files = listFiles(ctx.workspaceConfig, dir)
+      const files = await listFiles(ctx.db, ctx.teamId, dir)
       if (files.length === 0) return `No files found in "${dir || '/'}".`
       return files.map((f) => `${f.isDirectory ? '[dir] ' : ''}${f.path} (${f.size} bytes)`).join('\n')
     }
@@ -326,6 +328,13 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         assignedAgentId: ctx.agentId,
         deadline: args.deadline as string | undefined,
       })
+      // Apply tags if provided
+      const tagNames = Array.isArray(args.tags) ? (args.tags as string[]).filter(Boolean) : []
+      let appliedTags: string[] = []
+      if (tagNames.length > 0) {
+        const tags = await applyTagsByName(ctx.db, ctx.teamId, tagNames, 'task', task.id)
+        appliedTags = tags.map((t) => t.name)
+      }
       // Auto-create task thread and post initial summary
       try {
         const thread = await getTaskThread(ctx.db, task.id, ctx.teamId)
@@ -333,10 +342,11 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         if (task.description) parts.push(task.description)
         parts.push(`Priority: ${task.priority}`)
         if (task.deadline) parts.push(`Deadline: ${task.deadline}`)
+        if (appliedTags.length > 0) parts.push(`Tags: ${appliedTags.join(', ')}`)
         parts.push(`Status: ${task.status}`)
         await sendMessage(ctx.db, thread.id, 'agent', ctx.agentId, parts.join('\n'))
       } catch { /* thread creation is best-effort */ }
-      return `Task created: "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''})`
+      return `Task created: "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${appliedTags.length ? `, tags: ${appliedTags.join(', ')}` : ''})`
     }
 
     case 'update_task': {
@@ -518,7 +528,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         const ext = image.content_type?.split('/')?.[1] ?? 'png'
         const slug = (args.prompt as string).slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_')
         const filename = `${slug}.${ext}`
-        const workspacePath = await downloadAndSave(ctx.workspaceConfig, ctx.teamId, 'images', image.url, filename)
+        const workspacePath = await downloadAndSave(ctx.db, ctx.teamId, 'images', image.url, filename)
         const attachment: ChatAttachment = {
           type: 'image', url: workspacePath, filename,
           mimeType: guessMimeType(filename), width: image.width, height: image.height,
@@ -551,7 +561,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         const ext = video.content_type?.split('/')?.[1] ?? 'mp4'
         const slug = (args.prompt as string).slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_')
         const filename = `${slug}.${ext}`
-        const workspacePath = await downloadAndSave(ctx.workspaceConfig, ctx.teamId, 'video', video.url, filename)
+        const workspacePath = await downloadAndSave(ctx.db, ctx.teamId, 'video', video.url, filename)
         const attachment: ChatAttachment = {
           type: 'video', url: workspacePath, filename,
           mimeType: guessMimeType(filename),
@@ -582,7 +592,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         if (!mesh) return '3D generation completed but no model was returned.'
 
         const filename = mesh.file_name ?? 'model.glb'
-        const workspacePath = await downloadAndSave(ctx.workspaceConfig, ctx.teamId, '3d', mesh.url, filename)
+        const workspacePath = await downloadAndSave(ctx.db, ctx.teamId, '3d', mesh.url, filename)
         const attachment: ChatAttachment = {
           type: '3d', url: workspacePath, filename,
           mimeType: guessMimeType(filename),
@@ -785,7 +795,11 @@ This applies to ALL actions: responding to messages, updating tasks, searching t
 - When you need guidance, direction, or collaboration, @mention the relevant agent in a group channel. Do NOT message the human directly unless they specifically asked you something.
 - All your communication should happen in group channels or task threads — never send direct messages proactively.
 - If you're unsure what to do, ask your team lead or AdvisorBot via @mention in a group channel.
-- If there is nothing meaningful to do, respond with "[no-op]" — do not take actions just to appear busy.
+- If there is nothing meaningful to do, call the "respond" tool with the message "no-op" — do not take actions just to appear busy.
+
+## CRITICAL: Use function calls, NOT text tags
+
+You MUST use the provided tool/function calls for ALL actions. NEVER write tool names as text tags like [think], [respond], [update_task], etc. Always use the native function calling mechanism. If you want to think, call the "think" function. If you want to respond, call the "respond" function. Plain text output should ONLY be used for final messages — never for tool invocations.
 
 `
 }
@@ -805,7 +819,7 @@ export async function runReactLoop(
   userMessage: string,
   modelConfig: ModelConfig,
   systemPrompt: string,
-  workspaceConfig: WorkspaceConfig,
+  _workspaceConfig: unknown,
   skillsDir: string,
   config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
   logicalModelId?: string,
@@ -869,7 +883,7 @@ export async function runReactLoop(
   const skillTools = getSkillTools(skillsDir, installedSkills)
   const mcpTools = await loadMcpTools(db, agentId)
   const tools = [...getBuiltinTools(), ...skillTools, ...mcpTools]
-  const toolCtx: ToolContext = { db, agentId, teamId, workspaceConfig, skillsDir, skipCredits: config.skipCredits }
+  const toolCtx: ToolContext = { db, agentId, teamId, skillsDir, skipCredits: config.skipCredits, currentTaskId: config.currentTaskId }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
 
@@ -991,8 +1005,47 @@ export async function runReactLoop(
       continue
     }
 
-    // No tool calls — model gave a direct text response
+    // No tool calls — check if model wrote tool syntax as plain text (common with DeepSeek, Llama, etc.)
     if (completion.content) {
+      const text = completion.content
+
+      // Detect text-based [think] blocks and convert to synthetic tool calls
+      const thinkMatch = text.match(/\[think\]([\s\S]*?)\[\/think\]/)
+      if (thinkMatch && i < config.maxIterations - 1) {
+        const thought = thinkMatch[1].trim()
+        console.log(`[runtime] Model wrote [think] as text — converting to tool call (iteration ${i + 1})`)
+
+        // Check if the rest of the text after stripping think blocks is just [no-op] or empty
+        const remainder = text.replace(/\[think\][\s\S]*?\[\/think\]/g, '').replace(/\[no-?op\]/gi, '').trim()
+
+        // Treat the think block as if it were a real tool call, feed it back, and continue
+        messages.push({
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: `synth_think_${i}`,
+            type: 'function' as const,
+            function: { name: 'think', arguments: JSON.stringify({ thought }) },
+          }],
+        })
+        messages.push({
+          role: 'tool',
+          content: 'Thought noted. Now use your tools (function calls) to take action. Do NOT write [think] or [no-op] as text — use the actual function calling mechanism.',
+          tool_call_id: `synth_think_${i}`,
+        })
+        toolCallLog.push({ name: 'think', result: thought.slice(0, 200) })
+
+        // If the model also wrote [no-op] and there's nothing else, return no-op
+        if (remainder.length === 0 && text.includes('[no-op]')) {
+          response = 'no-op'
+          await addMessage(db, agentId, 'assistant', response, teamId)
+          return { response, iterations: i + 1, toolCalls: toolCallLog }
+        }
+
+        continue  // Re-enter the loop so the model can make real tool calls
+      }
+
+      // No text-based tool syntax detected — genuine text response
       response = completion.content
       await addMessage(db, agentId, 'assistant', response, teamId)
       return { response, iterations: i + 1, toolCalls: toolCallLog }

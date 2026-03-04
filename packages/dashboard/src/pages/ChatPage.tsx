@@ -47,6 +47,7 @@ export function ChatPage() {
   const [reactions, setReactions] = useState<Record<number, Record<string, string[]>>>({}) // messageId → { emoji → userIds[] }
   const [showReactionPicker, setShowReactionPicker] = useState<number | null>(null) // messageId with picker open
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
+  const [taskTitles, setTaskTitles] = useState<Record<string, string>>({}) // taskId → title
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -90,6 +91,22 @@ export function ChatPage() {
 
   useEffect(() => { loadChannels(); loadMentionCompletions(); loadUnread() }, [])
 
+  // Resolve task titles for task_thread channels
+  useEffect(() => {
+    const taskChannels = channels.filter(c => c.type === 'task_thread' && c.name.startsWith('task:'))
+    const unknownTaskIds = taskChannels
+      .map(c => c.name.replace('task:', ''))
+      .filter(id => !taskTitles[id])
+    if (unknownTaskIds.length === 0) return
+    engine.listTasks().then(tasks => {
+      const newTitles: Record<string, string> = {}
+      for (const t of tasks) {
+        newTitles[t.id] = t.title
+      }
+      setTaskTitles(prev => ({ ...prev, ...newTitles }))
+    }).catch(() => {})
+  }, [channels])
+
   // Handle ?dm=agentId query param (from AgentDetailPage link)
   useEffect(() => {
     const dmAgentId = searchParams.get('dm')
@@ -129,13 +146,25 @@ export function ChatPage() {
   // SSE: reload messages when a new message arrives in the active channel
   useRealtimeEvent('new_message', useCallback((data: unknown) => {
     const { channelId } = data as { channelId: string }
-    if (channelId === activeChannelId) loadMessages()
+    if (channelId === activeChannelId) {
+      loadMessages()
+      // Clear unread for the channel we're viewing — we just saw the message
+      setUnreadCounts(prev => { const next = { ...prev }; delete next[activeChannelId]; return next })
+    } else {
+      // Increment unread for channels we're NOT viewing
+      setUnreadCounts(prev => ({ ...prev, [channelId]: (prev[channelId] ?? 0) + 1 }))
+    }
   }, [activeChannelId]))
 
-  // SSE: live unread count updates
+  // SSE: live unread count updates (exclude the channel we're currently viewing)
   useRealtimeEvent('unread_counts', useCallback((data: unknown) => {
-    setUnreadCounts(data as Record<string, number>)
-  }, []))
+    const counts = data as Record<string, number>
+    setUnreadCounts(() => {
+      const next = { ...counts }
+      if (activeChannelId) delete next[activeChannelId]
+      return next
+    })
+  }, [activeChannelId]))
 
   const sendMsg = async () => {
     if (!newMessage.trim() || !activeChannelId) return
@@ -195,6 +224,17 @@ export function ChatPage() {
 
   const activeChannel = channels.find((c) => c.id === activeChannelId)
   const dmChannels = channels.filter((c) => c.type === 'dm')
+  const taskThreadChannels = channels.filter((c) => c.type === 'task_thread')
+
+  /** Get human-readable display name for any channel */
+  const getChannelDisplayName = (ch: ChatChannel): string => {
+    if (ch.type === 'dm') return getAgentName(ch)
+    if (ch.type === 'task_thread' && ch.name.startsWith('task:')) {
+      const taskId = ch.name.replace('task:', '')
+      return taskTitles[taskId] ?? 'Task Thread'
+    }
+    return ch.name
+  }
 
   const groupChannels = channels.filter((c) => c.type === 'group')
 
@@ -643,6 +683,34 @@ export function ChatPage() {
             )}
           </div>
 
+          {/* Task Threads */}
+          {taskThreadChannels.length > 0 && (
+            <div className="mb-4">
+              <p className="mb-2 px-2 text-xs font-bold uppercase tracking-wider text-text-muted">Task Threads</p>
+              {taskThreadChannels.map((ch) => {
+                const isActive = ch.id === activeChannelId
+                const threadUnread = unreadCounts[ch.id] ?? 0
+                return (
+                  <button
+                    key={ch.id}
+                    onClick={() => { setActiveChannelId(ch.id); setShowChannelsMobile(false) }}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
+                      isActive ? 'bg-forest-green/10 font-medium text-forest-green' : threadUnread ? 'text-text-main font-semibold' : 'text-text-secondary hover:bg-light-surface-alt'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-text-muted">task_alt</span>
+                    <span className="truncate">{getChannelDisplayName(ch)}</span>
+                    {threadUnread > 0 && !isActive && (
+                      <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-forest-green px-1.5 text-[10px] font-bold text-white">
+                        {threadUnread}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
         </div>
       </div>
 
@@ -664,7 +732,7 @@ export function ChatPage() {
                   {activeChannel.type === 'dm' ? 'smart_toy' : activeChannel.type === 'task_thread' ? 'task_alt' : 'tag'}
                 </span>
                 <h3 className="font-medium text-text-main">
-                  {activeChannel.type === 'dm' ? getAgentName(activeChannel) : activeChannel.name}
+                  {getChannelDisplayName(activeChannel)}
                 </h3>
                 {activeChannel.type === 'dm' && (() => {
                   const ag = getAgentForChannel(activeChannel)
@@ -769,7 +837,13 @@ export function ChatPage() {
                   while ((thinkMatch = thinkRegex.exec(textOnly)) !== null) {
                     thinkBlocks.push(thinkMatch[1].trim())
                   }
-                  const visibleText = textOnly.replace(/\[think\][\s\S]*?\[\/think\]\s*/g, '').trim()
+                  // Strip [think] blocks, then tool-call-like syntax ([tag]...[/tag])
+                  const afterThink = textOnly.replace(/\[think\][\s\S]*?\[\/think\]\s*/g, '')
+                  const visibleText = afterThink
+                    .replace(/\[([a-z_]+)\][\s\S]*?\[\/\1\]/g, '')
+                    .replace(/\[\/?[a-z_]+\]/g, '')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim()
                   return (
                     <>
                       {thinkBlocks.length > 0 && (

@@ -3,12 +3,11 @@
  *
  * When agents generate images/video/3D, the result is a temporary URL
  * from fal.ai. This module downloads the file and saves it to the team's
- * workspace so it becomes part of the knowledge base.
+ * workspace (DB-backed) so it becomes part of the knowledge base.
  */
 
-import { writeFileSync, mkdirSync } from 'fs'
-import { join } from 'path'
-import type { WorkspaceConfig } from './workspace.ts'
+import type { Db } from './db/types.ts'
+import { writeBinaryFile } from './workspace.ts'
 
 export type MediaType = 'images' | 'video' | '3d'
 
@@ -27,31 +26,29 @@ export interface MediaAttachment {
  * Returns the relative workspace path.
  */
 export async function downloadAndSave(
-  workspaceConfig: WorkspaceConfig,
+  db: Db,
   teamId: string,
   mediaType: MediaType,
   sourceUrl: string,
   filename: string,
 ): Promise<string> {
-  // Create the media directory
-  const mediaDir = join(workspaceConfig.rootDir, teamId, 'media', mediaType)
-  mkdirSync(mediaDir, { recursive: true })
-
   // Generate timestamped filename
   const timestamp = new Date().toISOString().slice(0, 10)
   const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
   const fullFilename = `${timestamp}_${safeFilename}`
-  const filePath = join(mediaDir, fullFilename)
+  const relativePath = `${teamId}/media/${mediaType}/${fullFilename}`
 
   // Download the file
   const res = await fetch(sourceUrl)
   if (!res.ok) throw new Error(`Failed to download media: ${res.status}`)
 
   const buffer = Buffer.from(await res.arrayBuffer())
-  writeFileSync(filePath, buffer)
+  const mimeType = guessMimeType(filename)
 
-  // Return relative path
-  return `${teamId}/media/${mediaType}/${fullFilename}`
+  // Save to DB
+  await writeBinaryFile(db, teamId, relativePath, buffer, mimeType, 'system')
+
+  return relativePath
 }
 
 /**
