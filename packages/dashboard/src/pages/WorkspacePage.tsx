@@ -28,6 +28,7 @@ export interface WorkspaceState {
   viewerTabs: ViewerTab[]
   activeTabId: string | null
   selectedTaskId: string | null
+  activeFilePath: string | null
   addViewerTab: (tab: ViewerTab) => void
   closeViewerTab: (tabId: string) => void
   setActiveTab: (tabId: string) => void
@@ -114,10 +115,15 @@ export function WorkspacePage() {
     })
   }, [activeTabId])
 
+  // Derive active file path from active tab
+  const activeTab = viewerTabs.find(t => t.id === activeTabId)
+  const activeFilePath = activeTab?.type === 'file' ? activeTab.resourceId : null
+
   const workspaceState: WorkspaceState = {
     viewerTabs,
     activeTabId,
     selectedTaskId,
+    activeFilePath,
     addViewerTab,
     closeViewerTab,
     setActiveTab: setActiveTabId,

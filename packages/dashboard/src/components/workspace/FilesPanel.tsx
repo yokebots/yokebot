@@ -114,6 +114,23 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     localStorage.setItem('workspace-expanded-dirs', JSON.stringify([...expandedDirs]))
   }, [expandedDirs])
 
+  // Auto-expand parent directories when a file is opened from another panel
+  useEffect(() => {
+    const filePath = workspace.activeFilePath
+    if (!filePath) return
+    const parts = filePath.split('/')
+    if (parts.length <= 1) return
+    setExpandedDirs(prev => {
+      const next = new Set(prev)
+      let path = ''
+      for (let i = 0; i < parts.length - 1; i++) {
+        path = path ? `${path}/${parts[i]}` : parts[i]
+        next.add(path)
+      }
+      return next
+    })
+  }, [workspace.activeFilePath])
+
   const toggleDir = (dirPath: string) => {
     setExpandedDirs(prev => {
       const next = new Set(prev)
@@ -207,6 +224,7 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
                 toggleDir={toggleDir}
                 openFile={openFile}
                 unreadFileIds={unreadFileIds}
+                activeFilePath={workspace.activeFilePath}
               />
             ))}
           </>
@@ -223,6 +241,7 @@ function TreeNodeRow({
   toggleDir,
   openFile,
   unreadFileIds,
+  activeFilePath,
 }: {
   node: TreeNode
   level: number
@@ -230,15 +249,21 @@ function TreeNodeRow({
   toggleDir: (path: string) => void
   openFile: (path: string) => void
   unreadFileIds?: Set<string>
+  activeFilePath?: string | null
 }) {
   const isExpanded = expandedDirs.has(node.path)
   const isUnread = !node.isDirectory && unreadFileIds?.has(node.path)
+  const isActive = !node.isDirectory && node.path === activeFilePath
 
   return (
     <>
       <button
         onClick={() => node.isDirectory ? toggleDir(node.path) : openFile(node.path)}
-        className="group flex w-full items-center gap-1.5 rounded-lg py-1 pr-2 text-left text-xs transition-colors hover:bg-light-surface-alt"
+        className={`group flex w-full items-center gap-1.5 rounded-lg py-1 pr-2 text-left text-xs transition-colors ${
+          isActive
+            ? 'bg-forest-green/10 text-forest-green'
+            : 'hover:bg-light-surface-alt'
+        }`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
       >
         {/* Expand/collapse chevron for dirs */}
@@ -283,6 +308,7 @@ function TreeNodeRow({
           toggleDir={toggleDir}
           openFile={openFile}
           unreadFileIds={unreadFileIds}
+          activeFilePath={activeFilePath}
         />
       ))}
     </>
