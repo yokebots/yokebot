@@ -131,22 +131,39 @@ export function MessageBubble({
 
   const timeStr = new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
-  return (
-    <div className={`group flex gap-2 ${compact ? '' : 'py-1'}`}>
-      {/* Avatar */}
-      <div
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-        style={{ backgroundColor: color + '18' }}
-      >
-        <span className="material-symbols-outlined text-[14px]" style={{ color }}>{icon}</span>
-      </div>
+  const isHuman = message.senderType === 'human'
 
-      <div className="min-w-0 flex-1">
-        {/* Name + time */}
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-xs font-semibold" style={{ color }}>{displayName}</span>
-          <span className="text-[10px] text-text-muted">{timeStr}</span>
+  return (
+    <div className={`group flex gap-2 ${isHuman ? 'justify-end' : ''} ${compact ? '' : ''}`}>
+      {/* Avatar (left side, non-human only) */}
+      {!isHuman && (
+        <div
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full mt-0.5"
+          style={{ backgroundColor: color + '18' }}
+        >
+          <span className="material-symbols-outlined text-[14px]" style={{ color }}>{icon}</span>
         </div>
+      )}
+
+      <div className={`min-w-0 max-w-[85%] rounded-xl px-3 py-2 ${
+        isHuman
+          ? 'bg-forest-green/10'
+          : isSystem
+            ? 'bg-amber-50 text-amber-800'
+            : 'bg-white border border-border-subtle'
+      }`}>
+        {/* Name + time */}
+        {!isHuman && (
+          <div className="flex items-baseline gap-1.5 mb-0.5">
+            <span className="text-[11px] font-bold" style={{ color }}>{displayName}</span>
+            <span className="text-[10px] text-text-muted">{timeStr}</span>
+          </div>
+        )}
+        {isHuman && (
+          <div className="flex items-baseline gap-1.5 mb-0.5 justify-end">
+            <span className="text-[10px] text-text-muted">{timeStr}</span>
+          </div>
+        )}
         {/* Content */}
         <div className="relative text-sm text-text-main leading-relaxed break-words whitespace-pre-wrap">
           {renderMentionContent(visibleContent, undefined, onFileClick, undefined, onTaskClick)}
