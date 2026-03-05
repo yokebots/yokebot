@@ -61,7 +61,6 @@ export async function executeSkillHandler(
     // Users can still BYOK (team_credentials checked first above).
     if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
       const NATIVE_SKILL_KEYS: Record<string, string> = {
-        brave: 'BRAVE_API_KEY',
         resend: 'RESEND_API_KEY',
         tavily: 'TAVILY_API_KEY',
       }
@@ -77,7 +76,6 @@ export async function executeSkillHandler(
     // Fall back to env vars ONLY for self-hosted (never in hosted mode)
     if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
       const envFallbacks: Record<string, string> = {
-        brave: 'BRAVE_API_KEY',
         slack: 'SLACK_WEBHOOK_URL',
         sendgrid: 'SENDGRID_API_KEY',
         twilio: 'TWILIO_AUTH',
@@ -126,20 +124,23 @@ export async function executeSkillHandler(
 // Built-in handlers
 // ============================================================
 
-// ---- Web Search (Brave) ----
+// ---- Web Search (Tavily) ----
 registerHandler('web_search', async (args, creds) => {
-  const apiKey = creds.brave
-  const query = encodeURIComponent(args.query as string)
-  const count = Math.min((args.count as number) ?? 5, 20)
-  const res = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${query}&count=${count}`, {
-    headers: { 'Accept': 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': apiKey },
+  const apiKey = creds.tavily
+  const query = args.query as string
+  const count = Math.min((args.count as number) ?? 5, 10)
+  const res = await fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, query, max_results: count, include_answer: true }),
   })
   if (!res.ok) return `Search failed: ${res.status} ${res.statusText}`
-  const data = await res.json() as { web?: { results?: Array<{ title: string; url: string; description: string }> } }
-  const results = data.web?.results ?? []
+  const data = await res.json() as { answer?: string; results?: Array<{ title: string; url: string; content: string }> }
+  const results = data.results ?? []
   if (results.length === 0) return 'No results found.'
-  return results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.description}`).join('\n\n')
-}, ['brave'])
+  const summary = data.answer ? `**Summary:** ${data.answer}\n\n---\n\n` : ''
+  return summary + results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.content}`).join('\n\n')
+}, ['tavily'])
 
 // ---- Slack Send Message ----
 registerHandler('slack_send_message', async (args, creds) => {
