@@ -537,6 +537,12 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
             await db.run(`UPDATE tasks SET sprint_count = sprint_count + 1, last_sprint_at = ${now} WHERE id = $1`, [task.id])
           }
 
+          // Auto-set task status to 'blocked' so it won't be retried on next heartbeat
+          if (result.taskBlocked) {
+            await db.run(`UPDATE tasks SET status = 'blocked' WHERE id = $1 AND status != 'done'`, [task.id])
+            console.log(`[scheduler] Task "${task.title}" auto-set to blocked — will not retry until unblocked`)
+          }
+
           // Clean tool-call syntax from response before posting to chat
           const cleanResponse = result.response ? stripToolSyntax(result.response) : null
 

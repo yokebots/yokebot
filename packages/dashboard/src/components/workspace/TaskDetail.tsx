@@ -5,7 +5,7 @@ import TagManager from '@/components/TagManager'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 
-const STATUS_OPTIONS = ['backlog', 'todo', 'in_progress', 'review', 'done']
+const STATUS_OPTIONS = ['backlog', 'todo', 'in_progress', 'blocked', 'review', 'done']
 const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent']
 
 interface TaskDetailProps {

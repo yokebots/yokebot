@@ -5,12 +5,12 @@ import TagFilterBar from '@/components/TagFilterBar'
 import type { WorkspaceState } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 
-const STATUS_ORDER = ['todo', 'in_progress', 'review', 'done', 'backlog']
+const STATUS_ORDER = ['todo', 'in_progress', 'blocked', 'review', 'done', 'backlog']
 const STATUS_LABELS: Record<string, string> = {
-  backlog: 'Backlog', todo: 'To Do', in_progress: 'In Progress', review: 'Review', done: 'Done',
+  backlog: 'Backlog', todo: 'To Do', in_progress: 'In Progress', blocked: 'Blocked', review: 'Review', done: 'Done',
 }
 const STATUS_DOTS: Record<string, string> = {
-  backlog: 'bg-gray-400', todo: 'bg-blue-500', in_progress: 'bg-amber-500', review: 'bg-purple-500', done: 'bg-green-500',
+  backlog: 'bg-gray-400', todo: 'bg-blue-500', in_progress: 'bg-amber-500', blocked: 'bg-red-500', review: 'bg-purple-500', done: 'bg-green-500',
 }
 const PRIORITY_BADGES: Record<string, string> = {
   urgent: 'bg-red-100 text-red-700',
