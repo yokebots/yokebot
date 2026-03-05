@@ -112,9 +112,13 @@ export function MessageBubble({
   const color = agent?.color ?? (isAgent ? '#0F4D26' : isSystem ? '#6B7280' : '#059669')
   const icon = agent?.icon ?? (isAgent ? 'smart_toy' : isSystem ? 'info' : 'person')
 
-  // Strip [think] blocks from display
+  // Strip [think] blocks and tool-call syntax from display
   const displayContent = message.content
-    .replace(/\[think\][\s\S]*?\[\/think\]/g, '')
+    .replace(/\[think\][\s\S]*?\[\/think\]\s*/g, '')
+    .replace(/\[([a-z_]+)\][\s\S]*?\[\/\1\]/g, '')
+    .replace(/\[\/?[a-z_]+\]/g, '')
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '') // strip markdown images
+    .replace(/\n{3,}/g, '\n\n')
     .trim()
 
   if (!displayContent) return null
@@ -144,10 +148,10 @@ export function MessageBubble({
           <span className="text-[10px] text-text-muted">{timeStr}</span>
         </div>
         {/* Content */}
-        <div className="relative text-sm text-text-main leading-relaxed break-words">
+        <div className="relative text-sm text-text-main leading-relaxed break-words whitespace-pre-wrap">
           {renderMentionContent(visibleContent, undefined, onFileClick, undefined, onTaskClick)}
           {isLong && !expanded && (
-            <span className="bg-gradient-to-l from-white via-white/80 to-transparent pl-6 text-[12px] text-forest-green cursor-pointer hover:underline" onClick={() => setExpanded(true)}>... Read more</span>
+            <span className="bg-gradient-to-l from-white via-white/80 to-transparent pl-6 text-[12px] text-forest-green cursor-pointer hover:underline whitespace-nowrap" onClick={() => setExpanded(true)}>... Read more</span>
           )}
         </div>
         {isLong && expanded && (

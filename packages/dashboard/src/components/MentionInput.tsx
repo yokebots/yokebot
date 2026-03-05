@@ -431,6 +431,24 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
  * Parse message content and render mention tokens as styled chips.
  * Returns an array of React elements (text spans + mention chips).
  */
+/** Render inline markdown: **bold**, *italic*, `code` */
+function renderInlineMarkdown(text: string, keyPrefix: string): React.ReactNode {
+  // Match **bold**, *italic*, `code` — in that order to avoid conflicts
+  const inlineRegex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g
+  const parts: React.ReactNode[] = []
+  let last = 0
+  let m
+  while ((m = inlineRegex.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    if (m[2]) parts.push(<strong key={`${keyPrefix}-b-${m.index}`}>{m[2]}</strong>)
+    else if (m[3]) parts.push(<em key={`${keyPrefix}-i-${m.index}`}>{m[3]}</em>)
+    else if (m[4]) parts.push(<code key={`${keyPrefix}-c-${m.index}`} className="rounded bg-gray-100 px-1 py-0.5 text-[12px] font-mono">{m[4]}</code>)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts.length === 1 ? parts[0] : <>{parts}</>
+}
+
 export function renderMentionContent(
   content: string,
   onAgentClick?: (agentId: string) => void,
@@ -444,9 +462,9 @@ export function renderMentionContent(
   let match
 
   while ((match = regex.exec(content)) !== null) {
-    // Add text before the mention
+    // Add text before the mention (with inline markdown)
     if (match.index > lastIndex) {
-      parts.push(<span key={`t-${lastIndex}`}>{content.slice(lastIndex, match.index)}</span>)
+      parts.push(<span key={`t-${lastIndex}`}>{renderInlineMarkdown(content.slice(lastIndex, match.index), `t-${lastIndex}`)}</span>)
     }
 
     const [, displayName, type, id] = match
@@ -521,9 +539,9 @@ export function renderMentionContent(
     lastIndex = match.index + match[0].length
   }
 
-  // Add remaining text after last mention
+  // Add remaining text after last mention (with inline markdown)
   if (lastIndex < content.length) {
-    parts.push(<span key={`t-${lastIndex}`}>{content.slice(lastIndex)}</span>)
+    parts.push(<span key={`t-${lastIndex}`}>{renderInlineMarkdown(content.slice(lastIndex), `t-${lastIndex}`)}</span>)
   }
 
   return parts.length > 0 ? parts : [<span key="raw">{content}</span>]
