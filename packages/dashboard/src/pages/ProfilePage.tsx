@@ -73,10 +73,12 @@ export function ProfilePage() {
 
   const handleSelect = (icon: string | null, color: string | null) => {
     const newIcon = icon ?? selectedIcon
-    const newColor = color ?? selectedColor
+    const newColor = color ?? selectedColor ?? 'green'
     if (icon) setSelectedIcon(icon)
     if (color) setSelectedColor(color)
-    if (newIcon && newColor) {
+    if (!selectedColor && color) setSelectedColor(color)
+    if (!selectedColor && !color) setSelectedColor('green')
+    if (newIcon) {
       handleSave(newIcon, newColor)
     }
   }
