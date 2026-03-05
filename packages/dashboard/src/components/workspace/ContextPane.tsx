@@ -107,7 +107,7 @@ function TabBar({ workspace }: { workspace: WorkspaceState }) {
   }
 
   return (
-    <div className="relative flex items-center border-b border-border-subtle bg-light-surface shrink-0">
+    <div className="relative flex items-center border-b border-border-subtle bg-light-surface shrink-0 min-w-0">
       {/* Left chevron */}
       {canScrollLeft && (
         <button
@@ -118,11 +118,11 @@ function TabBar({ workspace }: { workspace: WorkspaceState }) {
         </button>
       )}
 
-      {/* Scrollable tab container */}
+      {/* Tab container — tabs shrink proportionally, scrolls only when they hit min-width */}
       <div
         ref={containerRef}
         onScroll={updateScrollState}
-        className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide px-2 py-1"
+        className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide px-2 py-1 min-w-0 flex-1"
       >
         {workspace.viewerTabs.map(tab => {
           const isActive = workspace.activeTabId === tab.id
@@ -132,18 +132,18 @@ function TabBar({ workspace }: { workspace: WorkspaceState }) {
               ref={isActive ? activeTabRef : undefined}
               onClick={() => workspace.setActiveTab(tab.id)}
               title={tab.label}
-              className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors shrink-0 ${
+              className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors min-w-0 ${
                 isActive
                   ? 'bg-forest-green/10 text-forest-green'
                   : 'text-text-muted hover:bg-light-surface-alt hover:text-text-main'
               }`}
-              style={{ minWidth: 80, maxWidth: 180, flex: '1 1 0' }}
+              style={{ minWidth: 80, maxWidth: 180, flex: '1 1 0px' }}
             >
               <span className="material-symbols-outlined text-[14px] shrink-0">{tab.icon}</span>
-              <span className="truncate">{tab.label}</span>
+              <span className="truncate min-w-0">{tab.label}</span>
               <span
                 onClick={(e) => { e.stopPropagation(); workspace.closeViewerTab(tab.id) }}
-                className="ml-auto shrink-0 rounded hover:bg-black/10 p-0.5 leading-none cursor-pointer"
+                className="shrink-0 rounded hover:bg-black/10 p-0.5 leading-none cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[12px]">close</span>
               </span>
