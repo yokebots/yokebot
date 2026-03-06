@@ -11,7 +11,7 @@
 import type { Db } from './db/types.ts'
 import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCall, type ModelConfig } from './model.ts'
 import { getMessages, addMessage, getAgent } from './agent.ts'
-import { listFiles, readFile, writeFile } from './workspace.ts'
+import { listFiles, readFile, writeFile, renameFile, deleteFile } from './workspace.ts'
 import { createTask, listTasks, updateTask } from './tasks.ts'
 import { applyTagsByName } from './tags.ts'
 import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel } from './chat.ts'
@@ -27,6 +27,7 @@ import { getLogicalModel } from './model.ts'
 import { downloadAndSave, guessMimeType } from './media.ts'
 import type { ChatAttachment } from './chat.ts'
 import { deductCredits, getModelCreditCost, getSkillCreditCost } from './billing.ts'
+import { getTeamMembers } from './teams.ts'
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
@@ -153,22 +154,41 @@ function getBuiltinTools(): ToolDef[] {
       directory: { type: 'string', description: 'Directory path relative to workspace root (empty string for root)' },
     }, []),
 
+    toolDef('rename_workspace_file', 'Rename a file or directory in the workspace.', {
+      oldPath: { type: 'string', description: 'Current file/directory path relative to workspace root' },
+      newPath: { type: 'string', description: 'New file/directory path relative to workspace root' },
+    }, ['oldPath', 'newPath']),
+
+    toolDef('move_workspace_file', 'Move a file to a different folder in the workspace.', {
+      filePath: { type: 'string', description: 'Current file path relative to workspace root' },
+      destinationFolder: { type: 'string', description: 'Destination folder path (e.g. "research/seo")' },
+    }, ['filePath', 'destinationFolder']),
+
+    toolDef('delete_workspace_file', 'Request deletion of a workspace file. Requires human approval — the file will NOT be deleted until a human approves.', {
+      filePath: { type: 'string', description: 'File path relative to workspace root' },
+      reason: { type: 'string', description: 'Why this file should be deleted' },
+    }, ['filePath', 'reason']),
+
     // Tasks (Mission Control)
     toolDef('create_task', 'Create a new task in Mission Control.', {
       title: { type: 'string', description: 'Task title' },
       description: { type: 'string', description: 'Task description' },
       priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Task priority' },
+      status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'Initial status (defaults to backlog)' },
+      assignedAgentId: { type: 'string', description: 'Agent ID to assign the task to (defaults to self). Use list_tasks to see other agents.' },
+      assignedUserId: { type: 'string', description: 'Human team member user ID to assign the task to. Use list_team_members to look up IDs.' },
       deadline: { type: 'string', description: 'Deadline in ISO 8601 format (e.g. 2026-03-15). Set a reasonable deadline based on task complexity and urgency.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Tag names to apply (e.g. ["VIP", "follow-up"]). Tags are auto-created if they don\'t exist.' },
     }, ['title']),
 
-    toolDef('update_task', 'Update an existing task. Can change any field: status, priority, description, title, assigned agent, or deadline.', {
+    toolDef('update_task', 'Update an existing task. Can change any field: status, priority, description, title, assigned agent/user, or deadline.', {
       taskId: { type: 'string', description: 'The task ID to update' },
       status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'New status' },
       priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'New priority' },
       description: { type: 'string', description: 'Updated description' },
       title: { type: 'string', description: 'New title for the task' },
       assignedAgentId: { type: 'string', description: 'Agent ID to reassign the task to' },
+      assignedUserId: { type: 'string', description: 'Human team member user ID to assign the task to. Use list_team_members to look up IDs.' },
       deadline: { type: 'string', description: 'New deadline in ISO 8601 format (e.g. 2026-03-15)' },
     }, ['taskId']),
 
@@ -262,6 +282,9 @@ function getBuiltinTools(): ToolDef[] {
 
     toolDef('list_workflows', 'List available workflows for the current team.', {}, []),
 
+    // Team
+    toolDef('list_team_members', 'List human team members. Returns user IDs, emails, and roles. Use this to look up who to assign tasks to.', {}, []),
+
     // Skills self-install
     toolDef('list_available_skills', 'List all available skills with their install status. Use this to discover skills you can install to gain new capabilities.', {}, []),
 
@@ -312,6 +335,36 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       return files.map((f) => `${f.isDirectory ? '[dir] ' : ''}${f.path} (${f.size} bytes)`).join('\n')
     }
 
+    case 'rename_workspace_file': {
+      const oldPath = args.oldPath as string
+      const newPath = args.newPath as string
+      if (!oldPath || !newPath) return 'Error: Both oldPath and newPath are required.'
+      const result = await renameFile(ctx.db, ctx.teamId, oldPath, newPath)
+      return result.success ? `Renamed: ${oldPath} → ${newPath}` : `Error: ${result.error}`
+    }
+
+    case 'move_workspace_file': {
+      const filePath = args.filePath as string
+      const destFolder = (args.destinationFolder as string).replace(/\/+$/, '')
+      const fileName = filePath.split('/').pop() ?? filePath
+      const newPath = destFolder ? `${destFolder}/${fileName}` : fileName
+      const result = await renameFile(ctx.db, ctx.teamId, filePath, newPath)
+      return result.success ? `Moved: ${filePath} → ${newPath}` : `Error: ${result.error}`
+    }
+
+    case 'delete_workspace_file': {
+      const filePath = args.filePath as string
+      const reason = args.reason as string
+      // Route through approval — agent cannot delete directly
+      const deleteApproval = await createApproval(
+        ctx.db, ctx.teamId, ctx.agentId,
+        'delete_file',
+        `Delete file "${filePath}". Reason: ${reason}`,
+        'high',
+      )
+      return `Deletion request submitted for approval (approval id: ${deleteApproval.id}). File "${filePath}" will be deleted once a human approves.`
+    }
+
     // ---- Tasks ----
     case 'create_task': {
       // Validate deadline is not in the past
@@ -325,7 +378,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const task = await createTask(ctx.db, ctx.teamId, args.title as string, {
         description: args.description as string | undefined,
         priority: (args.priority as 'low' | 'medium' | 'high' | 'urgent') ?? 'medium',
-        assignedAgentId: ctx.agentId,
+        status: (args.status as 'backlog' | 'todo' | 'in_progress' | 'review' | 'done') || undefined,
+        assignedAgentId: (args.assignedAgentId as string) ?? ctx.agentId,
+        assignedUserId: args.assignedUserId as string | undefined,
         deadline: args.deadline as string | undefined,
       })
       // Apply tags if provided
@@ -368,6 +423,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (args.description) updates.description = args.description
       if (args.title) updates.title = args.title
       if (args.assignedAgentId) updates.assignedAgentId = args.assignedAgentId
+      if (args.assignedUserId) updates.assignedUserId = args.assignedUserId
       if (args.deadline) updates.deadline = args.deadline
       const task = await updateTask(ctx.db, args.taskId as string, updates)
       if (!task) return `Task not found: ${args.taskId as string}`
@@ -492,9 +548,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       // Team-scoped: only access own team's tables
       const table = await getSorTableByName(ctx.db, args.tableName as string, ctx.teamId)
       if (!table) return `Table not found: "${args.tableName as string}"`
-      // Enforce per-agent read permission
+      // Enforce per-agent read permission (deny by default — must have explicit canRead=true)
       const readPerm = await checkSorPermission(ctx.db, ctx.agentId, table.id)
-      if (readPerm && !readPerm.canRead) return `Access denied: you do not have read permission on table "${table.name}".`
+      if (!readPerm || !readPerm.canRead) return `Access denied: you do not have read permission on table "${table.name}".`
       const rows = await listSorRows(ctx.db, table.id)
       if (rows.length === 0) return `Table "${table.name}" has no rows.`
       return JSON.stringify(rows, null, 2)
@@ -503,8 +559,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     case 'add_source_of_record_row': {
       const table = await getSorTableByName(ctx.db, args.tableName as string, ctx.teamId)
       if (!table) return `Table not found: "${args.tableName as string}"`
+      // Deny by default — must have explicit canWrite=true
       const addPerm = await checkSorPermission(ctx.db, ctx.agentId, table.id)
-      if (addPerm && !addPerm.canWrite) return `Access denied: you do not have write permission on table "${table.name}".`
+      if (!addPerm || !addPerm.canWrite) return `Access denied: you do not have write permission on table "${table.name}".`
       const newRow = await addSorRow(ctx.db, table.id, args.data as Record<string, unknown>)
       // Fire row_added workflows (best-effort, don't block agent)
       try {
@@ -525,9 +582,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       // Team-scoped: only access own team's tables
       const table = await getSorTableByName(ctx.db, args.tableName as string, ctx.teamId)
       if (!table) return `Table not found: "${args.tableName as string}"`
-      // Enforce per-agent write permission
+      // Deny by default — must have explicit canWrite=true
       const writePerm = await checkSorPermission(ctx.db, ctx.agentId, table.id)
-      if (writePerm && !writePerm.canWrite) return `Access denied: you do not have write permission on table "${table.name}".`
+      if (!writePerm || !writePerm.canWrite) return `Access denied: you do not have write permission on table "${table.name}".`
       const row = await updateSorRow(ctx.db, args.rowId as string, args.data as Record<string, unknown>)
       if (!row) return `Row not found: ${args.rowId as string}`
       return `Row updated: ${JSON.stringify(row.data)}`
@@ -708,6 +765,12 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (installed.includes(skillName)) return `Skill "${skillName}" is already installed.`
       await installSkill(ctx.db, ctx.agentId, skillName)
       return `Skill "${skillName}" installed successfully. Its tools will be available on your next action cycle.`
+    }
+
+    case 'list_team_members': {
+      const members = await getTeamMembers(ctx.db, ctx.teamId)
+      if (members.length === 0) return 'No team members found.'
+      return members.map(m => `- ${m.email} (userId: ${m.userId}, role: ${m.role})`).join('\n')
     }
 
     default: {

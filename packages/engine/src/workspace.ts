@@ -26,6 +26,22 @@ export interface FileEntry {
   taskId?: string | null
 }
 
+/**
+ * Sanitize a file path to prevent path traversal attacks.
+ * Strips leading slashes and rejects ../ sequences, backslash escapes,
+ * and null bytes. Throws on invalid paths.
+ */
+function sanitizePath(rawPath: string): string {
+  const normalized = rawPath.replace(/^\/+/, '')
+  if (
+    normalized.includes('../') || normalized.includes('..\\') ||
+    normalized === '..' || normalized.includes('\0')
+  ) {
+    throw new Error('Invalid file path: path traversal not allowed')
+  }
+  return normalized
+}
+
 // Simple in-memory file locks
 const locks = new Map<string, { agentId: string; expiresAt: number }>()
 const LOCK_TTL_MS = 30_000 // 30 seconds
@@ -42,7 +58,7 @@ export function initWorkspace(_config: WorkspaceConfig): void {
  * Simulates a directory tree from flat paths stored in DB.
  */
 export async function listFiles(db: Db, teamId: string, dirPath = '', recursive = false): Promise<FileEntry[]> {
-  const normalizedDir = dirPath.replace(/^\/+|\/+$/g, '')
+  const normalizedDir = sanitizePath(dirPath.replace(/\/+$/g, ''))
   const prefix = normalizedDir ? normalizedDir + '/' : ''
   const depth = normalizedDir ? normalizedDir.split('/').length : 0
 
@@ -115,7 +131,7 @@ export async function listFiles(db: Db, teamId: string, dirPath = '', recursive 
  * Read a file from the workspace.
  */
 export async function readFile(db: Db, teamId: string, filePath: string): Promise<{ content: string; createdBy: string; taskId: string | null } | null> {
-  const normalizedPath = filePath.replace(/^\/+/, '')
+  const normalizedPath = sanitizePath(filePath)
   const row = await db.queryOne<Record<string, unknown>>(
     'SELECT content, created_by, task_id FROM workspace_files WHERE team_id = $1 AND path = $2',
     [teamId, normalizedPath],
@@ -128,7 +144,7 @@ export async function readFile(db: Db, teamId: string, filePath: string): Promis
  * Read binary file content from the workspace.
  */
 export async function readBinaryFile(db: Db, teamId: string, filePath: string): Promise<Buffer | null> {
-  const normalizedPath = filePath.replace(/^\/+/, '')
+  const normalizedPath = sanitizePath(filePath)
   const row = await db.queryOne<Record<string, unknown>>(
     'SELECT binary_content, content FROM workspace_files WHERE team_id = $1 AND path = $2',
     [teamId, normalizedPath],
@@ -153,7 +169,7 @@ export async function writeFile(
   // Clean expired locks
   cleanExpiredLocks()
 
-  const normalizedPath = filePath.replace(/^\/+/, '')
+  const normalizedPath = sanitizePath(filePath)
 
   const lock = locks.get(`${teamId}:${normalizedPath}`)
   if (lock && lock.agentId !== agentId) {
@@ -195,7 +211,7 @@ export async function writeBinaryFile(
   mimeType: string,
   createdBy = '',
 ): Promise<void> {
-  const normalizedPath = filePath.replace(/^\/+/, '')
+  const normalizedPath = sanitizePath(filePath)
   const id = randomUUID()
 
   if (db.driver === 'postgres') {
@@ -301,7 +317,7 @@ export async function getUnreadFileIds(db: Db, userId: string, teamId: string): 
 
 /** Get file metadata by path (for read tracking). */
 export async function getFileByPath(db: Db, teamId: string, filePath: string): Promise<{ id: string; taskId: string | null } | null> {
-  const normalizedPath = filePath.replace(/^\/+/, '')
+  const normalizedPath = sanitizePath(filePath)
   const row = await db.queryOne<Record<string, unknown>>(
     'SELECT id, task_id FROM workspace_files WHERE team_id = $1 AND path = $2',
     [teamId, normalizedPath],
@@ -312,8 +328,8 @@ export async function getFileByPath(db: Db, teamId: string, filePath: string): P
 
 /** Rename a file or directory (update paths). */
 export async function renameFile(db: Db, teamId: string, oldPath: string, newPath: string): Promise<{ success: boolean; error?: string }> {
-  const normalizedOld = oldPath.replace(/^\/+/, '')
-  const normalizedNew = newPath.replace(/^\/+/, '')
+  const normalizedOld = sanitizePath(oldPath)
+  const normalizedNew = sanitizePath(newPath)
 
   const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
 
@@ -360,7 +376,7 @@ export async function renameFile(db: Db, teamId: string, oldPath: string, newPat
 
 /** Delete a file by path. */
 export async function deleteFile(db: Db, teamId: string, filePath: string): Promise<{ success: boolean; error?: string }> {
-  const normalizedPath = filePath.replace(/^\/+/, '')
+  const normalizedPath = sanitizePath(filePath)
 
   const file = await db.queryOne<Record<string, unknown>>(
     'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',

@@ -69,6 +69,7 @@ const SQLITE_DDL = `
     status TEXT NOT NULL DEFAULT 'backlog',
     priority TEXT NOT NULL DEFAULT 'medium',
     assigned_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    assigned_user_id TEXT,
     parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     deadline TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -538,6 +539,7 @@ const POSTGRES_DDL = `
     status TEXT NOT NULL DEFAULT 'backlog',
     priority TEXT NOT NULL DEFAULT 'medium',
     assigned_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    assigned_user_id TEXT,
     parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     deadline TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -984,6 +986,9 @@ const POSTGRES_DDL = `
   -- Migrations: Add trigger_table_id to workflows, context to workflow_runs
   ALTER TABLE workflows ADD COLUMN IF NOT EXISTS trigger_table_id TEXT;
   ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS context TEXT NOT NULL DEFAULT '{}';
+
+  -- Migrations: Add assigned_user_id to tasks (human task assignment)
+  ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_user_id TEXT;
 
   -- All tables are accessed via the Express API using a service_role or
   -- direct Postgres connection (which bypasses RLS). We enable RLS and

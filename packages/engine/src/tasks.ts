@@ -18,19 +18,19 @@ export interface TaskTag {
 
 export interface Task {
   id: string; title: string; description: string | null; status: TaskStatus; priority: TaskPriority
-  assignedAgentId: string | null; parentTaskId: string | null; deadline: string | null
+  assignedAgentId: string | null; assignedUserId: string | null; parentTaskId: string | null; deadline: string | null
   headerImage: string | null; attachments: TaskAttachment[]
   tags: TaskTag[]
   createdAt: string; updatedAt: string
 }
 
 export async function createTask(db: Db, teamId: string, title: string, opts?: {
-  description?: string; priority?: TaskPriority; assignedAgentId?: string; parentTaskId?: string; deadline?: string
+  description?: string; priority?: TaskPriority; assignedAgentId?: string; assignedUserId?: string; parentTaskId?: string; deadline?: string; status?: TaskStatus
 }): Promise<Task> {
   const id = randomUUID()
   await db.run(
-    'INSERT INTO tasks (id, team_id, title, description, priority, assigned_agent_id, parent_task_id, deadline) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-    [id, teamId, title, opts?.description ?? null, opts?.priority ?? 'medium', opts?.assignedAgentId ?? null, opts?.parentTaskId ?? null, opts?.deadline ?? null],
+    'INSERT INTO tasks (id, team_id, title, description, status, priority, assigned_agent_id, assigned_user_id, parent_task_id, deadline) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+    [id, teamId, title, opts?.description ?? null, opts?.status ?? 'backlog', opts?.priority ?? 'medium', opts?.assignedAgentId ?? null, opts?.assignedUserId ?? null, opts?.parentTaskId ?? null, opts?.deadline ?? null],
   )
   return (await getTask(db, id))!
 }
@@ -95,7 +95,7 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   return tasks
 }
 
-export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'deadline' | 'headerImage'>> & { attachments?: string }): Promise<Task | null> {
+export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'assignedUserId' | 'deadline' | 'headerImage'>> & { attachments?: string }): Promise<Task | null> {
   const fields: string[] = []
   const values: unknown[] = []
   let paramIdx = 1
@@ -105,6 +105,7 @@ export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task,
   if (updates.status !== undefined) { fields.push(`status = $${paramIdx++}`); values.push(updates.status) }
   if (updates.priority !== undefined) { fields.push(`priority = $${paramIdx++}`); values.push(updates.priority) }
   if (updates.assignedAgentId !== undefined) { fields.push(`assigned_agent_id = $${paramIdx++}`); values.push(updates.assignedAgentId) }
+  if (updates.assignedUserId !== undefined) { fields.push(`assigned_user_id = $${paramIdx++}`); values.push(updates.assignedUserId) }
   if (updates.deadline !== undefined) { fields.push(`deadline = $${paramIdx++}`); values.push(updates.deadline) }
   if (updates.headerImage !== undefined) { fields.push(`header_image = $${paramIdx++}`); values.push(updates.headerImage) }
   if (updates.attachments !== undefined) { fields.push(`attachments = $${paramIdx++}`); values.push(updates.attachments) }
@@ -159,7 +160,7 @@ function rowToTask(row: Record<string, unknown>): Task {
   return {
     id: row.id as string, title: row.title as string, description: row.description as string | null,
     status: row.status as TaskStatus, priority: row.priority as TaskPriority,
-    assignedAgentId: row.assigned_agent_id as string | null, parentTaskId: row.parent_task_id as string | null,
+    assignedAgentId: row.assigned_agent_id as string | null, assignedUserId: (row.assigned_user_id as string | null) ?? null, parentTaskId: row.parent_task_id as string | null,
     deadline: row.deadline as string | null, headerImage: (row.header_image as string | null) ?? null,
     attachments, tags: [], createdAt: row.created_at as string, updatedAt: row.updated_at as string,
   }

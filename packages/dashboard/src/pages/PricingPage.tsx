@@ -38,7 +38,7 @@ export function PricingPage() {
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 text-center">
             <h1 className="mb-4 font-display text-4xl font-bold text-text-main md:text-5xl">Build Your Team</h1>
-            <p className="mx-auto max-w-xl text-lg text-text-muted">Start with a couple of part-timers and scale to a full 24/7 workforce. Onboard new team members in minutes, not weeks.</p>
+            <p className="mx-auto max-w-xl text-lg text-text-muted">Every plan includes 24/7 always-on agents. Scale from a small crew to a full workforce in minutes, not weeks.</p>
           </div>
           <div className="grid items-center gap-8 md:grid-cols-3">
             {PLANS.map((plan) => (

@@ -41,7 +41,7 @@ const faqItems = [
   { q: 'What are credits?', a: 'Universal credits cover all usage on the platform: LLM heartbeats, media generation (images, video, 3D), and skill execution (web search, email, etc.). Your subscription includes monthly credits, and you can buy additional credit packs that never expire.' },
   { q: 'Can I self-host?', a: 'Yes! YokeBot is open-source (AGPLv3). You can self-host on your own hardware with your own API keys for free forever. The cloud version adds managed hosting, billing, and team features.' },
   { q: 'What models are available?', a: 'We offer 12+ models ranging from budget (Gemma 3 at 5 credits/heartbeat) to frontier (Qwen 3.5 at 75 credits/heartbeat), plus image, video, and 3D generation models. Each model has star ratings for Intelligence, Power, and Speed to help you choose.' },
-  { q: 'How do agents work?', a: 'Each agent runs on a check-in cycle. Every check-in (configurable from 5 min to 1 hour), the agent reviews its tasks, goals, and messages, then takes autonomous action using its assigned tools and skills. You set their work schedule — part-time, full-time, or always-on — and they operate within that window, just like a real team member.' },
+  { q: 'How do agents work?', a: 'Each agent runs on a check-in cycle. Every check-in (configurable from 5 min to 1 hour), the agent reviews its tasks, goals, and messages, then takes autonomous action using its assigned tools and skills. All plans include 24/7 availability — your agents are always on, just like a real team member.' },
   { q: 'Is my data safe?', a: 'Absolutely. With the self-hosted option, no data ever leaves your servers. On the cloud version, all data is encrypted in transit and at rest, and we never train on your data.' },
   { q: 'Can I bring my own API keys?', a: 'Yes! BYOK (Bring Your Own Key) skills cost 0 credits — you pay your provider directly. Self-hosted users always use their own keys for everything.' },
 ]
@@ -314,19 +314,19 @@ export function HomePage() {
           <div className="mx-auto max-w-7xl">
             <div className="mb-16 text-center">
               <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-5xl">Build Your Team</h2>
-              <p className="mx-auto max-w-xl text-text-muted">Start with a couple of part-timers and scale to a full 24/7 workforce. Onboard new team members in minutes, not weeks.</p>
+              <p className="mx-auto max-w-xl text-text-muted">Every plan includes 24/7 always-on agents. Scale from a small crew to a full workforce in minutes, not weeks.</p>
             </div>
             <div className="grid items-center gap-8 md:grid-cols-3">
               {/* Team */}
               <div className="pricing-card-hover group relative flex flex-col rounded-xl border border-border-subtle bg-white p-8 transition-all duration-300 hover:border-forest-green/30" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)' }}>
                 <h3 className="mb-1 font-display text-xl font-bold text-text-main">Starter Crew</h3>
-                <p className="mb-4 text-xs text-text-muted">Hire your first part-time team members</p>
+                <p className="mb-4 text-xs text-text-muted">Hire your first three AI agents!</p>
                 <div className="mb-6 flex items-baseline gap-1">
                   <span className="text-4xl font-bold text-text-main">$29</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['3 Agent Team Members', '30-Min Heartbeat Interval', 'Part-Time Availability', '50,000 Universal Credits/Mo'].map((f) => (
+                  {['3 Agent Team Members', '30-Min Heartbeat Interval', '24/7 Always Available', '50,000 Universal Credits/Mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
@@ -335,10 +335,10 @@ export function HomePage() {
                 </ul>
                 <div className="group/tip relative mb-6 inline-flex items-center gap-1 cursor-help">
                   <span className="material-symbols-outlined text-accent-gold text-[14px]">schedule</span>
-                  <span className="text-[12px] font-bold text-accent-gold-dim">Avg 64 work hrs/week</span>
+                  <span className="text-[12px] font-bold text-accent-gold-dim">Avg 144 work hrs/week</span>
                   <span className="material-symbols-outlined text-[12px] text-text-muted">info</span>
                   <div className="absolute bottom-full left-0 mb-1 hidden group-hover/tip:block z-10 w-56 rounded-lg border border-border-subtle bg-white p-2 text-[11px] text-text-muted shadow-lg">
-                    Based on 2 agents working 16 hrs/day at 30-min heartbeats
+                    Based on 3 agents working 24/7 at 30-min heartbeats
                   </div>
                 </div>
                 <button onClick={goToLogin} className="w-full rounded-lg border border-gray-300 bg-gray-50 py-3 font-bold text-text-main transition-colors hover:border-accent-gold hover:bg-white hover:text-accent-gold-dim">Start Onboarding</button>
@@ -353,7 +353,7 @@ export function HomePage() {
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['9 Agent Team Members', '15-Min Heartbeat Interval', 'Full-Time Availability', '150,000 Universal Credits/Mo'].map((f) => (
+                  {['9 Agent Team Members', '15-Min Heartbeat Interval', '24/7 Always Available', '150,000 Universal Credits/Mo'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}

@@ -103,6 +103,11 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
   // Inline rename state
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
 
+  // Upload state
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const panelRef = useRef<HTMLDivElement>(null)
 
   const loadFiles = useCallback(async () => {
@@ -345,6 +350,32 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     setExporting(false)
   }
 
+  const handleUploadFiles = async (files: FileList | File[]) => {
+    if (uploading) return
+    setUploading(true)
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 10 * 1024 * 1024) {
+          alert(`"${file.name}" exceeds the 10MB limit`)
+          continue
+        }
+        await engine.uploadWorkspaceFile(file)
+      }
+      await loadFiles()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Upload failed')
+    }
+    setUploading(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (e.dataTransfer.files.length > 0) {
+      handleUploadFiles(e.dataTransfer.files)
+    }
+  }
+
   // Search: filter flat file list
   const searchResults = search
     ? allFiles.filter(f => f.path.toLowerCase().includes(search.toLowerCase()))
@@ -386,6 +417,23 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
           <span className="material-symbols-outlined text-[14px]">table_chart</span>
           Data
         </button>
+        {activePanel === 'files' && (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title="Upload files"
+            className="ml-auto flex items-center gap-1 rounded-md px-2 py-1.5 text-xs text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-[14px]">{uploading ? 'hourglass_top' : 'upload_file'}</span>
+          </button>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => { if (e.target.files?.length) handleUploadFiles(e.target.files); e.target.value = '' }}
+        />
       </div>
 
       {/* Search */}
@@ -400,7 +448,12 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
       </div>
 
       {/* Content area */}
-      <div className="flex-1 overflow-y-auto px-1">
+      <div
+        className={`flex-1 overflow-y-auto px-1 relative ${dragOver ? 'ring-2 ring-inset ring-forest-green/40 bg-forest-green/5' : ''}`}
+        onDragOver={(e) => { e.preventDefault(); if (activePanel === 'files') setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={activePanel === 'files' ? handleDrop : undefined}
+      >
         {activePanel === 'files' ? (
           // FILES panel
           searchResults ? (
@@ -426,7 +479,11 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
           ) : (
             <>
               {tree.length === 0 && (
-                <p className="px-3 py-6 text-center text-xs text-text-muted">No files yet</p>
+                <div className="px-3 py-6 text-center text-xs text-text-muted">
+                  <span className="material-symbols-outlined text-2xl mb-1 block text-text-muted/40">upload_file</span>
+                  <p>No files yet</p>
+                  <p className="mt-1 text-[10px]">Drop files here or click upload</p>
+                </div>
               )}
               {tree.map(node => (
                 <TreeNodeRow

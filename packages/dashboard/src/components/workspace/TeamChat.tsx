@@ -12,6 +12,11 @@ interface TeamChatProps {
   onTaskClick?: (taskId: string) => void
 }
 
+interface ContextMenuState {
+  x: number; y: number
+  message: engine.ChatMessage
+}
+
 export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatProps) {
   const [messages, setMessages] = useState<engine.ChatMessage[]>([])
   const [messageText, setMessageText] = useState('')
@@ -19,8 +24,24 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
   const [completions, setCompletions] = useState<engine.MentionCompletionData | null>(null)
   const [threadParent, setThreadParent] = useState<engine.ChatMessage | null>(null)
   const [agentColorMap, setAgentColorMap] = useState<Map<string, { color: string; icon: string; name: string }>>(new Map())
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [uploadingFile, setUploadingFile] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
+  const chatFileInputRef = useRef<HTMLInputElement>(null)
+
+  // Close context menu on click anywhere
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [contextMenu])
+
+  const handleMessageContextMenu = (e: React.MouseEvent, msg: engine.ChatMessage) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, message: msg })
+  }
 
   // Load messages
   const loadMessages = useCallback(async () => {
@@ -113,6 +134,31 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
     } catch { /* ignore */ }
   }
 
+  const handleFileAttach = async (files: FileList) => {
+    if (!teamChannelId || uploadingFile) return
+    setUploadingFile(true)
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 10 * 1024 * 1024) {
+          alert(`"${file.name}" exceeds the 10MB limit`)
+          continue
+        }
+        // Upload to workspace under chat-uploads/ folder
+        const result = await engine.uploadWorkspaceFile(file, 'chat-uploads')
+        // Send a message referencing the uploaded file
+        const msg = await engine.sendMessage(teamChannelId, {
+          senderType: 'human',
+          senderId: 'user',
+          content: `Shared a file: **${file.name}** (${formatFileSize(file.size)})\n📎 \`${result.path}\``,
+        })
+        setMessages(prev => [...prev, msg])
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Upload failed')
+    }
+    setUploadingFile(false)
+  }
+
   if (!teamChannelId) {
     return (
       <div className="flex flex-col h-full">
@@ -149,9 +195,33 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
             onThreadClick={setThreadParent}
             onFileClick={onFileClick}
             onTaskClick={onTaskClick}
+            onContextMenu={handleMessageContextMenu}
           />
         ))}
       </div>
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-[160px] rounded-lg border border-border-subtle bg-white py-1 shadow-lg"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={() => { setThreadParent(contextMenu.message); setContextMenu(null) }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-text-main hover:bg-light-surface-alt"
+          >
+            <span className="material-symbols-outlined text-[16px]">reply</span>
+            Reply in thread
+          </button>
+          <button
+            onClick={() => { navigator.clipboard.writeText(contextMenu.message.content); setContextMenu(null) }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-text-main hover:bg-light-surface-alt"
+          >
+            <span className="material-symbols-outlined text-[16px]">content_copy</span>
+            Copy text
+          </button>
+        </div>
+      )}
 
       {/* Thread view (inline expand) */}
       {threadParent && (
@@ -171,10 +241,24 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
           onSubmit={sendMessage}
           placeholder="Message your team..."
           completions={completions}
-          disabled={sending}
+          disabled={sending || uploadingFile}
           onGifSelect={handleGifSelect}
+          onFileAttach={() => chatFileInputRef.current?.click()}
+        />
+        <input
+          ref={chatFileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => { if (e.target.files?.length) handleFileAttach(e.target.files); e.target.value = '' }}
         />
       </div>
     </div>
   )
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }

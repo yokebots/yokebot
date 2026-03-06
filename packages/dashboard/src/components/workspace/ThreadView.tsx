@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { renderMentionContent } from '@/components/MentionInput'
 import * as engine from '@/lib/engine'
+
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀', '💯', '🙌']
 
 interface ThreadViewProps {
   parentMessage: engine.ChatMessage
@@ -96,6 +98,7 @@ export function MessageBubble({
   onThreadClick,
   onFileClick,
   onTaskClick,
+  onContextMenu,
 }: {
   message: engine.ChatMessage
   agentColorMap: Map<string, { color: string; icon: string; name: string }>
@@ -103,8 +106,26 @@ export function MessageBubble({
   onThreadClick?: (msg: engine.ChatMessage) => void
   onFileClick?: (docId: string) => void
   onTaskClick?: (taskId: string) => void
+  onContextMenu?: (e: React.MouseEvent, msg: engine.ChatMessage) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [reactions, setReactions] = useState<Record<string, string[]>>({})
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+
+  // Load reactions
+  useEffect(() => {
+    if (compact) return
+    engine.getReactions(message.id).then(setReactions).catch(() => {})
+  }, [message.id, compact])
+
+  const toggleReaction = useCallback(async (emoji: string) => {
+    try {
+      await engine.toggleReaction(message.id, emoji)
+      const updated = await engine.getReactions(message.id)
+      setReactions(updated)
+    } catch { /* ignore */ }
+    setShowEmojiPicker(false)
+  }, [message.id])
   const isAgent = message.senderType === 'agent'
   const isSystem = message.senderType === 'system'
   const agent = isAgent ? agentColorMap.get(message.senderId) : null
@@ -131,8 +152,13 @@ export function MessageBubble({
 
   const isHuman = message.senderType === 'human'
 
+  const reactionEntries = Object.entries(reactions).filter(([, users]) => users.length > 0)
+
   return (
-    <div className={`group flex gap-2 ${isHuman ? 'justify-end' : ''} ${compact ? '' : ''}`}>
+    <div
+      className={`group/msg flex gap-2 ${isHuman ? 'justify-end' : ''} ${compact ? '' : ''}`}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(e, message) : undefined}
+    >
       {/* Avatar (left side, non-human only) */}
       {!isHuman && (
         <div
@@ -195,6 +221,46 @@ export function MessageBubble({
               </span>
             )}
           </button>
+        )}
+        {/* Emoji reactions */}
+        {!compact && (
+          <div className="flex flex-wrap items-center gap-1 mt-1 relative">
+            {reactionEntries.map(([emoji, users]) => (
+              <button
+                key={emoji}
+                onClick={() => toggleReaction(emoji)}
+                className={`flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-xs transition-colors ${
+                  users.includes('user')
+                    ? 'border-forest-green/40 bg-forest-green/10'
+                    : 'border-border-subtle bg-white hover:border-forest-green/30'
+                }`}
+              >
+                <span>{emoji}</span>
+                <span className="text-[10px] text-text-muted">{users.length}</span>
+              </button>
+            ))}
+            {/* Add reaction button — visible on hover */}
+            <button
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+              className="flex items-center rounded-full border border-border-subtle bg-white px-1.5 py-0.5 text-[11px] text-text-muted opacity-0 group-hover/msg:opacity-100 transition-opacity hover:border-forest-green/30"
+            >
+              <span className="material-symbols-outlined text-[13px]">add_reaction</span>
+            </button>
+            {/* Quick emoji picker */}
+            {showEmojiPicker && (
+              <div className="absolute bottom-full left-0 mb-1 flex gap-0.5 rounded-lg border border-border-subtle bg-white p-1 shadow-lg z-10">
+                {QUICK_EMOJIS.map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={() => toggleReaction(emoji)}
+                    className="rounded p-1 text-sm hover:bg-light-surface-alt transition-colors"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

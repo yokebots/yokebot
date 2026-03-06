@@ -20,7 +20,7 @@ import { createApproval, listPendingApprovals, resolveApproval, countPendingAppr
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
 import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
 import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getChannelMessages, getThreadReplies, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
-import { initWorkspace, listFiles, readFile, writeFile, renameFile, deleteFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
+import { initWorkspace, listFiles, readFile, writeFile, writeBinaryFile, renameFile, deleteFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
 // Note: WorkspaceConfig kept for backward compat — workspace is now DB-backed
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
@@ -268,6 +268,11 @@ async function main() {
     const { setNotificationBroadcast } = await import('./notifications.ts')
     setNotificationBroadcast((userId, count) => {
       broadcastToUser(userId, 'notification_count', { count })
+    })
+
+    const { setCreditBroadcast } = await import('./billing.ts')
+    setCreditBroadcast((teamId, credits) => {
+      broadcastToTeam(teamId, 'credits', { credits })
     })
   }
 
@@ -1128,6 +1133,28 @@ async function main() {
     const result = await writeFile(db, teamId, path, content, agentId)
     if (!result.success) return res.status(423).json({ error: result.error })
     res.json({ success: true })
+  })
+
+  // Upload binary file to workspace (base64-encoded)
+  app.post('/api/workspace/file/upload', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user?.activeTeamId ?? ''
+    const { path: filePath, base64, mimeType, fileName } = req.body as {
+      path?: string; base64?: string; mimeType?: string; fileName?: string
+    }
+    if (!base64 || !fileName) return res.status(400).json({ error: 'base64 and fileName are required' })
+    const targetPath = filePath ? `${filePath.replace(/\/+$/, '')}/${fileName}` : fileName
+    const buffer = Buffer.from(base64, 'base64')
+    const MAX_UPLOAD_BYTES = 10 * 1024 * 1024 // 10MB
+    if (buffer.length > MAX_UPLOAD_BYTES) {
+      return res.status(413).json({ error: `File too large: ${(buffer.length / 1024 / 1024).toFixed(1)}MB exceeds 10MB limit` })
+    }
+    try {
+      await writeBinaryFile(db, teamId, targetPath, buffer, mimeType ?? 'application/octet-stream', req.user?.id ?? '')
+      res.json({ success: true, path: targetPath, size: buffer.length })
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
   })
 
   app.patch('/api/workspace/file', async (req, res) => {

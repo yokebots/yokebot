@@ -11,6 +11,9 @@ import { writeBinaryFile } from './workspace.ts'
 
 export type MediaType = 'images' | 'video' | '3d'
 
+// 50 MB max for generated media (images ~1-5MB, videos ~10-30MB, 3D ~5-20MB)
+const MAX_MEDIA_BYTES = 50 * 1024 * 1024
+
 export interface MediaAttachment {
   type: 'image' | 'video' | '3d'
   url: string              // relative workspace path
@@ -42,7 +45,18 @@ export async function downloadAndSave(
   const res = await fetch(sourceUrl)
   if (!res.ok) throw new Error(`Failed to download media: ${res.status}`)
 
+  // Check Content-Length header first (fast reject before downloading)
+  const contentLength = Number(res.headers.get('content-length') ?? 0)
+  if (contentLength > MAX_MEDIA_BYTES) {
+    throw new Error(`Media too large: ${(contentLength / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_MEDIA_BYTES / 1024 / 1024}MB limit`)
+  }
+
   const buffer = Buffer.from(await res.arrayBuffer())
+
+  // Double-check actual size (Content-Length can be missing or wrong)
+  if (buffer.length > MAX_MEDIA_BYTES) {
+    throw new Error(`Media too large: ${(buffer.length / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_MEDIA_BYTES / 1024 / 1024}MB limit`)
+  }
   const mimeType = guessMimeType(filename)
 
   // Save to DB

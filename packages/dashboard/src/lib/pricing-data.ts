@@ -1,15 +1,15 @@
 export const PLANS = [
   {
     tier: 'team', name: 'Starter Crew', price: '$29', period: '/mo',
-    subtitle: 'Hire your first part-time team members',
+    subtitle: 'Hire your first three AI agents!',
     features: [
       '3 Agent Team Members',
       '30-Min Heartbeat Interval',
-      'Part-Time Availability',
+      '24/7 Always Available',
       '50,000 Universal Credits/Mo',
     ],
-    workHours: 'Avg 64 work hrs/week',
-    workHoursTooltip: 'Based on 2 agents working 16 hrs/day at 30-min heartbeats',
+    workHours: 'Avg 144 work hrs/week',
+    workHoursTooltip: 'Based on 3 agents working 24/7 at 30-min heartbeats',
     envKey: 'VITE_STRIPE_PRICE_TEAM',
   },
   {
@@ -18,11 +18,11 @@ export const PLANS = [
     features: [
       '9 Agent Team Members',
       '15-Min Heartbeat Interval',
-      'Full-Time Availability',
+      '24/7 Always Available',
       '150,000 Universal Credits/Mo',
     ],
     workHours: 'Avg 840 work hrs/week',
-    workHoursTooltip: 'Based on 5 agents working 24/7 at 15-min heartbeats',
+    workHoursTooltip: 'Based on 9 agents working 24/7 at 15-min heartbeats',
     envKey: 'VITE_STRIPE_PRICE_BUSINESS',
   },
   {

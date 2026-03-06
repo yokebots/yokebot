@@ -11,6 +11,7 @@ interface MentionInputProps {
   completions: MentionCompletionData | null
   disabled?: boolean
   onGifSelect?: (gifUrl: string, title: string) => void
+  onFileAttach?: () => void
 }
 
 interface MentionOption {
@@ -32,7 +33,7 @@ const FILE_ICONS: Record<string, string> = {
 
 const GIPHY_API_KEY = 'GlVGYHkr3WSBnllca54iNt0yFbjz7L65' // GIPHY public beta key
 
-export function MentionInput({ value, onChange, onSubmit, placeholder, completions, disabled, onGifSelect }: MentionInputProps) {
+export function MentionInput({ value, onChange, onSubmit, placeholder, completions, disabled, onGifSelect, onFileAttach }: MentionInputProps) {
   const [showDropdown, setShowDropdown] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionStart, setMentionStart] = useState(-1)
@@ -295,6 +296,16 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
         />
         {/* GIF + Emoji buttons */}
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+          {onFileAttach && (
+            <button
+              type="button"
+              onClick={onFileAttach}
+              className="rounded-md p-1 text-text-muted hover:text-text-main hover:bg-light-surface-alt transition-colors"
+              title="Attach file"
+            >
+              <span className="material-symbols-outlined text-[18px]">attach_file</span>
+            </button>
+          )}
           {onGifSelect && (
             <button
               type="button"

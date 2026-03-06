@@ -8,6 +8,14 @@
 import type { Db } from './db/types.ts'
 import { randomUUID } from 'crypto'
 
+// ---- Broadcast hook (set by index.ts to push SSE credit updates) ----
+
+let creditBroadcast: ((teamId: string, credits: number) => void) | null = null
+
+export function setCreditBroadcast(fn: (teamId: string, credits: number) => void): void {
+  creditBroadcast = fn
+}
+
 // ---- Types ----
 
 export type SubscriptionTier = 'none' | 'team' | 'business' | 'enterprise'
@@ -174,6 +182,9 @@ export async function addCredits(
     [randomUUID(), teamId, amount, newBalance, type, description, stripePaymentIntentId ?? null],
   )
 
+  // Broadcast updated balance to connected SSE clients
+  if (creditBroadcast) creditBroadcast(teamId, newBalance)
+
   return newBalance
 }
 
@@ -223,6 +234,9 @@ export async function deductCredits(
     'INSERT INTO credit_transactions (id, team_id, amount, balance_after, type, description) VALUES ($1, $2, $3, $4, $5, $6)',
     [randomUUID(), teamId, -amount, row.balance, type, description],
   )
+
+  // Broadcast updated balance to connected SSE clients
+  if (creditBroadcast) creditBroadcast(teamId, row.balance)
 
   return { success: true, balance: row.balance }
 }

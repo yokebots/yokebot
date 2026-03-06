@@ -9,6 +9,42 @@
 import type { Db } from './db/types.ts'
 import { getCredentials } from './credentials.ts'
 
+// ---- Security Helpers ----
+
+/** Validate a URL is safe (no SSRF against private networks). */
+function validateUrl(rawUrl: string): { ok: true; url: string } | { ok: false; error: string } {
+  try {
+    const parsed = new URL(rawUrl)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { ok: false, error: `Only http/https URLs allowed, got "${parsed.protocol}"` }
+    }
+    const host = parsed.hostname.toLowerCase()
+    // Block private / internal IPs and localhost
+    if (
+      host === 'localhost' || host === '[::1]' ||
+      host.startsWith('127.') ||
+      host.startsWith('10.') ||
+      host.startsWith('192.168.') ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      host.endsWith('.internal') ||
+      host.endsWith('.local') ||
+      host === '0.0.0.0' ||
+      host === 'metadata.google.internal' ||
+      host === '169.254.169.254' // cloud metadata endpoint
+    ) {
+      return { ok: false, error: 'Internal/private URLs not allowed' }
+    }
+    return { ok: true, url: parsed.toString() }
+  } catch {
+    return { ok: false, error: 'Invalid URL' }
+  }
+}
+
+/** Truncate a string input to prevent abuse. */
+function truncateInput(value: string, maxLen = 500): string {
+  return value.length > maxLen ? value.slice(0, maxLen) : value
+}
+
 export interface SkillHandlerContext {
   db: Db
   agentId: string
@@ -231,10 +267,12 @@ registerHandler('discord_post', async (args, creds) => {
 // ---- Scrape Webpage (Tavily — native default) ----
 registerHandler('scrape_webpage', async (args, creds) => {
   const apiKey = creds.tavily
+  const urlCheck = validateUrl(args.url as string)
+  if (!urlCheck.ok) return `Invalid URL: ${urlCheck.error}`
   const res = await fetch('https://api.tavily.com/extract', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ api_key: apiKey, urls: [args.url as string] }),
+    body: JSON.stringify({ api_key: apiKey, urls: [urlCheck.url] }),
   })
   if (!res.ok) return `Tavily extract error: ${res.status}`
   const data = await res.json() as { results?: Array<{ raw_content?: string }> }
@@ -247,10 +285,12 @@ registerHandler('scrape_webpage', async (args, creds) => {
 // ---- Scrape Webpage via Firecrawl (BYOK) ----
 registerHandler('scrape_webpage_firecrawl', async (args, creds) => {
   const apiKey = creds.firecrawl
+  const urlCheck = validateUrl(args.url as string)
+  if (!urlCheck.ok) return `Invalid URL: ${urlCheck.error}`
   const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: args.url as string, formats: ['markdown'] }),
+    body: JSON.stringify({ url: urlCheck.url, formats: ['markdown'] }),
   })
   if (!res.ok) return `Firecrawl error: ${res.status}`
   const data = await res.json() as { data?: { markdown?: string } }
@@ -262,7 +302,7 @@ registerHandler('scrape_webpage_firecrawl', async (args, creds) => {
 // ---- Monitor News (NewsAPI) ----
 registerHandler('monitor_news', async (args, creds) => {
   const apiKey = creds.newsapi
-  const query = encodeURIComponent(args.query as string)
+  const query = encodeURIComponent(truncateInput(args.query as string, 200))
   const pageSize = Math.min((args.count as number) ?? 5, 10)
   const res = await fetch(`https://newsapi.org/v2/everything?q=${query}&pageSize=${pageSize}&sortBy=publishedAt&apiKey=${apiKey}`)
   if (!res.ok) return `NewsAPI error: ${res.status}`
@@ -275,7 +315,7 @@ registerHandler('monitor_news', async (args, creds) => {
 // ---- HubSpot Contacts ----
 registerHandler('hubspot_search_contacts', async (args, creds) => {
   const apiKey = creds.hubspot
-  const query = args.query as string
+  const query = truncateInput(args.query as string, 200)
   const res = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -355,6 +395,9 @@ registerHandler('find_contact', async (args, creds) => {
 registerHandler('github_issues', async (args, creds) => {
   const token = creds.github
   const repo = args.repo as string
+  if (!/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo)) {
+    return 'Invalid repo format. Use "owner/repo" (e.g. "yokebots/yokebot").'
+  }
   const action = (args.action as string) ?? 'list'
   const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' }
 
@@ -385,7 +428,8 @@ registerHandler('stripe_customers', async (args, creds) => {
   const headers = { 'Authorization': `Bearer ${apiKey}` }
 
   if (action === 'search' && args.email) {
-    const res = await fetch(`https://api.stripe.com/v1/customers/search?query=email:"${args.email as string}"`, { headers })
+    const safeEmail = encodeURIComponent((args.email as string).replace(/"/g, ''))
+    const res = await fetch(`https://api.stripe.com/v1/customers/search?query=${encodeURIComponent(`email:"${safeEmail}"`)}`, { headers })
     if (!res.ok) return `Stripe error: ${res.status}`
     const data = await res.json() as { data: Array<{ id: string; email: string; name: string }> }
     return data.data.length === 0
@@ -451,9 +495,10 @@ registerHandler('google_calendar_list', async (args, creds) => {
 registerHandler('transcribe_audio', async (args) => {
   const apiKey = process.env.DEEPINFRA_API_KEY
   if (!apiKey) return 'Error: DEEPINFRA_API_KEY not configured'
-  const audioUrl = args.audioUrl as string
+  const urlCheck = validateUrl(args.audioUrl as string)
+  if (!urlCheck.ok) return `Invalid audio URL: ${urlCheck.error}`
   // Download the audio file first
-  const audioRes = await fetch(audioUrl)
+  const audioRes = await fetch(urlCheck.url)
   if (!audioRes.ok) return `Failed to download audio: ${audioRes.status}`
   const audioBlob = await audioRes.blob()
 
@@ -688,7 +733,9 @@ registerHandler('create_survey', llmHandler((args) =>
 
 // ---- SEO Audit (LLM + fetch) ----
 registerHandler('seo_audit', async (args) => {
-  const url = args.url as string
+  const urlCheck = validateUrl(args.url as string)
+  if (!urlCheck.ok) return `Invalid URL: ${urlCheck.error}`
+  const url = urlCheck.url
   try {
     const res = await fetch(url, { headers: { 'User-Agent': 'YokeBot-SEO/1.0' } })
     if (!res.ok) return `Failed to fetch ${url}: ${res.status}`
