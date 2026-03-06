@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { HorizontalDivider } from './ResizablePanel'
 import { FileViewer } from './FileViewer'
 import { TeamChat } from './TeamChat'
+import { FileContextMenu } from './FileContextMenu'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 import type { SorTable, SorRow } from '@/lib/engine'
@@ -16,6 +17,42 @@ interface ContextPaneProps {
 export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatioChange }: ContextPaneProps) {
   const hasViewerTabs = workspace.viewerTabs.length > 0
   const activeTab = workspace.viewerTabs.find(t => t.id === workspace.activeTabId)
+
+  // Context menu state for tab bar
+  const [tabContextMenu, setTabContextMenu] = useState<{ x: number; y: number; tab: ViewerTab } | null>(null)
+
+  const handleTabRename = useCallback(async (oldPath: string, newName: string) => {
+    const parts = oldPath.split('/')
+    parts[parts.length - 1] = newName
+    const newPath = parts.join('/')
+    if (newPath === oldPath) return
+    try {
+      await engine.renameFile(oldPath, newPath)
+      // Update the tab to reflect the new path/label
+      const tab = workspace.viewerTabs.find(t => t.type === 'file' && t.resourceId === oldPath)
+      if (tab) {
+        workspace.updateViewerTab(tab.id, { label: newName, resourceId: newPath })
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to rename file')
+    }
+  }, [workspace])
+
+  const handleTabDelete = useCallback(async (path: string) => {
+    const name = path.split('/').pop() ?? path
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return
+    try {
+      await engine.deleteFile(path)
+      const tab = workspace.viewerTabs.find(t => t.type === 'file' && t.resourceId === path)
+      if (tab) workspace.closeViewerTab(tab.id)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete file')
+    }
+  }, [workspace])
+
+  const handleTabCopyPath = useCallback((path: string) => {
+    navigator.clipboard.writeText(path)
+  }, [])
 
   const handleFileClick = useCallback((docId: string) => {
     const name = docId.split('/').pop() ?? docId
@@ -36,7 +73,10 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
         <>
           <div style={{ height: `${splitRatio * 100}%` }} className="flex flex-col overflow-hidden">
             {/* Tab bar — Chrome/Zed-style with proportional shrink + scroll */}
-            <TabBar workspace={workspace} />
+            <TabBar workspace={workspace} onTabContextMenu={(e, tab) => {
+              e.preventDefault()
+              setTabContextMenu({ x: e.clientX, y: e.clientY, tab })
+            }} />
 
             {/* Tab content */}
             <div className="flex-1 overflow-hidden flex flex-col">
@@ -71,12 +111,32 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
       >
         <TeamChat teamChannelId={teamChannelId} onFileClick={handleFileClick} onTaskClick={handleTaskClick} />
       </div>
+
+      {/* Tab context menu (file tabs only) */}
+      {tabContextMenu && tabContextMenu.tab.type === 'file' && (
+        <FileContextMenu
+          x={tabContextMenu.x}
+          y={tabContextMenu.y}
+          filePath={tabContextMenu.tab.resourceId}
+          isDirectory={false}
+          onClose={() => setTabContextMenu(null)}
+          onRename={(path) => {
+            setTabContextMenu(null)
+            const name = path.split('/').pop() ?? path
+            const newName = prompt('Rename file:', name)
+            if (newName && newName !== name) handleTabRename(path, newName)
+          }}
+          onDelete={(path) => { setTabContextMenu(null); handleTabDelete(path) }}
+          onCopyPath={(path) => { setTabContextMenu(null); handleTabCopyPath(path) }}
+          onOpenInTab={() => setTabContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
 
 /** Chrome/Zed-style tab bar with proportional sizing and scroll chevrons. */
-function TabBar({ workspace }: { workspace: WorkspaceState }) {
+function TabBar({ workspace, onTabContextMenu }: { workspace: WorkspaceState; onTabContextMenu: (e: React.MouseEvent, tab: ViewerTab) => void }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const activeTabRef = useRef<HTMLButtonElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -133,6 +193,7 @@ function TabBar({ workspace }: { workspace: WorkspaceState }) {
               key={tab.id}
               ref={isActive ? activeTabRef : undefined}
               onClick={() => workspace.setActiveTab(tab.id)}
+              onContextMenu={(e) => onTabContextMenu(e, tab)}
               title={tab.label}
               className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors min-w-0 ${
                 isActive

@@ -64,7 +64,7 @@ export const docsSections: Array<{ title: string; icon: string; slugs: string[] 
   {
     title: 'Reference',
     icon: 'api',
-    slugs: ['api-reference'],
+    slugs: ['api-reference', 'keyboard-shortcuts'],
   },
 ]
 
@@ -1896,6 +1896,58 @@ docker compose logs -f dashboard # dashboard only` }),
       CodeBlock({ language: 'text', children: `X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 87
 X-RateLimit-Reset: 1718450400` }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // KEYBOARD SHORTCUTS
+  // ---------------------------------------------------------------------------
+  'keyboard-shortcuts': {
+    slug: 'keyboard-shortcuts',
+    title: 'Keyboard Shortcuts',
+    section: 'Reference',
+    description: 'All keyboard shortcuts available in the YokeBot dashboard.',
+    keywords: ['keyboard', 'shortcuts', 'hotkeys', 'keybindings', 'keys'],
+    content: () => [
+      H2({ children: 'Global' }),
+      Table({
+        headers: ['Shortcut', 'Action'],
+        rows: [
+          ['Cmd+K / Ctrl+K', 'Open universal search'],
+          ['Escape', 'Close overlays, modals, and search'],
+        ],
+      }),
+
+      H2({ children: 'Workspace Files' }),
+      Table({
+        headers: ['Shortcut', 'Action'],
+        rows: [
+          ['F2', 'Rename the active file'],
+          ['Delete / Backspace', 'Delete the active file (with confirmation)'],
+          ['Cmd+C / Ctrl+C', 'Copy file path (when a file row is focused)'],
+          ['Right-click', 'Open context menu with Rename, Delete, Copy Path'],
+        ],
+      }),
+
+      H2({ children: 'Navigation' }),
+      Table({
+        headers: ['Shortcut', 'Action'],
+        rows: [
+          ['Cmd+K then type in:files', 'Search workspace files'],
+          ['Cmd+K then type in:agents', 'Search agents'],
+          ['Cmd+K then type in:docs', 'Search documentation'],
+        ],
+      }),
+
+      H2({ children: 'Chat' }),
+      Table({
+        headers: ['Shortcut', 'Action'],
+        rows: [
+          ['Enter', 'Send message'],
+          ['Shift+Enter', 'New line in message'],
+          ['@ then type', 'Mention an agent or user'],
+        ],
+      }),
     ],
   },
 }

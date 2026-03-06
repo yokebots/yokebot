@@ -20,7 +20,7 @@ import { createApproval, listPendingApprovals, resolveApproval, countPendingAppr
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
 import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
 import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getChannelMessages, getThreadReplies, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
-import { initWorkspace, listFiles, readFile, writeFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
+import { initWorkspace, listFiles, readFile, writeFile, renameFile, deleteFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
 // Note: WorkspaceConfig kept for backward compat — workspace is now DB-backed
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
@@ -1127,6 +1127,26 @@ async function main() {
     const { path, content, agentId } = validate(WriteFileSchema, req.body)
     const result = await writeFile(db, teamId, path, content, agentId)
     if (!result.success) return res.status(423).json({ error: result.error })
+    res.json({ success: true })
+  })
+
+  app.patch('/api/workspace/file', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user?.activeTeamId ?? ''
+    const { path, newPath } = req.body as { path?: string; newPath?: string }
+    if (!path || !newPath) return res.status(400).json({ error: 'path and newPath are required' })
+    const result = await renameFile(db, teamId, path, newPath)
+    if (!result.success) return res.status(result.error === 'File not found.' ? 404 : 409).json({ error: result.error })
+    res.json({ success: true })
+  })
+
+  app.delete('/api/workspace/file', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user?.activeTeamId ?? ''
+    const path = req.query.path as string
+    if (!path) return res.status(400).json({ error: 'path is required' })
+    const result = await deleteFile(db, teamId, path)
+    if (!result.success) return res.status(404).json({ error: result.error })
     res.json({ success: true })
   })
 

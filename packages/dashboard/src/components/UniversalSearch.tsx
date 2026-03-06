@@ -25,7 +25,7 @@ const CATEGORIES: Array<{ key: ResultCategory | 'all'; label: string; icon: stri
   { key: 'agent', label: 'Agents', icon: 'smart_toy' },
   { key: 'task', label: 'Tasks', icon: 'task_alt' },
   { key: 'message', label: 'Messages', icon: 'chat_bubble' },
-  { key: 'document', label: 'Docs', icon: 'description' },
+  { key: 'document', label: 'Files', icon: 'folder_open' },
   { key: 'goal', label: 'Goals', icon: 'flag' },
   { key: 'activity', label: 'Activity', icon: 'history' },
   { key: 'data', label: 'Data', icon: 'table_chart' },
@@ -49,7 +49,7 @@ const SECTION_LABELS: Record<ResultCategory, string> = {
   agent: 'Agents',
   task: 'Mission Control',
   message: 'Chat Messages',
-  document: 'Knowledge Base',
+  document: 'Files',
   goal: 'Goals',
   kpi: 'KPI Goals',
   activity: 'Activity Log',
@@ -69,6 +69,8 @@ const PREFIX_MAP: Record<string, ResultCategory> = {
   docs: 'document',
   doc: 'document',
   documents: 'document',
+  files: 'document',
+  file: 'document',
   goals: 'goal',
   goal: 'goal',
   kpi: 'kpi',
@@ -122,6 +124,7 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
   const [agents, setAgents] = useState<engine.EngineAgent[]>([])
   const [tasks, setTasks] = useState<engine.EngineTask[]>([])
   const [documents, setDocuments] = useState<engine.KbDocument[]>([])
+  const [files, setFiles] = useState<Array<{ path: string; name: string; size: number; modifiedAt: string }>>([])
   const [goals, setGoals] = useState<engine.Goal[]>([])
   const [kpiGoals, setKpiGoals] = useState<engine.KpiGoal[]>([])
   const [activityLog, setActivityLog] = useState<engine.ActivityLogEntry[]>([])
@@ -140,6 +143,7 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
       engine.listAgents(),
       engine.listTasks(),
       engine.listKbDocuments(),
+      engine.listFiles('', true),
       engine.listGoals(),
       engine.listKpiGoals(),
       engine.listActivityLog({ limit: 100 }),
@@ -150,11 +154,12 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
       if (results[0].status === 'fulfilled') setAgents(results[0].value)
       if (results[1].status === 'fulfilled') setTasks(results[1].value)
       if (results[2].status === 'fulfilled') setDocuments(results[2].value)
-      if (results[3].status === 'fulfilled') setGoals(results[3].value)
-      if (results[4].status === 'fulfilled') setKpiGoals(results[4].value)
-      if (results[5].status === 'fulfilled') setActivityLog(results[5].value)
-      if (results[6].status === 'fulfilled') setDataTables(results[6].value)
-      if (results[7].status === 'fulfilled') setNotifications(results[7].value)
+      if (results[3].status === 'fulfilled') setFiles(results[3].value)
+      if (results[4].status === 'fulfilled') setGoals(results[4].value)
+      if (results[5].status === 'fulfilled') setKpiGoals(results[5].value)
+      if (results[6].status === 'fulfilled') setActivityLog(results[6].value)
+      if (results[7].status === 'fulfilled') setDataTables(results[7].value)
+      if (results[8].status === 'fulfilled') setNotifications(results[8].value)
     })
   }, [])
 
@@ -229,6 +234,20 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
       })
     }
 
+    // Workspace Files
+    for (const f of files) {
+      if (query && !matchesQuery(query, f.name, f.path)) continue
+      items.push({
+        type: 'document',
+        icon: 'description',
+        iconColor: ICON_COLORS.document,
+        label: f.name,
+        detail: f.path,
+        timestamp: relativeTime(f.modifiedAt),
+        action: () => { navigate('/workspace'); onClose() },
+      })
+    }
+
     // KB Documents
     for (const d of documents) {
       if (query && !matchesQuery(query, d.title, d.fileName)) continue
@@ -241,7 +260,7 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
         timestamp: relativeTime(d.createdAt),
         badge: d.status,
         badgeClass: d.status === 'ready' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700',
-        action: () => { navigate('/knowledge-base'); onClose() },
+        action: () => { navigate('/files'); onClose() },
       })
     }
 
@@ -344,7 +363,7 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
     }
 
     return items
-  }, [query, agents, tasks, documents, goals, kpiGoals, activityLog, dataTables, notifications, navigate, onClose])
+  }, [query, agents, tasks, files, documents, goals, kpiGoals, activityLog, dataTables, notifications, navigate, onClose])
 
   // Filter by effective category, merge in chat message results
   const filtered = useMemo(() => {
@@ -413,7 +432,7 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
             value={rawQuery}
             onChange={(e) => setRawQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search YokeBot... (try in:docs or in:goals)"
+            placeholder="Search YokeBot... (try in:files or in:goals)"
             className="flex-1 bg-transparent text-lg text-text-main placeholder-text-muted outline-none"
           />
           <kbd className="rounded border border-border-subtle bg-light-surface-alt px-2 py-0.5 text-xs text-text-muted">ESC</kbd>

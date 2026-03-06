@@ -464,6 +464,14 @@ async function pickBestChannel(db: Db, agent: { teamId: string; department: stri
  * Single heartbeat cycle for an agent.
  */
 async function heartbeat(db: Db, agent: Agent): Promise<void> {
+  // Re-check agent status from DB — if stopped/paused since scheduling, bail out
+  const { getAgent } = await import('./agent.ts')
+  const fresh = await getAgent(db, agent.id)
+  if (!fresh || fresh.status !== 'running') {
+    unscheduleAgent(agent.id)
+    return
+  }
+
   // Per-team concurrency limiter
   const teamCount = activeHeartbeatsPerTeam.get(agent.teamId) ?? 0
   if (teamCount >= MAX_CONCURRENT_PER_TEAM) {

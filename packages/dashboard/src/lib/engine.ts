@@ -428,6 +428,15 @@ export const writeFile = (path: string, content: string, agentId: string) =>
     body: JSON.stringify({ path, content, agentId }),
   })
 
+export const renameFile = (path: string, newPath: string) =>
+  request<{ success: boolean }>('/api/workspace/file', {
+    method: 'PATCH',
+    body: JSON.stringify({ path, newPath }),
+  })
+
+export const deleteFile = (path: string) =>
+  request<{ success: boolean }>(`/api/workspace/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
+
 // ===== Source of Record =====
 
 export interface SorTable {

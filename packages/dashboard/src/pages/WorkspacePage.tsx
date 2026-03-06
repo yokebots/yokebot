@@ -31,6 +31,7 @@ export interface WorkspaceState {
   activeFilePath: string | null
   addViewerTab: (tab: ViewerTab) => void
   closeViewerTab: (tabId: string) => void
+  updateViewerTab: (tabId: string, updates: Partial<Pick<ViewerTab, 'label' | 'resourceId'>>) => void
   setActiveTab: (tabId: string) => void
   setSelectedTaskId: (taskId: string | null) => void
 }
@@ -115,6 +116,18 @@ export function WorkspacePage() {
     })
   }, [activeTabId])
 
+  const updateViewerTab = useCallback((tabId: string, updates: Partial<Pick<ViewerTab, 'label' | 'resourceId'>>) => {
+    setViewerTabs(prev => prev.map(t => {
+      if (t.id !== tabId) return t
+      const updated = { ...t, ...updates }
+      // Keep id in sync with resourceId for file tabs
+      if (updates.resourceId && t.type === 'file') {
+        updated.id = `file:${updates.resourceId}`
+      }
+      return updated
+    }))
+  }, [])
+
   // Derive active file path from active tab
   const activeTab = viewerTabs.find(t => t.id === activeTabId)
   const activeFilePath = activeTab?.type === 'file' ? activeTab.resourceId : null
@@ -126,6 +139,7 @@ export function WorkspacePage() {
     activeFilePath,
     addViewerTab,
     closeViewerTab,
+    updateViewerTab,
     setActiveTab: setActiveTabId,
     setSelectedTaskId,
   }

@@ -310,6 +310,50 @@ export async function getFileByPath(db: Db, teamId: string, filePath: string): P
   return { id: row.id as string, taskId: (row.task_id as string) ?? null }
 }
 
+/** Rename a file (update its path). */
+export async function renameFile(db: Db, teamId: string, oldPath: string, newPath: string): Promise<{ success: boolean; error?: string }> {
+  const normalizedOld = oldPath.replace(/^\/+/, '')
+  const normalizedNew = newPath.replace(/^\/+/, '')
+
+  // Check source exists
+  const source = await db.queryOne<Record<string, unknown>>(
+    'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',
+    [teamId, normalizedOld],
+  )
+  if (!source) return { success: false, error: 'File not found.' }
+
+  // Check target doesn't already exist
+  const existing = await db.queryOne<Record<string, unknown>>(
+    'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',
+    [teamId, normalizedNew],
+  )
+  if (existing) return { success: false, error: 'A file already exists at that path.' }
+
+  const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
+  await db.run(
+    `UPDATE workspace_files SET path = $1, updated_at = ${now} WHERE team_id = $2 AND path = $3`,
+    [normalizedNew, teamId, normalizedOld],
+  )
+  return { success: true }
+}
+
+/** Delete a file by path. */
+export async function deleteFile(db: Db, teamId: string, filePath: string): Promise<{ success: boolean; error?: string }> {
+  const normalizedPath = filePath.replace(/^\/+/, '')
+
+  const file = await db.queryOne<Record<string, unknown>>(
+    'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',
+    [teamId, normalizedPath],
+  )
+  if (!file) return { success: false, error: 'File not found.' }
+
+  await db.run(
+    'DELETE FROM workspace_files WHERE team_id = $1 AND path = $2',
+    [teamId, normalizedPath],
+  )
+  return { success: true }
+}
+
 function cleanExpiredLocks(): void {
   const now = Date.now()
   for (const [path, lock] of locks) {

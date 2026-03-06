@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
+import { FileContextMenu } from './FileContextMenu'
 
 interface FlatFile {
   path: string
@@ -95,6 +96,14 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
   const [tables, setTables] = useState<engine.SorTable[]>([])
   const [tablesLoading, setTablesLoading] = useState(false)
 
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null)
+
+  // Inline rename state
+  const [renamingPath, setRenamingPath] = useState<string | null>(null)
+
+  const panelRef = useRef<HTMLDivElement>(null)
+
   const loadFiles = useCallback(async () => {
     try {
       const result = await engine.listFiles('', true)
@@ -145,6 +154,40 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     })
   }, [workspace.activeFilePath])
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle when files panel is active and not in an input
+      if (activePanel !== 'files') return
+      if (renamingPath) return
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+      const activePath = workspace.activeFilePath
+      if (!activePath) return
+
+      const isFile = allFiles.some(f => f.path === activePath)
+      if (!isFile) return
+
+      if (e.key === 'F2') {
+        e.preventDefault()
+        setRenamingPath(activePath)
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        handleDelete(activePath)
+      } else if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+        // Only copy path if focus is within the panel (not in code editor etc.)
+        if (panelRef.current?.contains(target)) {
+          e.preventDefault()
+          handleCopyPath(activePath)
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [activePanel, workspace.activeFilePath, allFiles, renamingPath])
+
   const toggleDir = (dirPath: string) => {
     setExpandedDirs(prev => {
       const next = new Set(prev)
@@ -179,6 +222,49 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     workspace.addViewerTab(tab)
   }
 
+  const handleContextMenu = (e: React.MouseEvent, path: string, isDir: boolean) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, path, isDir })
+  }
+
+  const handleRename = async (oldPath: string, newName: string) => {
+    const parts = oldPath.split('/')
+    parts[parts.length - 1] = newName
+    const newPath = parts.join('/')
+    if (newPath === oldPath) {
+      setRenamingPath(null)
+      return
+    }
+    try {
+      await engine.renameFile(oldPath, newPath)
+      // Update any open viewer tab pointing to the old path
+      const tab = workspace.viewerTabs.find(t => t.type === 'file' && t.resourceId === oldPath)
+      if (tab) workspace.updateViewerTab(tab.id, { label: newName, resourceId: newPath })
+      await loadFiles()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to rename file')
+    }
+    setRenamingPath(null)
+  }
+
+  const handleDelete = async (path: string) => {
+    const name = path.split('/').pop() ?? path
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return
+    try {
+      await engine.deleteFile(path)
+      // Close any open viewer tab for this file
+      const tab = workspace.viewerTabs.find(t => t.type === 'file' && t.resourceId === path)
+      if (tab) workspace.closeViewerTab(tab.id)
+      await loadFiles()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete file')
+    }
+  }
+
+  const handleCopyPath = (path: string) => {
+    navigator.clipboard.writeText(path)
+  }
+
   // Search: filter flat file list
   const searchResults = search
     ? allFiles.filter(f => f.path.toLowerCase().includes(search.toLowerCase()))
@@ -190,7 +276,7 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     : tables
 
   return (
-    <div className="flex flex-col h-full">
+    <div ref={panelRef} className="flex flex-col h-full">
       {/* Files / Data tab header — single line */}
       <div className="flex items-center gap-1 px-2 py-2 border-b border-border-subtle shrink-0">
         <button
@@ -246,6 +332,7 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
                 <button
                   key={file.path}
                   onClick={() => openFile(file.path)}
+                  onContextMenu={(e) => handleContextMenu(e, file.path, false)}
                   className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-light-surface-alt"
                 >
                   <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">
@@ -271,6 +358,10 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
                   openFile={openFile}
                   unreadFileIds={unreadFileIds}
                   activeFilePath={workspace.activeFilePath}
+                  onContextMenu={handleContextMenu}
+                  renamingPath={renamingPath}
+                  onRenameSubmit={handleRename}
+                  onRenameCancel={() => setRenamingPath(null)}
                 />
               ))}
             </>
@@ -303,6 +394,21 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
           )
         )}
       </div>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <FileContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          filePath={contextMenu.path}
+          isDirectory={contextMenu.isDir}
+          onClose={() => setContextMenu(null)}
+          onRename={(path) => setRenamingPath(path)}
+          onDelete={handleDelete}
+          onCopyPath={handleCopyPath}
+          onOpenInTab={openFile}
+        />
+      )}
     </div>
   )
 }
@@ -315,6 +421,10 @@ function TreeNodeRow({
   openFile,
   unreadFileIds,
   activeFilePath,
+  onContextMenu,
+  renamingPath,
+  onRenameSubmit,
+  onRenameCancel,
 }: {
   node: TreeNode
   level: number
@@ -323,53 +433,69 @@ function TreeNodeRow({
   openFile: (path: string) => void
   unreadFileIds?: Set<string>
   activeFilePath?: string | null
+  onContextMenu: (e: React.MouseEvent, path: string, isDir: boolean) => void
+  renamingPath: string | null
+  onRenameSubmit: (oldPath: string, newName: string) => void
+  onRenameCancel: () => void
 }) {
   const isExpanded = expandedDirs.has(node.path)
   const isUnread = !node.isDirectory && unreadFileIds?.has(node.path)
   const isActive = !node.isDirectory && node.path === activeFilePath
+  const isRenaming = node.path === renamingPath
 
   return (
     <>
-      <button
-        onClick={() => node.isDirectory ? toggleDir(node.path) : openFile(node.path)}
-        className={`group flex w-full items-center gap-1.5 rounded-lg py-1 pr-2 text-left text-xs transition-colors ${
-          isActive
-            ? 'bg-forest-green/10 text-forest-green'
-            : 'hover:bg-light-surface-alt'
-        }`}
-        style={{ paddingLeft: `${level * 16 + 8}px` }}
-      >
-        {/* Expand/collapse chevron for dirs */}
-        {node.isDirectory ? (
-          <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0 transition-transform" style={{ transform: isExpanded ? 'rotate(90deg)' : undefined }}>
-            chevron_right
+      {isRenaming ? (
+        <InlineRenameRow
+          node={node}
+          level={level}
+          isExpanded={isExpanded}
+          onSubmit={(newName) => onRenameSubmit(node.path, newName)}
+          onCancel={onRenameCancel}
+        />
+      ) : (
+        <button
+          onClick={() => node.isDirectory ? toggleDir(node.path) : openFile(node.path)}
+          onContextMenu={(e) => onContextMenu(e, node.path, node.isDirectory)}
+          className={`group flex w-full items-center gap-1.5 rounded-lg py-1 pr-2 text-left text-xs transition-colors ${
+            isActive
+              ? 'bg-forest-green/10 text-forest-green'
+              : 'hover:bg-light-surface-alt'
+          }`}
+          style={{ paddingLeft: `${level * 16 + 8}px` }}
+        >
+          {/* Expand/collapse chevron for dirs */}
+          {node.isDirectory ? (
+            <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0 transition-transform" style={{ transform: isExpanded ? 'rotate(90deg)' : undefined }}>
+              chevron_right
+            </span>
+          ) : (
+            <span className="w-4 shrink-0" /> // spacer for alignment
+          )}
+
+          {/* Icon */}
+          <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">
+            {node.isDirectory
+              ? (isExpanded ? 'folder_open' : 'folder')
+              : getFileIcon(node.name.split('.').pop()?.toLowerCase() ?? '')}
           </span>
-        ) : (
-          <span className="w-4 shrink-0" /> // spacer for alignment
-        )}
 
-        {/* Icon */}
-        <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">
-          {node.isDirectory
-            ? (isExpanded ? 'folder_open' : 'folder')
-            : getFileIcon(node.name.split('.').pop()?.toLowerCase() ?? '')}
-        </span>
+          {/* Unread dot */}
+          {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />}
 
-        {/* Unread dot */}
-        {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />}
-
-        {/* Name */}
-        <span className={`flex-1 truncate ${isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>
-          {node.name}
-        </span>
-
-        {/* File size (files only) */}
-        {!node.isDirectory && (
-          <span className="text-[10px] text-text-muted shrink-0 opacity-0 group-hover:opacity-100">
-            {formatSize(node.size)}
+          {/* Name */}
+          <span className={`flex-1 truncate ${isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>
+            {node.name}
           </span>
-        )}
-      </button>
+
+          {/* File size (files only) */}
+          {!node.isDirectory && (
+            <span className="text-[10px] text-text-muted shrink-0 opacity-0 group-hover:opacity-100">
+              {formatSize(node.size)}
+            </span>
+          )}
+        </button>
+      )}
 
       {/* Children (if expanded) */}
       {node.isDirectory && isExpanded && node.children.map(child => (
@@ -382,9 +508,87 @@ function TreeNodeRow({
           openFile={openFile}
           unreadFileIds={unreadFileIds}
           activeFilePath={activeFilePath}
+          onContextMenu={onContextMenu}
+          renamingPath={renamingPath}
+          onRenameSubmit={onRenameSubmit}
+          onRenameCancel={onRenameCancel}
         />
       ))}
     </>
+  )
+}
+
+function InlineRenameRow({
+  node,
+  level,
+  isExpanded,
+  onSubmit,
+  onCancel,
+}: {
+  node: TreeNode
+  level: number
+  isExpanded: boolean
+  onSubmit: (newName: string) => void
+  onCancel: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [value, setValue] = useState(node.name)
+
+  useEffect(() => {
+    if (!inputRef.current) return
+    inputRef.current.focus()
+    // Select just the filename without extension for files
+    if (!node.isDirectory) {
+      const dotIdx = node.name.lastIndexOf('.')
+      if (dotIdx > 0) {
+        inputRef.current.setSelectionRange(0, dotIdx)
+      } else {
+        inputRef.current.select()
+      }
+    } else {
+      inputRef.current.select()
+    }
+  }, [node.name, node.isDirectory])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (value.trim() && value !== node.name) {
+        onSubmit(value.trim())
+      } else {
+        onCancel()
+      }
+    } else if (e.key === 'Escape') {
+      onCancel()
+    }
+  }
+
+  return (
+    <div
+      className="flex w-full items-center gap-1.5 rounded-lg py-0.5 pr-2"
+      style={{ paddingLeft: `${level * 16 + 8}px` }}
+    >
+      {node.isDirectory ? (
+        <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0 transition-transform" style={{ transform: isExpanded ? 'rotate(90deg)' : undefined }}>
+          chevron_right
+        </span>
+      ) : (
+        <span className="w-4 shrink-0" />
+      )}
+      <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">
+        {node.isDirectory
+          ? (isExpanded ? 'folder_open' : 'folder')
+          : getFileIcon(node.name.split('.').pop()?.toLowerCase() ?? '')}
+      </span>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={onCancel}
+        className="flex-1 rounded border border-forest-green bg-white px-1 py-0.5 text-xs text-text-main outline-none"
+      />
+    </div>
   )
 }
 
