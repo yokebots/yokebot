@@ -3,10 +3,46 @@ import { StatsRow } from '@/components/StatsRow'
 import { CreateAgentModal } from '@/components/CreateAgentModal'
 import * as engine from '@/lib/engine'
 import type { ActivityLogEntry } from '@/lib/engine'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useRealtimeEvent } from '@/lib/use-realtime'
 
+function WelcomeScreen() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-light-bg">
+      <div className="flex flex-col items-center gap-5">
+        <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-forest-green shadow-lg overflow-hidden">
+          <img src="/logo-icon-white.png" alt="YokeBot" className="h-10 w-10 object-contain" />
+          <div className="absolute -inset-1 animate-ping rounded-2xl bg-forest-green/20" />
+        </div>
+        <div className="flex flex-col items-center gap-2">
+          <span className="font-display text-xl font-bold tracking-tight text-text-main">
+            Getting everything ready...
+          </span>
+          <span className="text-base text-text-secondary">
+            Hang tight while we spin up your workspace
+          </span>
+        </div>
+        <div className="mt-1 flex gap-1.5">
+          <div className="h-2 w-2 animate-bounce rounded-full bg-forest-green" style={{ animationDelay: '0ms' }} />
+          <div className="h-2 w-2 animate-bounce rounded-full bg-forest-green" style={{ animationDelay: '150ms' }} />
+          <div className="h-2 w-2 animate-bounce rounded-full bg-forest-green" style={{ animationDelay: '300ms' }} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function DashboardPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showWelcome, setShowWelcome] = useState(() => searchParams.get('welcome') === '1')
+
+  useEffect(() => {
+    if (!showWelcome) return
+    // Clear the query param from URL
+    setSearchParams({}, { replace: true })
+    const timer = setTimeout(() => setShowWelcome(false), 3000)
+    return () => clearTimeout(timer)
+  }, [showWelcome, setSearchParams])
   const [agents, setAgents] = useState<engine.EngineAgent[]>([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [recentActivity, setRecentActivity] = useState<ActivityLogEntry[]>([])
@@ -72,6 +108,8 @@ export function DashboardPage() {
 
   const inProgressTasks = tasks.filter((t) => t.status === 'in_progress').slice(0, 5)
   const activeProjects = projects.filter((p) => p.status === 'active').slice(0, 4)
+
+  if (showWelcome) return <WelcomeScreen />
 
   return (
     <div className="max-w-6xl">

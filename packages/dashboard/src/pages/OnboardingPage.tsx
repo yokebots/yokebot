@@ -546,7 +546,7 @@ export function OnboardingPage() {
     try {
       await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>)
     } catch { /* fail silently */ }
-    navigate('/dashboard', { replace: true })
+    navigate('/dashboard?welcome=1', { replace: true })
   }, [activeTeam, navigate])
 
   // Step 1: Scan website
@@ -1449,7 +1449,7 @@ export function OnboardingPage() {
                         if (activeTeam) {
                           await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
                         }
-                        navigate('/dashboard', { replace: true })
+                        navigate('/dashboard?welcome=1', { replace: true })
                       }}
                       className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
                     >
@@ -1649,7 +1649,7 @@ export function OnboardingPage() {
                       if (activeTeam) {
                         await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
                       }
-                      navigate('/dashboard', { replace: true })
+                      navigate('/dashboard?welcome=1', { replace: true })
                     }}
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
                   >
@@ -1687,7 +1687,7 @@ export function OnboardingPage() {
                         if (activeTeam) {
                           await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
                         }
-                        navigate('/dashboard', { replace: true })
+                        navigate('/dashboard?welcome=1', { replace: true })
                       }}
                       className="text-sm text-text-muted hover:text-text-secondary transition-colors"
                     >
@@ -1823,7 +1823,7 @@ export function OnboardingPage() {
             {/* Quick links */}
             <div className="mt-8 flex flex-col gap-3">
               <button
-                onClick={() => navigate('/dashboard', { replace: true })}
+                onClick={() => navigate('/dashboard?welcome=1', { replace: true })}
                 className="w-full rounded-lg bg-forest-green px-4 py-3 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
               >
                 Go to Dashboard

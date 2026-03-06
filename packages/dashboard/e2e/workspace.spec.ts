@@ -107,6 +107,38 @@ test.describe('Workspace Page', () => {
 
     await page.screenshot({ path: 'e2e/screenshots/workspace-search-overlay.png' })
   })
+
+  test('Files/Data tab switcher works', async ({ page }) => {
+    await setupPage(page)
+
+    // Files tab should be visible by default
+    await expect(page.locator('button:has-text("Files")')).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('button:has-text("Data")')).toBeVisible({ timeout: 5000 })
+
+    // Click Data tab
+    await page.locator('button:has-text("Data")').first().click()
+    await page.waitForTimeout(1000)
+
+    // Search placeholder should change to "Search tables..."
+    await expect(page.locator('input[placeholder="Search tables..."]')).toBeVisible({ timeout: 5000 })
+
+    await page.screenshot({ path: 'e2e/screenshots/workspace-data-tab.png' })
+
+    // Click back to Files
+    await page.locator('button:has-text("Files")').first().click()
+    await page.waitForTimeout(500)
+    await expect(page.locator('input[placeholder="Search files..."]')).toBeVisible({ timeout: 5000 })
+  })
+
+  test('/chat redirects to /workspace', async ({ page }) => {
+    await setupPage(page, '/chat')
+
+    // Should have been redirected to /workspace
+    await page.waitForTimeout(2000)
+    expect(page.url()).toContain('/workspace')
+
+    await page.screenshot({ path: 'e2e/screenshots/chat-redirect.png' })
+  })
 })
 
 test.describe('Usage Page', () => {

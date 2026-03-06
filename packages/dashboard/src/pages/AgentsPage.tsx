@@ -1,17 +1,22 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router'
 import * as engine from '@/lib/engine'
-import type { EngineAgent } from '@/lib/engine'
+import type { EngineAgent, ModelCreditCost } from '@/lib/engine'
 import { CreateAgentModal } from '@/components/CreateAgentModal'
 
 export function AgentsPage() {
   const [agents, setAgents] = useState<EngineAgent[]>([])
+  const [modelCatalog, setModelCatalog] = useState<ModelCreditCost[]>([])
   const [showCreate, setShowCreate] = useState(false)
 
   const loadData = async () => {
     try {
-      const a = await engine.listAgents()
+      const [a, catalog] = await Promise.all([
+        engine.listAgents(),
+        engine.getModelCatalog().catch(() => [] as ModelCreditCost[]),
+      ])
       setAgents(a)
+      setModelCatalog(catalog)
     } catch { /* offline */ }
   }
 
@@ -46,38 +51,59 @@ export function AgentsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {agents.map((agent) => (
+        {[...agents].sort((a, b) => {
+          if (a.name === 'AdvisorBot') return -1
+          if (b.name === 'AdvisorBot') return 1
+          return 0
+        }).map((agent) => (
           <Link
             key={agent.id}
             to={`/agents/${agent.id}`}
-            className="group rounded-xl border border-border-subtle bg-white p-5 shadow-card transition-all hover:shadow-lg hover:border-forest-green/30"
+            className="group flex flex-col rounded-xl border border-border-subtle bg-white p-5 shadow-card transition-all hover:shadow-lg hover:border-forest-green/30"
           >
-            <div className="mb-4 flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest-green/10 text-forest-green border border-forest-green/20">
-                  <span className="material-symbols-outlined">smart_toy</span>
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-text-main">{agent.name}</h3>
-                  <p className="font-mono text-xs text-text-muted">{agent.department ?? 'GENERAL'}</p>
-                </div>
+            {/* Icon + name + status */}
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-forest-green/10 text-forest-green border border-forest-green/20">
+                <span className="material-symbols-outlined">smart_toy</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${statusDot[agent.status]}`} />
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusLabel[agent.status]?.bg} ${statusLabel[agent.status]?.text}`}>
-                  {agent.status}
-                </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${statusDot[agent.status]}`} />
+                  <span className={`text-[10px] font-bold uppercase ${statusLabel[agent.status]?.text}`}>
+                    {agent.status}
+                  </span>
+                </div>
+                <h3 className="text-sm font-bold text-text-main truncate">{agent.name}</h3>
+                <p className="font-mono text-[11px] text-text-muted uppercase tracking-wide">{agent.department ?? 'General'}</p>
               </div>
             </div>
-            <div className="space-y-2 text-xs text-text-muted">
+
+            {/* Details */}
+            <div className="mt-4 space-y-2 border-t border-border-subtle pt-3 text-xs text-text-muted">
               <div className="flex justify-between">
                 <span>Model</span>
-                <span className="font-mono text-text-main">{agent.modelName}</span>
+                <span className="font-mono text-text-main truncate ml-2 text-right">{agent.modelName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Check-in</span>
+                <span className="text-text-main">{agent.heartbeatSeconds >= 3600 ? `${agent.heartbeatSeconds / 3600}h` : `${agent.heartbeatSeconds / 60}m`}</span>
               </div>
               <div className="flex justify-between">
                 <span>Last active</span>
-                <span>{new Date(agent.updatedAt).toLocaleTimeString()}</span>
+                <span className="text-text-main">{new Date(agent.updatedAt).toLocaleTimeString()}</span>
               </div>
+              {(() => {
+                const cost = modelCatalog.find(c => c.modelId === agent.modelId)
+                if (!cost) return null
+                const checksPerDay = (24 * 60 * 60) / agent.heartbeatSeconds
+                const daily = Math.round(checksPerDay * cost.creditsPerUse)
+                return (
+                  <div className="flex justify-between">
+                    <span>Est. daily</span>
+                    <span className="text-text-main">{daily.toLocaleString()} credits</span>
+                  </div>
+                )
+              })()}
             </div>
           </Link>
         ))}

@@ -39,6 +39,7 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
   const [selectedModelId, setSelectedModelId] = useState('')
   const [heartbeat, setHeartbeat] = useState(1800) // Default 30 min for all tiers
   const [loading, setLoading] = useState(false)
+  const [modelsLoading, setModelsLoading] = useState(true)
   const [error, setError] = useState('')
   const [showUpgrade, setShowUpgrade] = useState(false)
   const [upgradeMessage, setUpgradeMessage] = useState('')
@@ -55,7 +56,7 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
       const firstChat = m.find((model) => model.type === 'chat' && model.category !== 'local')
       const defaultModel = recommended ?? firstChat ?? m[0]
       if (defaultModel) setSelectedModelId(defaultModel.id)
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => setModelsLoading(false))
   }, [])
 
   const selectedModel = models.find((m) => m.id === selectedModelId)
@@ -140,7 +141,11 @@ export function CreateAgentModal({ onClose, onCreated, defaultName, defaultPromp
           </div>
         )}
 
-        {models.length === 0 ? (
+        {modelsLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-forest-green border-t-transparent" />
+          </div>
+        ) : models.length === 0 ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
             <span className="material-symbols-outlined mb-2 text-3xl text-amber-600">warning</span>
             <p className="text-sm font-medium text-amber-800">No models available</p>

@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { PanelHeader } from './PanelHeader'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 
@@ -192,26 +191,11 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <PanelHeader
-        icon={activePanel === 'files' ? 'folder_open' : 'table_chart'}
-        title={activePanel === 'files' ? 'Files' : 'Data'}
-        badge={activePanel === 'files' ? unreadFileIds?.size : undefined}
-        actions={
-          <button
-            onClick={() => activePanel === 'files' ? loadFiles() : loadTables()}
-            className="rounded p-1 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
-            title="Refresh"
-          >
-            <span className="material-symbols-outlined text-[16px]">refresh</span>
-          </button>
-        }
-      />
-
-      {/* Files / Data tab switcher */}
-      <div className="flex gap-1 px-2 pt-1 pb-1 shrink-0">
+      {/* Files / Data tab header — single line */}
+      <div className="flex items-center gap-1 px-2 py-2 border-b border-border-subtle shrink-0">
         <button
           onClick={() => setActivePanel('files')}
-          className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${
             activePanel === 'files'
               ? 'bg-forest-green/10 text-forest-green'
               : 'text-text-muted hover:bg-light-surface-alt hover:text-text-main'
@@ -219,10 +203,15 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
         >
           <span className="material-symbols-outlined text-[14px]">folder_open</span>
           Files
+          {unreadFileIds && unreadFileIds.size > 0 && activePanel === 'files' && (
+            <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-forest-green px-1 text-[9px] font-bold text-white">
+              {unreadFileIds.size}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setActivePanel('data')}
-          className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${
             activePanel === 'data'
               ? 'bg-forest-green/10 text-forest-green'
               : 'text-text-muted hover:bg-light-surface-alt hover:text-text-main'
