@@ -262,10 +262,7 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
         {/* Styled preview overlay — always visible when mentions exist */}
         {hasMentions && value.trim() && (
           <div
-            onClick={() => {
-              requestAnimationFrame(() => inputRef.current?.focus())
-            }}
-            className={`absolute inset-0 z-10 flex items-start rounded-xl border bg-white px-4 py-2.5 pr-16 text-sm cursor-text overflow-hidden whitespace-pre-wrap ${
+            className={`absolute inset-0 z-10 flex items-start rounded-xl border bg-white px-4 py-2.5 pr-16 text-sm pointer-events-none overflow-hidden whitespace-pre-wrap ${
               isFocused ? 'border-forest-green' : 'border-border-subtle'
             }`}
             style={{ minHeight: '40px', maxHeight: '120px' }}

@@ -10,6 +10,8 @@ interface FileContextMenuProps {
   onDelete: (path: string) => void
   onCopyPath: (path: string) => void
   onOpenInTab: (path: string) => void
+  onDownload?: (path: string) => void
+  onDownloadZip?: (path: string) => void
 }
 
 interface MenuItem {
@@ -30,6 +32,8 @@ export function FileContextMenu({
   onDelete,
   onCopyPath,
   onOpenInTab,
+  onDownload,
+  onDownloadZip,
 }: FileContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -81,6 +85,18 @@ export function FileContextMenu({
       label: 'Copy Path',
       icon: 'content_copy',
       action: () => { onCopyPath(filePath); onClose() },
+    },
+    {
+      label: 'Download',
+      icon: 'download',
+      action: () => { onDownload?.(filePath); onClose() },
+      hidden: isDirectory || !onDownload,
+    },
+    {
+      label: 'Download as ZIP',
+      icon: 'folder_zip',
+      action: () => { onDownloadZip?.(filePath); onClose() },
+      hidden: !isDirectory || !onDownloadZip,
     },
     {
       label: 'Delete',

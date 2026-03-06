@@ -6,6 +6,7 @@ import { FileContextMenu } from './FileContextMenu'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 import type { SorTable, SorRow } from '@/lib/engine'
+import { downloadTextFile, tableToCsv, tableToJson } from '@/lib/export-utils'
 
 interface ContextPaneProps {
   workspace: WorkspaceState
@@ -65,6 +66,16 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
   const handleTaskClick = useCallback((taskId: string) => {
     workspace.setSelectedTaskId(taskId)
   }, [workspace])
+
+  const handleTabDownload = useCallback(async (path: string) => {
+    try {
+      const res = await engine.readFile(path)
+      const name = path.split('/').pop() ?? path
+      downloadTextFile(name, res.content)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download file')
+    }
+  }, [])
 
   return (
     <div className="flex flex-col h-full relative">
@@ -129,6 +140,7 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
           onDelete={(path) => { setTabContextMenu(null); handleTabDelete(path) }}
           onCopyPath={(path) => { setTabContextMenu(null); handleTabCopyPath(path) }}
           onOpenInTab={() => setTabContextMenu(null)}
+          onDownload={(path) => { setTabContextMenu(null); handleTabDownload(path) }}
         />
       )}
     </div>
@@ -317,6 +329,7 @@ function DataTableViewer({ tableId }: { tableId: string }) {
         <span className="text-sm font-semibold text-text-main">{table.name}</span>
         <span className="text-xs text-text-muted">{rows.length} record{rows.length !== 1 ? 's' : ''}</span>
         <div className="flex-1" />
+        <TableExportDropdown table={table} rows={rows} dataColumns={dataColumns} />
         <button
           onClick={() => { setShowAddRow(true); setNewRowData({}) }}
           className="flex items-center gap-1 rounded-md bg-forest-green px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 transition-colors"
@@ -417,6 +430,63 @@ function DataTableViewer({ tableId }: { tableId: string }) {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TableExportDropdown({ table, rows, dataColumns }: { table: SorTable; rows: SorRow[]; dataColumns: string[] }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const exportCsv = () => {
+    setOpen(false)
+    const csv = tableToCsv(dataColumns, rows.map(r => r.data))
+    downloadTextFile(`${table.name}.csv`, csv, 'text/csv')
+  }
+
+  const exportJson = () => {
+    setOpen(false)
+    const json = tableToJson(table.name, dataColumns, rows.map(r => r.data))
+    downloadTextFile(`${table.name}.json`, json, 'application/json')
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 rounded-md border border-border-subtle px-2.5 py-1 text-xs font-medium text-text-main hover:bg-light-surface-alt transition-colors"
+      >
+        <span className="material-symbols-outlined text-[14px]">download</span>
+        Export
+        <span className="material-symbols-outlined text-[12px]">expand_more</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-border-subtle bg-white shadow-lg py-1 z-50">
+          <button
+            onClick={exportCsv}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-main hover:bg-light-surface-alt transition-colors"
+          >
+            <span className="material-symbols-outlined text-[14px] text-text-muted">table_chart</span>
+            Export as CSV
+          </button>
+          <button
+            onClick={exportJson}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-main hover:bg-light-surface-alt transition-colors"
+          >
+            <span className="material-symbols-outlined text-[14px] text-text-muted">data_object</span>
+            Export as JSON
+          </button>
         </div>
       )}
     </div>

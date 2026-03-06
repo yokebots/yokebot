@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 import { FileContextMenu } from './FileContextMenu'
+import { downloadTextFile, downloadAsZip, tableToCsv } from '@/lib/export-utils'
 
 interface FlatFile {
   path: string
@@ -265,6 +266,85 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     navigator.clipboard.writeText(path)
   }
 
+  const handleDownloadFile = async (path: string) => {
+    try {
+      const res = await engine.readFile(path)
+      const name = path.split('/').pop() ?? path
+      downloadTextFile(name, res.content)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download file')
+    }
+  }
+
+  const handleDownloadDirZip = async (dirPath: string) => {
+    try {
+      const dirFiles = allFiles.filter(f => f.path.startsWith(dirPath + '/'))
+      if (dirFiles.length === 0) return
+      const contents = await Promise.all(
+        dirFiles.map(async (f) => {
+          const res = await engine.readFile(f.path)
+          // Strip the directory prefix so paths are relative inside the ZIP
+          const relativePath = f.path.slice(dirPath.length + 1)
+          return { path: relativePath, content: res.content }
+        }),
+      )
+      const dirName = dirPath.split('/').pop() ?? dirPath
+      await downloadAsZip(contents, `${dirName}.zip`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download directory')
+    }
+  }
+
+  const [exporting, setExporting] = useState(false)
+
+  const handleExportAllFiles = async () => {
+    if (allFiles.length === 0) return
+    setExporting(true)
+    try {
+      const contents = await Promise.all(
+        allFiles.map(async (f) => {
+          const res = await engine.readFile(f.path)
+          return { path: f.path, content: res.content }
+        }),
+      )
+      await downloadAsZip(contents, 'workspace-files.zip')
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to export files')
+    }
+    setExporting(false)
+  }
+
+  const handleExportAllTables = async (format: 'csv' | 'json') => {
+    if (tables.length === 0) return
+    setExporting(true)
+    try {
+      const allTableData = await Promise.all(
+        tables.map(async (t) => {
+          const rows = await engine.listSorRows(t.id)
+          const columns = t.columns.sort((a, b) => a.position - b.position).map(c => c.name)
+          return { table: t, columns, rows }
+        }),
+      )
+      if (format === 'json') {
+        const combined = allTableData.map(({ table, columns, rows }) => ({
+          table: table.name,
+          columns,
+          rows: rows.map(r => r.data),
+        }))
+        downloadTextFile('tables.json', JSON.stringify(combined, null, 2), 'application/json')
+      } else {
+        const files = allTableData.map(({ table, columns, rows }) => ({
+          path: `${table.name}.csv`,
+          content: tableToCsv(columns, rows.map(r => r.data)),
+        }))
+        await downloadAsZip(files, 'tables.zip')
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to export tables')
+    }
+    setExporting(false)
+  }
+
   // Search: filter flat file list
   const searchResults = search
     ? allFiles.filter(f => f.path.toLowerCase().includes(search.toLowerCase()))
@@ -395,6 +475,26 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
         )}
       </div>
 
+      {/* Export footer */}
+      <div className="border-t border-border-subtle px-2 py-1.5 shrink-0">
+        {activePanel === 'files' ? (
+          <button
+            onClick={handleExportAllFiles}
+            disabled={allFiles.length === 0 || exporting}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border-subtle px-3 py-1.5 text-xs font-medium text-text-main hover:bg-light-surface-alt transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-[14px]">download</span>
+            {exporting ? 'Exporting...' : `Export ${allFiles.length} file${allFiles.length !== 1 ? 's' : ''}`}
+          </button>
+        ) : (
+          <ExportTablesDropdown
+            tableCount={tables.length}
+            exporting={exporting}
+            onExport={handleExportAllTables}
+          />
+        )}
+      </div>
+
       {/* Context Menu */}
       {contextMenu && (
         <FileContextMenu
@@ -407,6 +507,8 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
           onDelete={handleDelete}
           onCopyPath={handleCopyPath}
           onOpenInTab={openFile}
+          onDownload={handleDownloadFile}
+          onDownloadZip={handleDownloadDirZip}
         />
       )}
     </div>
@@ -608,4 +710,58 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function ExportTablesDropdown({
+  tableCount,
+  exporting,
+  onExport,
+}: {
+  tableCount: number
+  exporting: boolean
+  onExport: (format: 'csv' | 'json') => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={tableCount === 0 || exporting}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border-subtle px-3 py-1.5 text-xs font-medium text-text-main hover:bg-light-surface-alt transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        <span className="material-symbols-outlined text-[14px]">download</span>
+        {exporting ? 'Exporting...' : `Export ${tableCount} table${tableCount !== 1 ? 's' : ''}`}
+        <span className="material-symbols-outlined text-[12px] ml-auto">expand_more</span>
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-border-subtle bg-white shadow-lg py-1 z-50">
+          <button
+            onClick={() => { setOpen(false); onExport('csv') }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-main hover:bg-light-surface-alt transition-colors"
+          >
+            <span className="material-symbols-outlined text-[14px] text-text-muted">table_chart</span>
+            Export as CSV (ZIP)
+          </button>
+          <button
+            onClick={() => { setOpen(false); onExport('json') }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-main hover:bg-light-surface-alt transition-colors"
+          >
+            <span className="material-symbols-outlined text-[14px] text-text-muted">data_object</span>
+            Export as JSON
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
