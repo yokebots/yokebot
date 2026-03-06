@@ -285,10 +285,10 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className={`w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-16 text-sm text-text-main focus:border-forest-green focus:ring-1 focus:ring-forest-green/30 focus:outline-none disabled:opacity-50 ${
-            hasMentions && value.trim() ? 'text-transparent' : ''
+          className={`w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-16 text-sm focus:border-forest-green focus:ring-1 focus:ring-forest-green/30 focus:outline-none disabled:opacity-50 ${
+            hasMentions && value.trim() ? '' : 'text-text-main'
           }`}
-          style={{ minHeight: '40px', maxHeight: '120px', caretColor: '#1F2937' }}
+          style={{ minHeight: '40px', maxHeight: '120px', caretColor: '#1F2937', color: hasMentions && value.trim() ? 'transparent' : undefined }}
           onInput={(e) => {
             // Auto-resize textarea
             const target = e.target as HTMLTextAreaElement
