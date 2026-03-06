@@ -4,6 +4,7 @@ import { MessageBubble } from './ThreadView'
 import { ThreadView } from './ThreadView'
 import { MentionInput } from '@/components/MentionInput'
 import { useRealtimeEvent } from '@/lib/use-realtime'
+import { useAuth } from '@/lib/auth'
 import * as engine from '@/lib/engine'
 
 interface TeamChatProps {
@@ -18,6 +19,8 @@ interface ContextMenuState {
 }
 
 export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatProps) {
+  const { user } = useAuth()
+  const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'You'
   const [messages, setMessages] = useState<engine.ChatMessage[]>([])
   const [messageText, setMessageText] = useState('')
   const [sending, setSending] = useState(false)
@@ -192,6 +195,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
             key={msg.id}
             message={msg}
             agentColorMap={agentColorMap}
+            humanName={userName}
             onThreadClick={setThreadParent}
             onFileClick={onFileClick}
             onTaskClick={onTaskClick}

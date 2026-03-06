@@ -95,6 +95,7 @@ export function MessageBubble({
   message,
   agentColorMap,
   compact,
+  humanName,
   onThreadClick,
   onFileClick,
   onTaskClick,
@@ -103,6 +104,7 @@ export function MessageBubble({
   message: engine.ChatMessage
   agentColorMap: Map<string, { color: string; icon: string; name: string }>
   compact?: boolean
+  humanName?: string
   onThreadClick?: (msg: engine.ChatMessage) => void
   onFileClick?: (docId: string) => void
   onTaskClick?: (taskId: string) => void
@@ -119,17 +121,29 @@ export function MessageBubble({
   }, [message.id, compact])
 
   const toggleReaction = useCallback(async (emoji: string) => {
+    // Optimistic update — apply immediately, reconcile after
+    setReactions(prev => {
+      const users = prev[emoji] ?? []
+      const hasReacted = users.includes('user')
+      const next = { ...prev }
+      if (hasReacted) {
+        next[emoji] = users.filter(u => u !== 'user')
+        if (next[emoji].length === 0) delete next[emoji]
+      } else {
+        next[emoji] = [...users, 'user']
+      }
+      return next
+    })
+    setShowEmojiPicker(false)
     try {
       await engine.toggleReaction(message.id, emoji)
-      const updated = await engine.getReactions(message.id)
-      setReactions(updated)
     } catch { /* ignore */ }
-    setShowEmojiPicker(false)
   }, [message.id])
   const isAgent = message.senderType === 'agent'
   const isSystem = message.senderType === 'system'
+  const isHuman = message.senderType === 'human'
   const agent = isAgent ? agentColorMap.get(message.senderId) : null
-  const displayName = agent?.name ?? (isAgent ? 'Agent' : isSystem ? 'System' : 'You')
+  const displayName = agent?.name ?? (isAgent ? 'Agent' : isSystem ? 'System' : humanName ?? 'You')
   const color = agent?.color ?? (isAgent ? '#0F4D26' : isSystem ? '#6B7280' : '#059669')
   const icon = agent?.icon ?? (isAgent ? 'smart_toy' : isSystem ? 'info' : 'person')
 
@@ -149,8 +163,6 @@ export function MessageBubble({
   const mobileCollapsed = isLong && !expanded
 
   const timeStr = new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-
-  const isHuman = message.senderType === 'human'
 
   const reactionEntries = Object.entries(reactions).filter(([, users]) => users.length > 0)
 
@@ -177,17 +189,10 @@ export function MessageBubble({
             : 'bg-white border border-border-subtle'
       }`}>
         {/* Name + time */}
-        {!isHuman && (
-          <div className="flex items-baseline gap-1.5 mb-0.5">
-            <span className="text-[11px] font-bold" style={{ color }}>{displayName}</span>
-            <span className="text-[10px] text-text-muted">{timeStr}</span>
-          </div>
-        )}
-        {isHuman && (
-          <div className="flex items-baseline gap-1.5 mb-0.5 justify-end">
-            <span className="text-[10px] text-text-muted">{timeStr}</span>
-          </div>
-        )}
+        <div className={`flex items-baseline gap-1.5 mb-0.5 ${isHuman ? 'justify-end' : ''}`}>
+          <span className="text-[11px] font-bold" style={{ color }}>{displayName}</span>
+          <span className="text-[10px] text-text-muted">{timeStr}</span>
+        </div>
         {/* Content — full on desktop, collapsible on mobile */}
         <div className={`relative text-sm text-text-main leading-relaxed break-words whitespace-pre-wrap ${mobileCollapsed ? 'max-md:max-h-[6.5em] max-md:overflow-hidden' : ''}`}>
           {renderMentionContent(displayContent, undefined, onFileClick, undefined, onTaskClick)}
@@ -263,6 +268,16 @@ export function MessageBubble({
           </div>
         )}
       </div>
+
+      {/* Avatar (right side, human only) */}
+      {isHuman && (
+        <div
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full mt-0.5"
+          style={{ backgroundColor: color + '18' }}
+        >
+          <span className="material-symbols-outlined text-[14px]" style={{ color }}>{icon}</span>
+        </div>
+      )}
     </div>
   )
 }

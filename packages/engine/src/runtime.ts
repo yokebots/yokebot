@@ -16,7 +16,7 @@ import { createTask, listTasks, updateTask } from './tasks.ts'
 import { applyTagsByName } from './tags.ts'
 import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel } from './chat.ts'
 import { createApproval } from './approval.ts'
-import { listSorTables, listSorRows, addSorRow, updateSorRow, getSorTableByName, checkSorPermission } from './sor.ts'
+import { listSorTables, listSorRows, addSorRow, updateSorRow, getSorTableByName, checkSorPermission, createSorTable, addSorColumn, setSorPermission } from './sor.ts'
 import { getAgentSkills, getSkillTools, loadSkillsFromDir, installSkill } from './skills.ts'
 import { executeSkillHandler } from './skill-handlers.ts'
 import { executeBrowserTool, isBrowserTool } from './browser.ts'
@@ -221,6 +221,11 @@ function getBuiltinTools(): ToolDef[] {
     }, ['actionType', 'actionDetail', 'riskLevel']),
 
     // Source of Record
+    toolDef('create_source_of_record', 'Create a new Source of Record data table with columns. Use this instead of CSV files when you need structured, queryable data.', {
+      tableName: { type: 'string', description: 'Name for the new table (e.g. "Leads", "Inventory", "Contacts")' },
+      columns: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, type: { type: 'string', enum: ['text', 'number', 'date', 'boolean'] } }, required: ['name'] }, description: 'Column definitions — each needs a name, type defaults to text' },
+    }, ['tableName', 'columns']),
+
     toolDef('query_source_of_record', 'Read rows from a Source of Record data table.', {
       tableName: { type: 'string', description: 'The table name to query' },
     }, ['tableName']),
@@ -544,6 +549,22 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     // ---- Source of Record ----
+    case 'create_source_of_record': {
+      const tableName = args.tableName as string
+      // Check if table already exists
+      const existing = await getSorTableByName(ctx.db, tableName, ctx.teamId)
+      if (existing) return `Table "${tableName}" already exists. Use add_source_of_record_row to add data.`
+      const newTable = await createSorTable(ctx.db, ctx.teamId, tableName)
+      // Add columns
+      const columns = args.columns as Array<{ name: string; type?: string }>
+      for (const col of columns) {
+        await addSorColumn(ctx.db, newTable.id, col.name, col.type ?? 'text')
+      }
+      // Grant the creating agent read+write permission
+      await setSorPermission(ctx.db, ctx.agentId, newTable.id, true, true)
+      return `Created data table "${tableName}" with ${columns.length} columns: ${columns.map(c => c.name).join(', ')}. You now have read/write access.`
+    }
+
     case 'query_source_of_record': {
       // Team-scoped: only access own team's tables
       const table = await getSorTableByName(ctx.db, args.tableName as string, ctx.teamId)
@@ -897,6 +918,8 @@ Before creating ANY file, you MUST:
 - Max 2 levels of nesting: \`content/seo-briefs/trading-strategies.md\` is OK, deeper is not
 
 **One file per topic.** If your task produces a deliverable that overlaps with an existing file, update that file. Never create parallel versions, drafts, or copies.
+
+**Structured data belongs in Data Tables, NOT files.** When you need to store structured/tabular data (leads, contacts, inventory, metrics, etc.), use \`create_source_of_record\` to make a Data Table with typed columns — then add rows with \`add_source_of_record_row\`. NEVER create CSV, JSON, or other flat files for structured data. Data Tables are searchable, sortable, and visible in the dashboard.
 
 **Content quality rules:**
 - Always include a Sources section at the bottom with links to references, data sources, or tools used

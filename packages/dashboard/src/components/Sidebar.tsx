@@ -65,7 +65,6 @@ const mainNav: NavItem[] = [
 ]
 
 const settingsNav = [
-  { to: '/team', icon: 'group', label: 'Team' },
   { to: '/settings', icon: 'settings', label: 'Settings' },
 ]
 

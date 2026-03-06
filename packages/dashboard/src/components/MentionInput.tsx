@@ -44,6 +44,7 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
   const [gifResults, setGifResults] = useState<Array<{ id: string; url: string; title: string }>>([])
   const [gifLoading, setGifLoading] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const pendingCursorRef = useRef<number | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
   const gifPickerRef = useRef<HTMLDivElement>(null)
@@ -85,25 +86,28 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
     if (selected) selected.scrollIntoView({ block: 'nearest' })
   }, [selectedIndex])
 
+  // Restore cursor after mention insertion
+  useEffect(() => {
+    if (pendingCursorRef.current !== null && inputRef.current) {
+      const pos = pendingCursorRef.current
+      inputRef.current.selectionStart = pos
+      inputRef.current.selectionEnd = pos
+      inputRef.current.focus()
+      pendingCursorRef.current = null
+    }
+  }, [value])
+
   const insertMention = useCallback((option: MentionOption) => {
     const before = value.slice(0, mentionStart)
     const after = value.slice(inputRef.current?.selectionStart ?? value.length)
     const mention = `@[${option.label}](${option.type}:${option.id}) `
     const newValue = before + mention + after
+    const pos = before.length + mention.length
+    pendingCursorRef.current = pos
     onChange(newValue)
     setShowDropdown(false)
     setMentionQuery('')
     setMentionStart(-1)
-
-    // Restore cursor position after React re-render
-    requestAnimationFrame(() => {
-      if (inputRef.current) {
-        const pos = before.length + mention.length
-        inputRef.current.selectionStart = pos
-        inputRef.current.selectionEnd = pos
-        inputRef.current.focus()
-      }
-    })
   }, [value, mentionStart, onChange])
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
