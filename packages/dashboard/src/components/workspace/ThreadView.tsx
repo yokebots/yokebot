@@ -125,9 +125,7 @@ export function MessageBubble({
 
   const COLLAPSE_THRESHOLD = 300
   const isLong = displayContent.length > COLLAPSE_THRESHOLD
-  const visibleContent = isLong && !expanded
-    ? displayContent.slice(0, COLLAPSE_THRESHOLD)
-    : displayContent
+  const mobileCollapsed = isLong && !expanded
 
   const timeStr = new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
@@ -164,19 +162,23 @@ export function MessageBubble({
             <span className="text-[10px] text-text-muted">{timeStr}</span>
           </div>
         )}
-        {/* Content */}
-        <div className="relative text-sm text-text-main leading-relaxed break-words whitespace-pre-wrap">
-          {renderMentionContent(visibleContent, undefined, onFileClick, undefined, onTaskClick)}
-          {isLong && !expanded && (
-            <span className="bg-gradient-to-l from-white via-white/80 to-transparent pl-6 text-[12px] text-forest-green cursor-pointer hover:underline whitespace-nowrap" onClick={() => setExpanded(true)}>... Read more</span>
+        {/* Content — full on desktop, collapsible on mobile */}
+        <div className={`relative text-sm text-text-main leading-relaxed break-words whitespace-pre-wrap ${mobileCollapsed ? 'max-md:max-h-[6.5em] max-md:overflow-hidden' : ''}`}>
+          {renderMentionContent(displayContent, undefined, onFileClick, undefined, onTaskClick)}
+          {mobileCollapsed && (
+            <div
+              className="absolute bottom-0 left-0 right-0 h-8 pointer-events-none hidden max-md:block"
+              style={{ background: `linear-gradient(to top, ${isHuman ? '#e8f5ec' : isSystem ? '#fffbeb' : '#ffffff'}, transparent)` }}
+            />
           )}
         </div>
-        {isLong && expanded && (
+        {isLong && (
           <button
-            onClick={() => setExpanded(false)}
-            className="mt-0.5 text-[12px] text-forest-green hover:underline"
+            onClick={() => setExpanded(!expanded)}
+            className="mt-1 hidden max-md:flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-forest-green hover:bg-forest-green/10 transition-colors mx-auto"
           >
-            Show less
+            <span className="material-symbols-outlined text-[13px]">{expanded ? 'expand_less' : 'expand_more'}</span>
+            {expanded ? 'Show less' : 'Read more'}
           </button>
         )}
         {/* Thread badge */}
