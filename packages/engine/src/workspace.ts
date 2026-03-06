@@ -310,30 +310,51 @@ export async function getFileByPath(db: Db, teamId: string, filePath: string): P
   return { id: row.id as string, taskId: (row.task_id as string) ?? null }
 }
 
-/** Rename a file (update its path). */
+/** Rename a file or directory (update paths). */
 export async function renameFile(db: Db, teamId: string, oldPath: string, newPath: string): Promise<{ success: boolean; error?: string }> {
   const normalizedOld = oldPath.replace(/^\/+/, '')
   const normalizedNew = newPath.replace(/^\/+/, '')
 
-  // Check source exists
+  const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
+
+  // Check if it's a single file
   const source = await db.queryOne<Record<string, unknown>>(
     'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',
     [teamId, normalizedOld],
   )
-  if (!source) return { success: false, error: 'File not found.' }
 
-  // Check target doesn't already exist
-  const existing = await db.queryOne<Record<string, unknown>>(
-    'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',
-    [teamId, normalizedNew],
-  )
-  if (existing) return { success: false, error: 'A file already exists at that path.' }
+  if (source) {
+    // Single file rename
+    const existing = await db.queryOne<Record<string, unknown>>(
+      'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',
+      [teamId, normalizedNew],
+    )
+    if (existing) return { success: false, error: 'A file already exists at that path.' }
 
-  const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
-  await db.run(
-    `UPDATE workspace_files SET path = $1, updated_at = ${now} WHERE team_id = $2 AND path = $3`,
-    [normalizedNew, teamId, normalizedOld],
+    await db.run(
+      `UPDATE workspace_files SET path = $1, updated_at = ${now} WHERE team_id = $2 AND path = $3`,
+      [normalizedNew, teamId, normalizedOld],
+    )
+    return { success: true }
+  }
+
+  // Directory rename — update all files under the old directory prefix
+  const prefix = normalizedOld + '/'
+  const children = await db.query<Record<string, unknown>>(
+    'SELECT id, path FROM workspace_files WHERE team_id = $1 AND path LIKE $2',
+    [teamId, prefix + '%'],
   )
+
+  if (children.length === 0) return { success: false, error: 'File not found.' }
+
+  for (const child of children) {
+    const childPath = child.path as string
+    const updatedPath = normalizedNew + childPath.slice(normalizedOld.length)
+    await db.run(
+      `UPDATE workspace_files SET path = $1, updated_at = ${now} WHERE id = $2 AND team_id = $3`,
+      [updatedPath, child.id, teamId],
+    )
+  }
   return { success: true }
 }
 
