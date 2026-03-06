@@ -454,7 +454,7 @@ export function AgentDetailPage() {
         {/* Right - Chat Link */}
         <div className="w-80 shrink-0">
           <Link
-            to={`/chat?dm=${agent.id}`}
+            to="/workspace"
             className="flex flex-col items-center gap-3 rounded-lg border border-border-subtle bg-white p-6 text-center hover:border-forest-green/30 hover:shadow-soft transition-all"
           >
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-forest-green/10 text-forest-green">
@@ -462,7 +462,7 @@ export function AgentDetailPage() {
             </div>
             <div>
               <p className="text-sm font-bold text-text-main">Chat with {agent.name}</p>
-              <p className="mt-1 text-xs text-text-muted">Open direct message in Chat</p>
+              <p className="mt-1 text-xs text-text-muted">Open conversation in Workspace</p>
             </div>
             <span className="inline-flex items-center gap-1 rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white">
               <span className="material-symbols-outlined text-[16px]">chat</span>

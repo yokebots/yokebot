@@ -39,7 +39,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (testUser) {
-    await deleteTestUser(testUser.id)
+    await deleteTestUser(testUser.id, testUser)
     console.log(`[e2e:data-tables] Deleted test user ${testUser.id}`)
   }
 })

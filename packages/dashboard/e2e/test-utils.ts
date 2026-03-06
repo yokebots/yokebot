@@ -145,9 +145,25 @@ async function provisionTestTeam(userId: string, email: string, accessToken: str
 }
 
 /**
- * Delete a test user and all associated data.
+ * Delete a test user and all associated data (team, agents, etc.).
+ * Cleans up the engine-side team first (via API), then removes the Supabase user.
  */
-export async function deleteTestUser(userId: string): Promise<void> {
+export async function deleteTestUser(userId: string, testUser?: TestUser): Promise<void> {
+  // If we have the full TestUser, clean up the engine-side team
+  if (testUser?.teamId && testUser?.accessToken) {
+    try {
+      await fetch(`${ENGINE_URL}/api/teams/${testUser.teamId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${testUser.accessToken}`,
+          'X-Team-Id': testUser.teamId,
+        },
+      })
+    } catch (e) {
+      console.warn(`[e2e] Failed to delete test team ${testUser.teamId}: ${e}`)
+    }
+  }
+
   const { error } = await adminClient.auth.admin.deleteUser(userId)
   if (error) {
     console.error(`Failed to delete test user ${userId}: ${error.message}`)

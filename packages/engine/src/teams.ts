@@ -75,7 +75,22 @@ export async function updateMemberRole(db: Db, teamId: string, userId: string, r
 }
 
 export async function deleteTeam(db: Db, id: string): Promise<void> {
+  // Cascade-delete all team data to prevent orphaned records
+  // Order matters: delete leaf tables first, then parents
+  await db.run('DELETE FROM resource_tags WHERE team_id = $1', [id])
+  await db.run('DELETE FROM tags WHERE team_id = $1', [id])
+  await db.run('DELETE FROM credit_transactions WHERE team_id = $1', [id])
+  await db.run('DELETE FROM team_credits WHERE team_id = $1', [id])
+  await db.run('DELETE FROM tasks WHERE team_id = $1', [id])
+  await db.run('DELETE FROM agents WHERE team_id = $1', [id])
+  await db.run('DELETE FROM team_members WHERE team_id = $1', [id])
   await db.run('DELETE FROM teams WHERE id = $1', [id])
+}
+
+/** Get all agent IDs for a team (used for scheduler cleanup). */
+export async function getTeamAgentIds(db: Db, teamId: string): Promise<string[]> {
+  const rows = await db.query<{ id: string }>('SELECT id FROM agents WHERE team_id = $1', [teamId])
+  return rows.map((r) => r.id)
 }
 
 /** Look up any existing user by email across all teams. Returns userId if found. */

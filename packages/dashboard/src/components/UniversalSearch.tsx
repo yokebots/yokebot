@@ -184,7 +184,7 @@ export function UniversalSearch({ onClose }: { onClose: () => void }) {
             label: preview,
             detail: `${m.senderType === 'agent' ? 'Agent' : 'You'} in ${channelLabel}`,
             timestamp: relativeTime(m.createdAt),
-            action: () => { navigate(`/chat?channel=${m.channelId}`); onClose() },
+            action: () => { navigate('/workspace'); onClose() },
           }
         }))
       } catch { setMessageResults([]) }

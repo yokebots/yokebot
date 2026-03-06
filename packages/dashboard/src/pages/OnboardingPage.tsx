@@ -1830,7 +1830,7 @@ export function OnboardingPage() {
               </button>
               <div className="flex gap-3">
                 <button
-                  onClick={() => navigate('/chat', { replace: true })}
+                  onClick={() => navigate('/workspace', { replace: true })}
                   className="flex-1 rounded-lg border border-border-subtle px-4 py-3 text-base font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
                 >
                   Chat with Agents

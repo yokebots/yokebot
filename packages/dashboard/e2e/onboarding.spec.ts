@@ -20,7 +20,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   if (testUser?.id) {
     console.log(`[e2e] Cleaning up test user: ${testUser.id}`)
-    await deleteTestUser(testUser.id)
+    await deleteTestUser(testUser.id, testUser)
     console.log('[e2e] Test user deleted')
   }
 })

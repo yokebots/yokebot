@@ -31,6 +31,22 @@ export class ApiError extends Error {
   }
 }
 
+// Cache session token to avoid calling supabase.auth.getSession() on every request
+let _cachedToken: string | null = null
+let _cachedTokenExp = 0
+
+async function getToken(): Promise<string | undefined> {
+  if (_cachedToken && Date.now() < _cachedTokenExp) return _cachedToken
+  const { data } = await supabase.auth.getSession()
+  if (data.session) {
+    _cachedToken = data.session.access_token
+    // Cache for 4 minutes (tokens last 1 hour, so this is very safe)
+    _cachedTokenExp = Date.now() + 4 * 60 * 1000
+    return _cachedToken
+  }
+  return undefined
+}
+
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const doFetch = async (token?: string) => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -45,33 +61,37 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const method = opts?.method ?? 'GET'
   const isGet = method === 'GET'
 
-  let session = (await supabase.auth.getSession()).data.session
+  let token = await getToken()
   let res: Response
 
   try {
-    res = await doFetch(session?.access_token)
+    res = await doFetch(token)
   } catch (err) {
     // Network error — retry GET requests once after 1s
     if (isGet) {
       await new Promise((r) => setTimeout(r, 1000))
-      res = await doFetch(session?.access_token)
+      res = await doFetch(token)
     } else {
       throw err
     }
   }
 
   // On 401, refresh the token and retry once
-  if (res.status === 401 && session) {
+  if (res.status === 401 && token) {
+    _cachedToken = null; _cachedTokenExp = 0
     const { data } = await supabase.auth.refreshSession()
     if (data.session) {
-      res = await doFetch(data.session.access_token)
+      _cachedToken = data.session.access_token
+      _cachedTokenExp = Date.now() + 4 * 60 * 1000
+      token = _cachedToken
+      res = await doFetch(token)
     }
   }
 
   // On 429, wait 2s and retry once (only for GET)
   if (res.status === 429 && isGet) {
     await new Promise((r) => setTimeout(r, 2000))
-    res = await doFetch(session?.access_token)
+    res = await doFetch(token)
   }
 
   if (!res.ok) {
@@ -234,6 +254,35 @@ export const chatWithAgent = (id: string, message: string) =>
 
 // ===== Tasks =====
 
+// --- Simple TTL cache for frequently re-fetched data ---
+const _cache = new Map<string, { data: unknown; ts: number }>()
+const CACHE_TTL = 15_000 // 15 seconds
+
+function cached<T>(key: string, fetcher: () => Promise<T>, ttl = CACHE_TTL): Promise<T> {
+  const hit = _cache.get(key)
+  if (hit && Date.now() - hit.ts < ttl) return Promise.resolve(hit.data as T)
+  return fetcher().then(data => { _cache.set(key, { data, ts: Date.now() }); return data })
+}
+
+export function invalidateCache(prefix?: string) {
+  if (!prefix) { _cache.clear(); return }
+  for (const key of _cache.keys()) { if (key.startsWith(prefix)) _cache.delete(key) }
+}
+
+export const getTask = (id: string) =>
+  cached(`task:${id}`, () => request<EngineTask>(`/api/tasks/${id}`))
+
+export interface TaskDetailResponse {
+  task: EngineTask
+  channelId: string
+  messages: ChatMessage[]
+  files: Array<{ path: string; name: string; size: number }>
+}
+
+/** Single request to load task + thread + files (replaces 5 separate calls) */
+export const getTaskDetail = (id: string) =>
+  cached(`taskDetail:${id}`, () => request<TaskDetailResponse>(`/api/tasks/${id}/detail`), 10_000)
+
 export const listTasks = (filters?: { status?: string; agentId?: string; parentId?: string; tags?: string }) => {
   const params = new URLSearchParams()
   if (filters?.status) params.set('status', filters.status)
@@ -241,7 +290,7 @@ export const listTasks = (filters?: { status?: string; agentId?: string; parentI
   if (filters?.parentId !== undefined) params.set('parentId', filters.parentId)
   if (filters?.tags) params.set('tags', filters.tags)
   const qs = params.toString()
-  return request<EngineTask[]>(`/api/tasks${qs ? `?${qs}` : ''}`)
+  return cached(`tasks:${qs}`, () => request<EngineTask[]>(`/api/tasks${qs ? `?${qs}` : ''}`))
 }
 
 export const createTask = (data: {
@@ -251,13 +300,13 @@ export const createTask = (data: {
   assignedAgentId?: string
   parentTaskId?: string
   deadline?: string
-}) => request<EngineTask>('/api/tasks', { method: 'POST', body: JSON.stringify(data) })
+}) => request<EngineTask>('/api/tasks', { method: 'POST', body: JSON.stringify(data) }).then(t => { invalidateCache('task'); return t })
 
 export const updateTask = (id: string, data: Record<string, unknown>) =>
-  request<EngineTask>(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+  request<EngineTask>(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }).then(t => { invalidateCache('task'); return t })
 
 export const deleteTask = (id: string) =>
-  request<void>(`/api/tasks/${id}`, { method: 'DELETE' })
+  request<void>(`/api/tasks/${id}`, { method: 'DELETE' }).then(() => { invalidateCache('task') })
 
 export const uploadTaskAttachment = async (taskId: string, file: File): Promise<{ url: string; attachments: TaskAttachment[] }> => {
   const contentBase64 = await fileToBase64(file)

@@ -6,7 +6,6 @@ import { HomePage } from '@/pages/HomePage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { MissionControlPage } from '@/pages/MissionControlPage'
 import { TaskDetailPage } from '@/pages/TaskDetailPage'
-import { ChatPage } from '@/pages/ChatPage'
 import { AgentsPage } from '@/pages/AgentsPage'
 import { AgentDetailPage } from '@/pages/AgentDetailPage'
 import { ApprovalsPage } from '@/pages/ApprovalsPage'
@@ -161,8 +160,8 @@ function AppRoutes() {
         <Route path="workflows/new" element={<WorkflowBuilderPage />} />
         <Route path="workflows/:id" element={<WorkflowBuilderPage />} />
         <Route path="workflows/:id/runs/:runId" element={<WorkflowRunPage />} />
-        <Route path="chat" element={<ChatPage />} />
-        <Route path="chat/:channelId" element={<ChatPage />} />
+        <Route path="chat" element={<Navigate to="/workspace" replace />} />
+        <Route path="chat/*" element={<Navigate to="/workspace" replace />} />
         <Route path="meetings" element={<MeetingsPage />} />
         <Route path="meetings/:meetingId" element={<MeetingReplayPage />} />
         <Route path="agents" element={<AgentsPage />} />

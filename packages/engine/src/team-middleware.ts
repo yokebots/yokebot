@@ -25,6 +25,10 @@ const FULLY_EXEMPT_PATHS = [
 // UUID v4 regex for extracting team IDs from URL paths
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+// Cache team membership lookups (key: "userId:teamId" → { role, ts })
+const _memberCache = new Map<string, { role: string; ts: number }>()
+const MEMBER_CACHE_TTL = 60_000 // 60 seconds
+
 export function createTeamMiddleware(db: Db) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // Skip fully exempt paths
@@ -85,11 +89,24 @@ export function createTeamMiddleware(db: Db) {
       return
     }
 
+    // Check cached membership first
+    const cacheKey = `${userId}:${teamId}`
+    const cached = _memberCache.get(cacheKey)
+    if (cached && Date.now() - cached.ts < MEMBER_CACHE_TTL) {
+      req.user!.activeTeamId = teamId
+      req.user!.teamRole = cached.role
+      next()
+      return
+    }
+
     const member = await getMember(db, teamId, userId)
     if (!member) {
       res.status(403).json({ error: 'You are not a member of this team' })
       return
     }
+
+    // Cache the result
+    _memberCache.set(cacheKey, { role: member.role, ts: Date.now() })
 
     // Attach team context to the request
     req.user!.activeTeamId = teamId

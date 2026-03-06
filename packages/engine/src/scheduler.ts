@@ -338,10 +338,16 @@ export async function respondToMention(
       db, agent.id, teamId, mentionPrompt, modelConfig, systemPrompt,
       state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined,
     )
-    if (result.response && !result.response.includes('[no-op]') && result.response.trim() !== 'no-op') {
+    const cleanMentionResponse = result.response ? stripToolSyntax(result.response) : null
+    const mentionIsUseful = cleanMentionResponse
+      && !cleanMentionResponse.includes('[no-op]')
+      && cleanMentionResponse.trim() !== 'no-op'
+      && !cleanMentionResponse.includes('unable to complete the task within the iteration limit')
+      && cleanMentionResponse.trim().length > 0
+    if (mentionIsUseful) {
       // Reply in the SAME channel where the mention happened
-      await sendMessage(db, channelId, 'agent', agent.id, result.response, undefined, teamId)
-      await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${result.response.slice(0, 150)}`, undefined, teamId)
+      await sendMessage(db, channelId, 'agent', agent.id, cleanMentionResponse, undefined, teamId)
+      await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${cleanMentionResponse.slice(0, 150)}`, undefined, teamId)
       console.log(`[scheduler] "${agent.name}" replied to @mention in channel ${channelId}`)
     }
   } catch (err) {
@@ -546,25 +552,37 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           // Clean tool-call syntax from response before posting to chat
           const cleanResponse = result.response ? stripToolSyntax(result.response) : null
 
-          // Post sprint result to the task thread
+          // Determine if the response is meaningful (not a no-op or JSON dump)
+          const isNoOpResponse = !cleanResponse
+            || cleanResponse.includes('[no-op]')
+            || cleanResponse.trim() === 'no-op'
+            || cleanResponse.trim().length === 0
+          // Detect JSON dumps — if the response starts with ``` or { and is mostly structured data, skip it
+          const looksLikeJsonDump = cleanResponse
+            && (cleanResponse.trim().startsWith('{') || cleanResponse.trim().startsWith('```'))
+            && cleanResponse.includes('"assessment"')
+
+          // Post sprint result to the task thread (skip no-ops and JSON dumps)
           try {
             const thread = await getTaskThread(db, task.id, agent.teamId)
-            if (cleanResponse && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op' && cleanResponse.trim().length > 0) {
-              await sendMessage(db, thread.id, 'agent', agent.id, cleanResponse, task.id, agent.teamId)
+            if (!isNoOpResponse && !looksLikeJsonDump) {
+              await sendMessage(db, thread.id, 'agent', agent.id, cleanResponse!, task.id, agent.teamId)
             }
           } catch { /* thread post is best-effort */ }
 
           const status = result.taskCompleted ? 'DONE' : result.taskBlocked ? 'BLOCKED' : 'continuing'
 
-          // Cross-post brief summary to team channel
-          try {
-            const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'
-            const teamSummary = `@[${task.title}](task:${task.id}) — ${statusLabel} (${result.iterations} iterations)${cleanResponse ? `\n${cleanResponse}` : ''}`
-            const teamChannel = await getTeamChannel(db, agent.teamId)
-            const existingMsg = await findLatestTaskMessage(db, teamChannel.id, task.id)
-            const parentId = existingMsg?.id ? Number(existingMsg.id) : undefined
-            await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, task.id, agent.teamId, undefined, undefined, undefined, parentId)
-          } catch { /* best-effort */ }
+          // Cross-post brief summary to team channel (skip no-ops and JSON dumps)
+          if (!isNoOpResponse && !looksLikeJsonDump) {
+            try {
+              const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'
+              const teamSummary = `@[${task.title}](task:${task.id}) — ${statusLabel} (${result.iterations} iterations)${cleanResponse ? `\n${cleanResponse}` : ''}`
+              const teamChannel = await getTeamChannel(db, agent.teamId)
+              const existingMsg = await findLatestTaskMessage(db, teamChannel.id, task.id)
+              const parentId = existingMsg?.id ? Number(existingMsg.id) : undefined
+              await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, task.id, agent.teamId, undefined, undefined, undefined, parentId)
+            } catch { /* best-effort */ }
+          }
 
           await logActivity(db, 'task_sprint', agent.id,
             `Sprint on "${task.title}" — ${result.iterations} iters, ${status}`,
@@ -589,13 +607,12 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
   // ---- Generic check-in (no tasks assigned, or AdvisorBot) ----
   const genericPrompt = [
-    'This is a scheduled check-in. Before taking any action, use the "think" tool to:',
-    '1. ASSESS — Review your current tasks, goals, messages, and pending approvals.',
-    '2. PRIORITIZE — Decide what is most important right now (urgent tasks first, then messages, then proactive ideas).',
-    '3. PLAN — Outline the specific actions you will take this check-in and in what order.',
-    'Then execute your plan step by step. Use "think" again before any complex or multi-step action.',
-    'If after assessment there is genuinely nothing to do, call the "respond" tool with the message "no-op".',
-    'If you notice pending approvals that need human attention, remind about them.',
+    'This is a scheduled check-in. Use the "think" tool to assess your tasks, messages, and pending work.',
+    '',
+    'If you have actionable work to do: execute it, then post a brief natural-language summary of what you accomplished.',
+    'If there is genuinely nothing to do: respond with exactly "no-op". Do NOT post a check-in message saying nothing happened.',
+    '',
+    'IMPORTANT: Your response will be posted to the team chat. Write it as a short, human-readable update — NOT JSON, NOT a structured assessment, NOT your internal reasoning. Just tell the team what you did or what you need.',
   ].join('\n')
 
   const advisorPrompt = [
@@ -630,21 +647,16 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   try {
     const runtimeConfig = { maxIterations: isAdvisor ? 5 : 10 }
     const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
-    // Skip no-ops and iteration-limit fallback messages — don't spam channels
+    // Skip no-ops, iteration-limit messages, and thinking dumps — don't spam channels
     const cleanedResponse = result.response ? stripToolSyntax(result.response) : null
     const isNoOp = cleanedResponse?.includes('[no-op]') || cleanedResponse?.trim() === 'no-op' || (cleanedResponse?.trim().length ?? 0) === 0
     const isIterationLimit = cleanedResponse?.includes('unable to complete the task within the iteration limit')
-    if (cleanedResponse && !isNoOp && !isIterationLimit) {
-      // Route proactive messages to the best-matching group channel
+    const isThinkingDump = cleanedResponse
+      && (cleanedResponse.includes('### ASSESS') || cleanedResponse.includes('### PRIORITIZE') || cleanedResponse.includes('### PLAN'))
+    if (cleanedResponse && !isNoOp && !isIterationLimit && !isThinkingDump) {
+      // Route proactive messages to the best-matching group channel only (no cross-post to avoid duplicates)
       const groupChannel = await pickBestChannel(db, agent)
       await sendMessage(db, groupChannel.id, 'agent', agent.id, cleanedResponse, undefined, agent.teamId)
-      // Cross-post to team channel
-      try {
-        const teamChannel = await getTeamChannel(db, agent.teamId)
-        if (teamChannel.id !== groupChannel.id) {
-          await sendMessage(db, teamChannel.id, 'agent', agent.id, cleanedResponse, undefined, agent.teamId)
-        }
-      } catch { /* best-effort */ }
       await logActivity(db, 'heartbeat_proactive', agent.id, `Proactive check-in: ${cleanedResponse.slice(0, 150)}`, undefined, agent.teamId)
       console.log(`[scheduler] Proactive message from "${agent.name}" posted to #${groupChannel.name}`)
     }

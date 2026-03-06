@@ -44,18 +44,13 @@ export async function getTask(db: Db, id: string): Promise<Task | null> {
 }
 
 export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; parentId?: string | null; teamId?: string; tags?: string }): Promise<Task[]> {
-  let sql = 'SELECT DISTINCT t.* FROM tasks t'
   const params: unknown[] = []
   let paramIdx = 1
 
-  // If filtering by tags, join resource_tags + tags tables
+  // If filtering by tags, use EXISTS subquery (avoids DISTINCT + ORDER BY issues in Postgres)
   const tagNames = filters?.tags ? filters.tags.split(',').map((t) => t.trim()).filter(Boolean) : []
-  if (tagNames.length > 0) {
-    sql += ' JOIN resource_tags rt ON rt.resource_id = t.id AND rt.resource_type = \'task\''
-    sql += ' JOIN tags tg ON tg.id = rt.tag_id'
-  }
 
-  sql += ' WHERE 1=1'
+  let sql = 'SELECT * FROM tasks t WHERE 1=1'
 
   if (filters?.teamId) { sql += ` AND t.team_id = $${paramIdx++}`; params.push(filters.teamId) }
   if (filters?.status) { sql += ` AND t.status = $${paramIdx++}`; params.push(filters.status) }
@@ -66,7 +61,7 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   }
   if (tagNames.length > 0) {
     const placeholders = tagNames.map(() => `$${paramIdx++}`).join(', ')
-    sql += ` AND tg.name IN (${placeholders})`
+    sql += ` AND EXISTS (SELECT 1 FROM resource_tags rt JOIN tags tg ON tg.id = rt.tag_id WHERE rt.resource_id = t.id AND rt.resource_type = 'task' AND tg.name IN (${placeholders}))`
     params.push(...tagNames)
   }
 
@@ -75,9 +70,26 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   const rows = await db.query<Record<string, unknown>>(sql, params)
   const tasks = rows.map(rowToTask)
 
-  // Hydrate tags for each task
-  for (const task of tasks) {
-    task.tags = await getTaskTags(db, task.id)
+  // Batch-load tags for all tasks in a single query (avoids N+1)
+  if (tasks.length > 0) {
+    const taskIds = tasks.map(t => t.id)
+    const placeholders = taskIds.map((_, i) => `$${i + 1}`).join(', ')
+    const tagRows = await db.query<Record<string, unknown>>(
+      `SELECT rt.resource_id AS task_id, t.id, t.name, t.color
+       FROM tags t JOIN resource_tags rt ON rt.tag_id = t.id
+       WHERE rt.resource_type = 'task' AND rt.resource_id IN (${placeholders})
+       ORDER BY t.name`,
+      taskIds,
+    )
+    const tagMap = new Map<string, TaskTag[]>()
+    for (const r of tagRows) {
+      const tid = r.task_id as string
+      if (!tagMap.has(tid)) tagMap.set(tid, [])
+      tagMap.get(tid)!.push({ id: r.id as string, name: r.name as string, color: r.color as string })
+    }
+    for (const task of tasks) {
+      task.tags = tagMap.get(task.id) ?? []
+    }
   }
 
   return tasks

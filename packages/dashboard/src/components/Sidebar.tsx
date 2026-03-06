@@ -40,14 +40,13 @@ interface NavItem {
   icon: string
   label: string
   end?: boolean
-  badgeKey?: 'approvals' | 'chat'
+  badgeKey?: 'approvals'
   children?: NavItem[]
 }
 
 const mainNav: NavItem[] = [
   { to: '/dashboard', icon: 'dashboard', label: 'Dashboard', end: true },
   { to: '/workspace', icon: 'workspaces', label: 'Workspace' },
-  { to: '/chat', icon: 'forum', label: 'Chat', badgeKey: 'chat' },
   { to: '/agents', icon: 'smart_toy', label: 'Agents', children: [
     { to: '/templates', icon: 'library_books', label: 'Pre-Built' },
     { to: '/skills', icon: 'extension', label: 'Skills' },
@@ -76,7 +75,6 @@ export function Sidebar() {
   const { collapsed, toggle, mobileOpen, closeMobile } = useSidebar()
   const location = useLocation()
   const [approvalCount, setApprovalCount] = useState(0)
-  const [chatUnreadCount, setChatUnreadCount] = useState(0)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
 
   // Auto-expand parent section when on a child route
@@ -103,10 +101,6 @@ export function Sidebar() {
 
   // SSE: live approval + unread count updates
   useRealtimeEvent<{ count: number }>('approval_count', (data) => setApprovalCount(data.count))
-  useRealtimeEvent<Record<string, number>>('unread_counts', (data) => {
-    const total = Object.values(data).reduce((sum, n) => sum + n, 0)
-    setChatUnreadCount(total)
-  })
 
   // On mobile, always show expanded sidebar (not icon-only)
   const showLabels = mobileOpen || !collapsed
@@ -256,16 +250,8 @@ export function Sidebar() {
                       {approvalCount}
                     </span>
                   )}
-                  {showLabels && item.badgeKey === 'chat' && chatUnreadCount > 0 && (
-                    <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-forest-green px-1 text-[10px] font-bold text-white">
-                      {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-                    </span>
-                  )}
                   {!showLabels && item.badgeKey === 'approvals' && approvalCount > 0 && (
                     <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
-                  )}
-                  {!showLabels && item.badgeKey === 'chat' && chatUnreadCount > 0 && (
-                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-forest-green" />
                   )}
                 </NavLink>
               )}

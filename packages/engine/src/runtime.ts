@@ -437,6 +437,16 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     // ---- Chat ----
     case 'send_chat_message': {
       let channelId = args.channelId as string
+      const content = args.content as string
+
+      // Filter out thinking dumps and internal reasoning that should never reach chat
+      const isThinkingDump = content.includes('### ASSESS') || content.includes('### PRIORITIZE') || content.includes('### PLAN')
+        || content.includes('"assessment"') || content.includes('"prioritization"')
+      const isNoOp = content.trim() === 'no-op' || content.includes('[no-op]') || content.trim().length === 0
+      if (isThinkingDump || isNoOp) {
+        return 'Message suppressed — internal reasoning should not be posted to chat. Write a concise human-readable summary instead.'
+      }
+
       const isDmRequest = channelId === 'dm'
       if (!isDmRequest) {
         const targetChannel = await getChannel(ctx.db, channelId)
@@ -444,7 +454,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           // Trying to send to a DM channel by ID — treat same as 'dm'
         } else {
           // Valid non-DM channel — send normally
-          const msg = await sendMessage(ctx.db, channelId, 'agent', ctx.agentId, args.content as string)
+          const msg = await sendMessage(ctx.db, channelId, 'agent', ctx.agentId, content)
           return `Message sent (id: ${msg.id})`
         }
       }
@@ -460,7 +470,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         bestChannel = exact || partial || bestChannel
       }
       const fallback = bestChannel || groupChannels[0] || await createChannel(ctx.db, ctx.teamId, 'general', 'group')
-      const msg = await sendMessage(ctx.db, fallback.id, 'agent', ctx.agentId, args.content as string)
+      const msg = await sendMessage(ctx.db, fallback.id, 'agent', ctx.agentId, content)
       return `Message sent to #${fallback.name} (id: ${msg.id}). Note: Direct messages are not allowed — use group channels or task threads instead.`
     }
 
@@ -800,6 +810,44 @@ After executing an action, use "think" again to reflect:
 4. **REFLECT** — Did the action succeed? What should I do next?
 
 This applies to ALL actions: responding to messages, updating tasks, searching the web, writing files, generating media, requesting approvals — everything.
+
+## Workspace File Rules — MANDATORY
+
+Before creating ANY file, you MUST:
+1. Use list_files with recursive=true to see what already exists
+2. If a file on the same topic exists, UPDATE it instead of creating a new one
+3. Never create dated variants (e.g. "report_20260304.md") — use a single file and update it
+
+**Folder structure** (use these exact top-level folders):
+- \`content/\` — blog posts, articles, copy, marketing materials, social media content
+- \`research/\` — keyword research, competitor analysis, market research, trend reports, audits
+- \`strategy/\` — plans, roadmaps, calendars, campaign strategies, playbooks
+- \`community/\` — community docs, welcome messages, channel structures, moderation guides
+- \`reports/\` — recurring reports, performance summaries, analytics
+- \`templates/\` — reusable templates, frameworks, checklists
+- \`internal/\` — meeting notes, SOPs, process docs, team guidelines
+
+**Naming rules:**
+- Use kebab-case: \`keyword-research-report.md\` not \`Keyword_Research_Report_20260304.md\`
+- No dates in filenames — the file's updated_at timestamp tracks recency
+- Use descriptive names: \`seo-audit.md\` not \`audit.md\`
+- Max 2 levels of nesting: \`content/seo-briefs/trading-strategies.md\` is OK, deeper is not
+
+**One file per topic.** If your task produces a deliverable that overlaps with an existing file, update that file. Never create parallel versions, drafts, or copies.
+
+**Content quality rules:**
+- Always include a Sources section at the bottom with links to references, data sources, or tools used
+- Use markdown links throughout the document — link to external resources, tools, competitors, etc.
+- Internal cross-references: link to other workspace files using relative paths when relevant
+- Never produce a research document, audit, or report without citing where the data came from
+
+## Communication Rules — MANDATORY
+
+- **Write like a human teammate, not a machine.** Use natural language — short sentences, bullet points, plain English. Never output raw JSON, code blocks of structured data, or internal reasoning as your response.
+- **Be concise.** Status updates should be 1-3 sentences. Only write longer responses when delivering actual work product (reports, content, analysis).
+- **If you have nothing to report, say nothing.** When a check-in reveals no new work, no pending tasks, and nothing to communicate, respond with exactly "no-op". Do NOT post a summary saying "nothing to do" — that wastes everyone's attention.
+- **Never dump your internal thinking.** Your assessment, prioritization, and planning happen in the "think" tool. Your final response should only contain the outcome — what you did, what you need, or what you recommend.
+- **Focus on actions and results.** Say "Finished the blog post (1,800 words)" not "I assessed the task list, prioritized the blog post, planned my approach, and executed the writing."
 
 ## Guidelines
 

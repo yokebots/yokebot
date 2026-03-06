@@ -83,6 +83,7 @@ function buildTree(files: FlatFile[]): TreeNode[] {
 }
 
 export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
+  const [activePanel, setActivePanel] = useState<'files' | 'data'>('files')
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => {
     const saved = localStorage.getItem('workspace-expanded-dirs')
@@ -90,6 +91,10 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
   })
   const [search, setSearch] = useState('')
   const [allFiles, setAllFiles] = useState<FlatFile[]>([])
+
+  // Data tables state
+  const [tables, setTables] = useState<engine.SorTable[]>([])
+  const [tablesLoading, setTablesLoading] = useState(false)
 
   const loadFiles = useCallback(async () => {
     try {
@@ -107,7 +112,17 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     } catch { /* offline */ }
   }, [])
 
+  const loadTables = useCallback(async () => {
+    setTablesLoading(true)
+    try {
+      const result = await engine.listSorTables()
+      setTables(result)
+    } catch { /* offline */ }
+    setTablesLoading(false)
+  }, [])
+
   useEffect(() => { loadFiles() }, [loadFiles])
+  useEffect(() => { if (activePanel === 'data') loadTables() }, [activePanel, loadTables])
 
   // Persist expanded dirs
   useEffect(() => {
@@ -154,20 +169,36 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     workspace.addViewerTab(tab)
   }
 
+  const openTable = (table: engine.SorTable) => {
+    const tab: ViewerTab = {
+      id: `data-table:${table.id}`,
+      type: 'data-table',
+      label: table.name,
+      icon: 'table_chart',
+      resourceId: table.id,
+    }
+    workspace.addViewerTab(tab)
+  }
+
   // Search: filter flat file list
   const searchResults = search
     ? allFiles.filter(f => f.path.toLowerCase().includes(search.toLowerCase()))
     : null
 
+  // Search: filter tables
+  const filteredTables = search
+    ? tables.filter(t => t.name.toLowerCase().includes(search.toLowerCase()))
+    : tables
+
   return (
     <div className="flex flex-col h-full">
       <PanelHeader
-        icon="folder_open"
-        title="Files"
-        badge={unreadFileIds?.size}
+        icon={activePanel === 'files' ? 'folder_open' : 'table_chart'}
+        title={activePanel === 'files' ? 'Files' : 'Data'}
+        badge={activePanel === 'files' ? unreadFileIds?.size : undefined}
         actions={
           <button
-            onClick={() => loadFiles()}
+            onClick={() => activePanel === 'files' ? loadFiles() : loadTables()}
             className="rounded p-1 text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
             title="Refresh"
           >
@@ -176,58 +207,111 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
         }
       />
 
+      {/* Files / Data tab switcher */}
+      <div className="flex gap-1 px-2 pt-1 pb-1 shrink-0">
+        <button
+          onClick={() => setActivePanel('files')}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+            activePanel === 'files'
+              ? 'bg-forest-green/10 text-forest-green'
+              : 'text-text-muted hover:bg-light-surface-alt hover:text-text-main'
+          }`}
+        >
+          <span className="material-symbols-outlined text-[14px]">folder_open</span>
+          Files
+        </button>
+        <button
+          onClick={() => setActivePanel('data')}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+            activePanel === 'data'
+              ? 'bg-forest-green/10 text-forest-green'
+              : 'text-text-muted hover:bg-light-surface-alt hover:text-text-main'
+          }`}
+        >
+          <span className="material-symbols-outlined text-[14px]">table_chart</span>
+          Data
+        </button>
+      </div>
+
       {/* Search */}
-      <div className="px-2 py-2 shrink-0">
+      <div className="px-2 py-1.5 shrink-0">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search files..."
+          placeholder={activePanel === 'files' ? 'Search files...' : 'Search tables...'}
           className="w-full rounded-lg border border-border-subtle px-2.5 py-1.5 text-xs focus:border-forest-green focus:outline-none"
         />
       </div>
 
-      {/* File tree or search results */}
+      {/* Content area */}
       <div className="flex-1 overflow-y-auto px-1">
-        {searchResults ? (
-          // Search results: flat list
-          <>
-            {searchResults.length === 0 && (
-              <p className="px-3 py-6 text-center text-xs text-text-muted">No files match your search</p>
-            )}
-            {searchResults.map(file => (
-              <button
-                key={file.path}
-                onClick={() => openFile(file.path)}
-                className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-light-surface-alt"
-              >
-                <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">
-                  {getFileIcon(file.name.split('.').pop()?.toLowerCase() ?? '')}
-                </span>
-                <span className="flex-1 truncate text-text-main">{file.path}</span>
-                <span className="text-[10px] text-text-muted shrink-0">{formatSize(file.size)}</span>
-              </button>
-            ))}
-          </>
+        {activePanel === 'files' ? (
+          // FILES panel
+          searchResults ? (
+            <>
+              {searchResults.length === 0 && (
+                <p className="px-3 py-6 text-center text-xs text-text-muted">No files match your search</p>
+              )}
+              {searchResults.map(file => (
+                <button
+                  key={file.path}
+                  onClick={() => openFile(file.path)}
+                  className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-light-surface-alt"
+                >
+                  <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">
+                    {getFileIcon(file.name.split('.').pop()?.toLowerCase() ?? '')}
+                  </span>
+                  <span className="flex-1 truncate text-text-main">{file.path}</span>
+                  <span className="text-[10px] text-text-muted shrink-0">{formatSize(file.size)}</span>
+                </button>
+              ))}
+            </>
+          ) : (
+            <>
+              {tree.length === 0 && (
+                <p className="px-3 py-6 text-center text-xs text-text-muted">No files yet</p>
+              )}
+              {tree.map(node => (
+                <TreeNodeRow
+                  key={node.path}
+                  node={node}
+                  level={0}
+                  expandedDirs={expandedDirs}
+                  toggleDir={toggleDir}
+                  openFile={openFile}
+                  unreadFileIds={unreadFileIds}
+                  activeFilePath={workspace.activeFilePath}
+                />
+              ))}
+            </>
+          )
         ) : (
-          // Tree view
-          <>
-            {tree.length === 0 && (
-              <p className="px-3 py-6 text-center text-xs text-text-muted">No files yet</p>
-            )}
-            {tree.map(node => (
-              <TreeNodeRow
-                key={node.path}
-                node={node}
-                level={0}
-                expandedDirs={expandedDirs}
-                toggleDir={toggleDir}
-                openFile={openFile}
-                unreadFileIds={unreadFileIds}
-                activeFilePath={workspace.activeFilePath}
-              />
-            ))}
-          </>
+          // DATA panel
+          tablesLoading ? (
+            <p className="px-3 py-6 text-center text-xs text-text-muted">Loading tables...</p>
+          ) : filteredTables.length === 0 ? (
+            <p className="px-3 py-6 text-center text-xs text-text-muted">
+              {search ? 'No tables match your search' : 'No data tables yet'}
+            </p>
+          ) : (
+            filteredTables.map(table => {
+              const isActive = workspace.viewerTabs.some(t => t.type === 'data-table' && t.resourceId === table.id && t.id === workspace.activeTabId)
+              return (
+                <button
+                  key={table.id}
+                  onClick={() => openTable(table)}
+                  className={`group flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
+                    isActive ? 'bg-forest-green/10 text-forest-green' : 'hover:bg-light-surface-alt'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">table_chart</span>
+                  <span className="flex-1 truncate text-text-main">{table.name}</span>
+                  <span className="text-[10px] text-text-muted shrink-0">{table.rowCount} row{table.rowCount !== 1 ? 's' : ''}</span>
+                </button>
+              )
+            })
+          )
         )}
       </div>
     </div>

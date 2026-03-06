@@ -29,30 +29,18 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
     agents.map(a => [a.id, { color: a.iconColor ?? '#0F4D26', icon: a.iconName ?? 'smart_toy', name: a.name }])
   )
 
-  // Load task details, thread, and linked files in parallel
+  // Load everything in a single API call
   const loadAll = useCallback(async () => {
-    const [taskResult, threadResult, filesResult] = await Promise.allSettled([
-      engine.listTasks().then(tasks => tasks.find(t => t.id === taskId) ?? null),
-      engine.getTaskThread(taskId).then(async (channel) => {
-        const msgs = await engine.getMessages(channel.id, 50)
-        return { channelId: channel.id, msgs }
-      }),
-      engine.getFilesByTask(taskId),
-    ])
-    if (taskResult.status === 'fulfilled' && taskResult.value) setTask(taskResult.value)
-    if (threadResult.status === 'fulfilled') {
-      setThreadChannelId(threadResult.value.channelId)
-      setThreadMessages(threadResult.value.msgs)
-    }
-    if (filesResult.status === 'fulfilled') setLinkedFiles(filesResult.value)
+    try {
+      const detail = await engine.getTaskDetail(taskId)
+      setTask(detail.task)
+      setThreadChannelId(detail.channelId)
+      setThreadMessages(detail.messages)
+      setLinkedFiles(detail.files)
+    } catch { /* offline */ }
   }, [taskId])
 
   useEffect(() => { loadAll() }, [loadAll])
-
-  // Mark task as read
-  useEffect(() => {
-    engine.markTaskRead(taskId).catch(() => {})
-  }, [taskId])
 
   const updateField = async (field: string, value: string) => {
     try {

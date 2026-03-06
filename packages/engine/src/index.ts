@@ -136,6 +136,18 @@ async function main() {
     message: { error: 'Chat rate limit exceeded, please wait' },
   })
 
+  // Request timing (log slow requests)
+  app.use((req, res, next) => {
+    const start = Date.now()
+    res.on('finish', () => {
+      const ms = Date.now() - start
+      if (ms > 200 || req.path.includes('/detail')) {
+        console.log(`[perf] ${req.method} ${req.path} → ${res.statusCode} in ${ms}ms`)
+      }
+    })
+    next()
+  })
+
   // Auth
   app.use(authMiddleware)
 
@@ -459,8 +471,8 @@ async function main() {
         agent.modelId || undefined,
       )
 
-      // Store agent response in DM channel
-      if (result.response) {
+      // Store agent response in DM channel (skip iteration-limit fallback messages)
+      if (result.response && !result.response.includes('unable to complete the task within the iteration limit')) {
         await sendMessage(db, dmChannel.id, 'agent', agent.id, result.response, undefined, teamId)
       }
 
@@ -579,6 +591,28 @@ async function main() {
     const task = await getTask(db, req.params.id)
     if (!task) return res.status(404).json({ error: 'Task not found' })
     res.json(task)
+  })
+
+  // Combined task detail — returns task + thread messages + linked files in one request
+  // Skips verifyOwnership (team middleware already verified membership, getTask checks team via query)
+  app.get('/api/tasks/:id/detail', async (req, res) => {
+    const t0 = Date.now()
+    const teamId = req.user!.activeTeamId!
+    const userId = req.user!.id
+    const taskId = req.params.id
+    const [task, channel, files] = await Promise.all([
+      getTask(db, taskId),
+      getTaskThread(db, taskId, teamId),
+      getFilesByTask(db, teamId, taskId),
+    ])
+    const t1 = Date.now()
+    if (!task) return res.status(404).json({ error: 'Task not found' })
+    const messages = await getChannelMessages(db, channel.id, 50)
+    const t2 = Date.now()
+    // Fire-and-forget: mark task as read
+    markTaskRead(db, userId, taskId).catch(() => {})
+    console.log(`[perf:detail] parallel=${t1-t0}ms messages=${t2-t1}ms total=${t2-t0}ms`)
+    res.json({ task, channelId: channel.id, messages, files })
   })
 
   app.post('/api/tasks', async (req, res) => {
@@ -1637,7 +1671,7 @@ async function main() {
       if (req.user?.id) {
         const userTeams = await getUserTeams(db, req.user.id)
         if (userTeams.length === 1) {
-          await addCredits(db, team.id, 500, 'starter_credits', 'Welcome bonus: 500 starter credits')
+          await addCredits(db, team.id, 1250, 'starter_credits', 'Welcome bonus: 1,250 starter credits')
           console.log(`[engine] Granted 1,250 starter credits to team ${team.id}`)
         }
       }

@@ -554,7 +554,7 @@ export async function chatCompletion(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
 
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(120_000) })
   if (!res.ok) { const text = await res.text(); throw new Error(`Model API error ${res.status}: ${text}`) }
 
   const data = await res.json() as {
