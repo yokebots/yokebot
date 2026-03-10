@@ -368,8 +368,6 @@ export function SettingsPage() {
                     <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">Alert Category</th>
                     <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-text-muted">In-App</th>
                     <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-text-muted">Email</th>
-                    <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-text-muted">Slack</th>
-                    <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-text-muted">Telegram</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -379,7 +377,7 @@ export function SettingsPage() {
                         <p className="text-sm font-medium text-text-main">{alert.label}</p>
                         <p className="text-xs text-text-muted">{alert.description}</p>
                       </td>
-                      {(['inApp', 'email', 'slack', 'telegram'] as const).map((field) => (
+                      {(['inApp', 'email'] as const).map((field) => (
                         <td key={field} className="px-4 py-3 text-center">
                           <button
                             onClick={() => toggleAlert(idx, field)}

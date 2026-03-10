@@ -611,7 +611,7 @@ async function main() {
       getFilesByTask(db, teamId, taskId),
     ])
     const t1 = Date.now()
-    if (!task) return res.status(404).json({ error: 'Task not found' })
+    if (!task || task.teamId !== teamId) return res.status(404).json({ error: 'Task not found' })
     const messages = await getChannelMessages(db, channel.id, 50)
     const t2 = Date.now()
     // Fire-and-forget: mark task as read
@@ -859,20 +859,20 @@ async function main() {
     res.json(await getChannelMessages(db, req.params.channelId, limit, before, includeThreads))
   })
 
-  app.post('/api/chat/channels/:channelId/messages', async (req, res) => {
+  app.post('/api/chat/channels/:channelId/messages', chatLimiter, async (req, res) => {
     const teamId = req.user!.activeTeamId!
-    if (!await verifyOwnership('chat_channels', req.params.channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
+    const channelId = req.params.channelId as string
+    if (!await verifyOwnership('chat_channels', channelId, teamId)) return res.status(404).json({ error: 'Channel not found' })
     const { senderType, senderId, content, taskId, parentMessageId } = validate(SendChatMessageSchema, req.body)
-    const msg = await sendMessage(db, req.params.channelId, senderType, senderId, content, taskId, teamId, undefined, undefined, undefined, parentMessageId)
+    const msg = await sendMessage(db, channelId, senderType, senderId, content, taskId, teamId, undefined, undefined, undefined, parentMessageId)
     // sendMessage() now broadcasts new_message SSE automatically via the hook
     // Fire-and-forget mention processing (notifications + agent wake)
-    processMentions(db, teamId, req.params.channelId, msg).catch((err) =>
+    processMentions(db, teamId, channelId, msg).catch((err) =>
       console.error('[chat] Mention processing error:', err),
     )
     // Instant agent reply — when a human messages, trigger the right agent immediately
     if (senderType === 'human') {
-      const channel = await getChannel(db, req.params.channelId)
-      const channelId = req.params.channelId
+      const channel = await getChannel(db, channelId)
 
       // Helper: fire-and-forget reply from a specific agent
       const triggerAgentReply = (agent: { id: string; name: string; iconName: string | null; iconColor: string | null }) => {
@@ -1038,7 +1038,7 @@ async function main() {
     const teamId = req.user!.activeTeamId!
     const messageId = Number(req.params.messageId)
     const { emoji } = req.body as { emoji: string }
-    if (!emoji || typeof emoji !== 'string') return res.status(400).json({ error: 'emoji required' })
+    if (!emoji || typeof emoji !== 'string' || emoji.length > 16) return res.status(400).json({ error: 'emoji required (max 16 chars)' })
 
     // Verify message belongs to a channel owned by this team
     const msg = await db.queryOne<{ id: number }>(
@@ -2928,6 +2928,12 @@ ${truncated}`,
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
     const body = validate(AddWorkflowStepSchema, req.body)
+    // Validate assignedAgentId belongs to this team
+    if (body.assignedAgentId) {
+      const { getAgent } = await import('./agent.ts')
+      const agent = await getAgent(db, body.assignedAgentId as string)
+      if (!agent || agent.teamId !== teamId) return res.status(400).json({ error: 'Assigned agent not found or not on this team' })
+    }
     const step = await addStep(db, req.params.id, body.title, body)
     res.status(201).json(step)
   })
@@ -2937,6 +2943,12 @@ ${truncated}`,
     const teamId = req.user!.activeTeamId!
     if (!(await verifyOwnership('workflows', req.params.id, teamId))) return res.status(404).json({ error: 'Workflow not found' })
     const body = validate(UpdateWorkflowStepSchema, req.body)
+    // Validate assignedAgentId belongs to this team
+    if (body.assignedAgentId) {
+      const { getAgent } = await import('./agent.ts')
+      const agent = await getAgent(db, body.assignedAgentId as string)
+      if (!agent || agent.teamId !== teamId) return res.status(400).json({ error: 'Assigned agent not found or not on this team' })
+    }
     const step = await updateStep(db, req.params.stepId, body as Record<string, unknown>)
     if (!step) return res.status(404).json({ error: 'Step not found' })
     res.json(step)

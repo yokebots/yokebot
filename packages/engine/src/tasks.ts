@@ -17,7 +17,7 @@ export interface TaskTag {
 }
 
 export interface Task {
-  id: string; title: string; description: string | null; status: TaskStatus; priority: TaskPriority
+  id: string; teamId: string; title: string; description: string | null; status: TaskStatus; priority: TaskPriority
   assignedAgentId: string | null; assignedUserId: string | null; parentTaskId: string | null; deadline: string | null
   headerImage: string | null; attachments: TaskAttachment[]
   tags: TaskTag[]
@@ -158,7 +158,7 @@ function rowToTask(row: Record<string, unknown>): Task {
     if (raw) attachments = JSON.parse(raw) as TaskAttachment[]
   } catch { /* invalid JSON — default to empty */ }
   return {
-    id: row.id as string, title: row.title as string, description: row.description as string | null,
+    id: row.id as string, teamId: row.team_id as string, title: row.title as string, description: row.description as string | null,
     status: row.status as TaskStatus, priority: row.priority as TaskPriority,
     assignedAgentId: row.assigned_agent_id as string | null, assignedUserId: (row.assigned_user_id as string | null) ?? null, parentTaskId: row.parent_task_id as string | null,
     deadline: row.deadline as string | null, headerImage: (row.header_image as string | null) ?? null,

@@ -380,11 +380,19 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           return `Error: Deadline "${args.deadline}" is in the past. Today is ${today.toISOString().split('T')[0]}. Please set a future deadline.`
         }
       }
+      // Validate assignedAgentId belongs to this team
+      let targetAgentId = (args.assignedAgentId as string) ?? ctx.agentId
+      if (targetAgentId && targetAgentId !== ctx.agentId) {
+        const targetAgent = await getAgent(ctx.db, targetAgentId)
+        if (!targetAgent || targetAgent.teamId !== ctx.teamId) {
+          return `Error: Cannot assign to agent "${targetAgentId}" — not found or not on this team`
+        }
+      }
       const task = await createTask(ctx.db, ctx.teamId, args.title as string, {
         description: args.description as string | undefined,
         priority: (args.priority as 'low' | 'medium' | 'high' | 'urgent') ?? 'medium',
         status: (args.status as 'backlog' | 'todo' | 'in_progress' | 'review' | 'done') || undefined,
-        assignedAgentId: (args.assignedAgentId as string) ?? ctx.agentId,
+        assignedAgentId: targetAgentId,
         assignedUserId: args.assignedUserId as string | undefined,
         deadline: args.deadline as string | undefined,
       })
@@ -427,7 +435,13 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (args.priority) updates.priority = args.priority
       if (args.description) updates.description = args.description
       if (args.title) updates.title = args.title
-      if (args.assignedAgentId) updates.assignedAgentId = args.assignedAgentId
+      if (args.assignedAgentId) {
+        const targetAgent = await getAgent(ctx.db, args.assignedAgentId as string)
+        if (!targetAgent || targetAgent.teamId !== ctx.teamId) {
+          return `Error: Cannot assign to agent "${args.assignedAgentId}" — not found or not on this team`
+        }
+        updates.assignedAgentId = args.assignedAgentId
+      }
       if (args.assignedUserId) updates.assignedUserId = args.assignedUserId
       if (args.deadline) updates.deadline = args.deadline
       const task = await updateTask(ctx.db, args.taskId as string, updates)

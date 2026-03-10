@@ -17,7 +17,6 @@ const FULLY_EXEMPT_PATHS = [
   '/health',
   '/api/ollama',
   '/api/config',
-  '/api/debug',
   '/api/notifications',
   '/api/user',
 ]

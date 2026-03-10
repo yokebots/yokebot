@@ -8,6 +8,7 @@
 
 import type { Db } from './db/types.ts'
 import { randomUUID } from 'crypto'
+import { sendNotificationEmail, generateUnsubscribeUrl } from './email.ts'
 
 // Global broadcast hook — set by index.ts at startup so notifications push SSE events
 let _onNotification: ((userId: string, unreadCount: number) => void) | null = null
@@ -60,6 +61,16 @@ export async function createNotification(
     const count = await countUnread(db, userId)
     _onNotification(userId, count)
   }
+
+  // Send email notification (hosted mode only, non-blocking)
+  if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
+    try {
+      await _maybeSendNotificationEmail(db, teamId, userId, type, title, body, link ?? null, id)
+    } catch (err) {
+      console.error('[notifications] Email send failed (non-blocking):', (err as Error).message)
+    }
+  }
+
   return (await getNotification(db, id))!
 }
 
@@ -326,6 +337,61 @@ function rowToAlertPref(row: Record<string, unknown>): AlertPreference {
 }
 
 // ---- Helpers ----
+
+// Map notification types to alert categories
+const TYPE_TO_CATEGORY: Record<NotificationType, string> = {
+  approval_needed: 'approval_queue',
+  task_assigned: 'task_completions',
+  agent_message: 'agent_feedback',
+  mention: 'agent_feedback',
+  system: 'critical_errors',
+}
+
+async function _maybeSendNotificationEmail(
+  db: Db,
+  teamId: string,
+  userId: string,
+  type: NotificationType,
+  title: string,
+  body: string,
+  link: string | null,
+  notificationId: string,
+): Promise<void> {
+  // Check user-level notification preference
+  const pref = await getPreference(db, userId, teamId)
+  if (pref && (!pref.emailEnabled || pref.muted)) return
+
+  // Check per-category alert preference
+  const category = TYPE_TO_CATEGORY[type]
+  if (category) {
+    const alertRow = await db.queryOne<Record<string, unknown>>(
+      'SELECT email FROM alert_preferences WHERE user_id = $1 AND team_id = $2 AND category = $3',
+      [userId, teamId, category],
+    )
+    // If a row exists and email is disabled, skip
+    if (alertRow && (alertRow.email as number) === 0) return
+  }
+
+  // Get user email from team_members
+  const member = await db.queryOne<{ email: string }>(
+    'SELECT email FROM team_members WHERE user_id = $1 AND team_id = $2',
+    [userId, teamId],
+  )
+  if (!member?.email) return
+
+  const unsubscribeUrl = generateUnsubscribeUrl(userId, teamId)
+
+  await sendNotificationEmail({
+    to: member.email,
+    title,
+    body,
+    link,
+    unsubscribeUrl,
+  })
+
+  // Mark as emailed
+  await db.run('UPDATE notifications SET emailed = 1 WHERE id = $1', [notificationId])
+}
 
 function rowToNotification(row: Record<string, unknown>): Notification {
   return {
