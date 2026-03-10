@@ -1730,16 +1730,16 @@ async function main() {
           const unsubUrl = generateUnsubscribeUrl(req.user.id, team.id)
           await sendWelcomeEmail(req.user.email, unsubUrl)
           console.log(`[engine] Welcome email sent to ${req.user.email}`)
-
-          // Enroll in onboarding drip series
-          try {
-            const { enrollUser } = await import('./onboarding-drip.ts')
-            await enrollUser(db, req.user.id, team.id, req.user.email)
-          } catch (dripErr) {
-            console.error('[engine] Failed to enroll in drip series:', (dripErr as Error).message)
-          }
         } catch (err) {
           console.error('[engine] Failed to send welcome email:', (err as Error).message)
+        }
+
+        // Enroll in onboarding drip series (independent of welcome email)
+        try {
+          const { enrollUser } = await import('./onboarding-drip.ts')
+          await enrollUser(db, req.user.id, team.id, req.user.email)
+        } catch (dripErr) {
+          console.error('[engine] Failed to enroll in drip series:', (dripErr as Error).message)
         }
       }
     }
