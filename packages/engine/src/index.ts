@@ -1722,6 +1722,26 @@ async function main() {
           console.log(`[engine] Granted 1,250 starter credits to team ${team.id}`)
         }
       }
+
+      // Send welcome email (non-blocking)
+      if (req.user?.email) {
+        try {
+          const { sendWelcomeEmail, generateUnsubscribeUrl } = await import('./email.ts')
+          const unsubUrl = generateUnsubscribeUrl(req.user.id, team.id)
+          await sendWelcomeEmail(req.user.email, unsubUrl)
+          console.log(`[engine] Welcome email sent to ${req.user.email}`)
+
+          // Enroll in onboarding drip series
+          try {
+            const { enrollUser } = await import('./onboarding-drip.ts')
+            await enrollUser(db, req.user.id, team.id, req.user.email)
+          } catch (dripErr) {
+            console.error('[engine] Failed to enroll in drip series:', (dripErr as Error).message)
+          }
+        } catch (err) {
+          console.error('[engine] Failed to send welcome email:', (err as Error).message)
+        }
+      }
     }
 
     await logActivity(db, 'team_created', null, `Team "${name}" created`)
@@ -2563,6 +2583,45 @@ ${truncated}`,
     } catch (err) {
       console.error('[contact] Error:', err)
       res.status(500).json({ error: 'Failed to submit' })
+    }
+  })
+
+  // ===== Unsubscribe (public — works from email without login) =====
+
+  app.get('/api/unsubscribe', async (req: Request, res: Response) => {
+    const token = req.query.token as string | undefined
+    if (!token) {
+      res.status(400).send('Missing token')
+      return
+    }
+
+    try {
+      const decoded = Buffer.from(token, 'base64url').toString()
+      const [userId, teamId] = decoded.split(':')
+      if (!userId || !teamId) {
+        res.status(400).send('Invalid token')
+        return
+      }
+
+      await setPreference(db, userId, teamId, { emailEnabled: false })
+      console.log(`[engine] User ${userId} unsubscribed from email notifications for team ${teamId}`)
+
+      res.setHeader('Content-Type', 'text/html')
+      res.send(`<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribed</title></head>
+<body style="margin:0;padding:40px 20px;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;text-align:center;">
+  <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+    <h1 style="font-size:20px;color:#1a1a1a;margin:0 0 12px;">You've been unsubscribed</h1>
+    <p style="font-size:14px;color:#666;line-height:1.5;margin:0;">
+      You will no longer receive YokeBot email notifications for this team.
+      You can re-enable emails anytime in <a href="https://yokebot.com/settings/notifications" style="color:#1a3a2a;">Settings</a>.
+    </p>
+  </div>
+</body>
+</html>`)
+    } catch {
+      res.status(400).send('Invalid token')
     }
   })
 

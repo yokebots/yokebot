@@ -1384,21 +1384,20 @@ Use the Kling model for best quality. Aspect ratio 16:9.` }),
     title: 'Notifications',
     section: 'Configuration',
     description: 'Configure how you receive notifications from YokeBot.',
-    keywords: ['notifications', 'email', 'webhook', 'alerts', 'mentions', 'settings'],
+    keywords: ['notifications', 'email', 'alerts', 'mentions', 'settings', 'unsubscribe'],
     content: () => [
       H2({ children: 'Notification Channels' }),
-      P({ children: 'YokeBot can notify you through multiple channels when events require your attention.' }),
+      P({ children: 'YokeBot can notify you through two channels when events require your attention.' }),
       Table({
         headers: ['Channel', 'Description', 'Configuration'],
         rows: [
           ['In-App', 'Badge notifications in the dashboard sidebar.', 'Always enabled.'],
-          ['Email', 'Email notifications to your account email address.', 'Settings > Notifications > Email.'],
-          ['Webhook', 'HTTP POST to a custom URL (Slack, Discord, etc.).', 'Settings > Notifications > Webhooks.'],
+          ['Email', 'Email notifications to your account email address.', 'Settings > Notifications.'],
         ],
       }),
 
-      H2({ children: 'Notification Events' }),
-      P({ children: 'You can enable or disable notifications for each event type independently:' }),
+      H2({ children: 'Alert Categories' }),
+      P({ children: 'Each notification category can be independently toggled for In-App and Email delivery. Go to Settings > Notifications to configure which alerts you receive and how:' }),
       UL({ children: [
         LI({ children: '@Mentions \u2014 when you are mentioned in a chat message.' }),
         LI({ children: 'Task Approval Needed \u2014 when an agent completes a task that requires your review.' }),
@@ -1406,31 +1405,10 @@ Use the Kling model for best quality. Aspect ratio 16:9.` }),
         LI({ children: 'Agent Error \u2014 when one of your agents enters the Error state.' }),
         LI({ children: 'Credit Warning \u2014 when your team\'s credits fall below a configurable threshold (cloud only).' }),
       ] }),
+      P({ children: 'Use the toggle switches next to each category to enable or disable In-App and Email delivery independently.' }),
 
-      H2({ children: 'Email Frequency' }),
-      P({ children: 'To avoid email overload, you can choose from three email frequency options:' }),
-      UL({ children: [
-        LI({ children: 'Immediate \u2014 one email per event, as it happens.' }),
-        LI({ children: 'Hourly Digest \u2014 a summary of all events from the past hour, sent on the hour.' }),
-        LI({ children: 'Daily Digest \u2014 a summary of all events from the past 24 hours, sent at your configured time.' }),
-      ] }),
-
-      H2({ children: 'Webhook Configuration' }),
-      P({ children: 'Webhooks send an HTTP POST with a JSON payload to your specified URL. This is useful for integrating YokeBot with Slack, Discord, Microsoft Teams, or any system that accepts incoming webhooks.' }),
-      CodeBlock({ language: 'json', children: `{
-  "event": "task.approval_needed",
-  "timestamp": "2025-06-15T10:30:00Z",
-  "data": {
-    "task_id": "task_abc123",
-    "task_title": "Draft Q3 Marketing Report",
-    "agent_name": "Marketing Writer",
-    "team_id": "team_xyz"
-  }
-}` }),
-      P({ children: 'You can add multiple webhook URLs and configure each one to receive only specific event types.' }),
-
-      H2({ children: 'Testing Notifications' }),
-      P({ children: 'From the notification settings page, you can send a test event to any configured channel to verify it is working correctly.' }),
+      H2({ children: 'Unsubscribe' }),
+      P({ children: 'Every email from YokeBot includes an unsubscribe link in the footer. Clicking it disables all email notifications for that team. You can re-enable emails at any time from Settings > Notifications.' }),
     ],
   },
 
@@ -1462,6 +1440,21 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
 
       H2({ children: 'Teams' }),
       P({ children: 'Teams are the top-level organizational unit. All agents, channels, knowledge bases, data tables, and tasks belong to a team. Every user has a personal team created automatically on sign-up.' }),
+
+      H2({ children: 'Business Context' }),
+      P({ children: 'Business Context is the information your agents use to tailor their work to your company. It includes your company name, industry, target market, goals, and a free-form notes field for anything else your agents should know.' }),
+      P({ children: 'To set it up, go to Settings > Business Context. The more detail you provide, the better your agents will perform \u2014 think of it like onboarding a new employee.' }),
+      Table({
+        headers: ['Field', 'Purpose'],
+        rows: [
+          ['Company Name', 'Used in agent outputs and communications.'],
+          ['Industry', 'Helps agents understand your market and use appropriate terminology.'],
+          ['Target Market', 'Guides agents when creating content, doing research, or drafting outreach.'],
+          ['Primary Goal', 'Keeps agents focused on what matters most to your business.'],
+          ['Additional Context', 'Free-form notes, ongoing memories, and context that agents reference continuously.'],
+        ],
+      }),
+      P({ children: 'Every agent on your team automatically receives this context in their system prompt, so you only need to set it once.' }),
 
       H2({ children: 'Team Roles' }),
       Table({

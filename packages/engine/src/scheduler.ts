@@ -158,9 +158,13 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
   if (!sequenceTimer) {
     sequenceTimer = setInterval(() => {
       void processEmailSequences(db)
+      void processOnboardingDripEmails(db)
     }, 5 * 60 * 1000)
     // Run once on startup after a short delay
-    setTimeout(() => void processEmailSequences(db), 30_000)
+    setTimeout(() => {
+      void processEmailSequences(db)
+      void processOnboardingDripEmails(db)
+    }, 30_000)
   }
 
   // Start workflow schedule processor (every 60 seconds)
@@ -685,6 +689,19 @@ async function processEmailSequences(db: Db): Promise<void> {
     }
   } catch (err) {
     console.error('[scheduler] Email sequence processing error:', err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * Process onboarding drip emails.
+ */
+async function processOnboardingDripEmails(db: Db): Promise<void> {
+  try {
+    const { processOnboardingDrips } = await import('./onboarding-drip.ts')
+    const dripCount = await processOnboardingDrips(db)
+    if (dripCount > 0) console.log(`[scheduler] Sent ${dripCount} onboarding drip email(s)`)
+  } catch (err) {
+    console.error('[scheduler] Onboarding drip processing error:', err instanceof Error ? err.message : err)
   }
 }
 

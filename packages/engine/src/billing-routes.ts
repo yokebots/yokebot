@@ -215,6 +215,14 @@ export function registerBillingRoutes(app: Express, db: Db): void {
               creditsResetAt: periodEnd,
               currentPeriodEnd: periodEnd,
             })
+
+            // Flip onboarding drip to paid series
+            try {
+              const { flipToPaidSeries } = await import('./onboarding-drip.ts')
+              await flipToPaidSeries(db, teamId, tierName!)
+            } catch (err) {
+              console.error('[billing] Failed to flip drip series:', (err as Error).message)
+            }
           }
           break
         }

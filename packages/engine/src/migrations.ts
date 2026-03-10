@@ -1087,6 +1087,49 @@ const migrations: Migration[] = [
       }
     },
   },
+
+  {
+    version: 23,
+    name: 'onboarding_drips',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS onboarding_drips (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            team_id TEXT NOT NULL,
+            email TEXT NOT NULL,
+            series TEXT NOT NULL DEFAULT 'activation',
+            tier_name TEXT,
+            step INTEGER NOT NULL DEFAULT 0,
+            next_send_at TIMESTAMPTZ,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(user_id, team_id)
+          )
+        `)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_drips_pending ON onboarding_drips(status, next_send_at)`)
+        await db.run(`ALTER TABLE onboarding_drips ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS onboarding_drips (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            team_id TEXT NOT NULL,
+            email TEXT NOT NULL,
+            series TEXT NOT NULL DEFAULT 'activation',
+            tier_name TEXT,
+            step INTEGER NOT NULL DEFAULT 0,
+            next_send_at TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(user_id, team_id)
+          )
+        `)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_onboarding_drips_pending ON onboarding_drips(status, next_send_at)`)
+      }
+    },
+  },
 ]
 
 /**

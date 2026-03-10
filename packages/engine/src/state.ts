@@ -440,6 +440,21 @@ const SQLITE_DDL = `
     error TEXT
   );
 
+  -- Onboarding drip email series
+  CREATE TABLE IF NOT EXISTS onboarding_drips (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    series TEXT NOT NULL DEFAULT 'activation',
+    tier_name TEXT,
+    step INTEGER NOT NULL DEFAULT 0,
+    next_send_at TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, team_id)
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -478,6 +493,7 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_task ON workflow_run_steps(task_id);
   CREATE INDEX IF NOT EXISTS idx_approvals_team_status ON approvals(team_id, status);
   CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_onboarding_drips_pending ON onboarding_drips(status, next_send_at);
 `
 
 const POSTGRES_DDL = `
@@ -935,6 +951,21 @@ const POSTGRES_DDL = `
     error TEXT
   );
 
+  -- Onboarding drip email series
+  CREATE TABLE IF NOT EXISTS onboarding_drips (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    series TEXT NOT NULL DEFAULT 'activation',
+    tier_name TEXT,
+    step INTEGER NOT NULL DEFAULT 0,
+    next_send_at TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, team_id)
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -979,6 +1010,7 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_task ON workflow_run_steps(task_id);
   CREATE INDEX IF NOT EXISTS idx_approvals_team_status ON approvals(team_id, status);
   CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_onboarding_drips_pending ON onboarding_drips(status, next_send_at);
 
   -- =====================================================================
   -- Row Level Security (RLS)
@@ -1034,6 +1066,7 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS workflow_steps ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS workflow_runs ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS workflow_run_steps ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS onboarding_drips ENABLE ROW LEVEL SECURITY;
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses
