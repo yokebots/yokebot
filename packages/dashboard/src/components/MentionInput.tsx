@@ -31,7 +31,7 @@ const FILE_ICONS: Record<string, string> = {
   csv: 'table_chart',
 }
 
-const GIPHY_API_KEY = 'GlVGYHkr3WSBnllca54iNt0yFbjz7L65' // GIPHY public beta key
+const GIPHY_API_KEY = import.meta.env.VITE_GIPHY_API_KEY ?? ''
 
 export function MentionInput({ value, onChange, onSubmit, placeholder, completions, disabled, onGifSelect, onFileAttach }: MentionInputProps) {
   const [showDropdown, setShowDropdown] = useState(false)
