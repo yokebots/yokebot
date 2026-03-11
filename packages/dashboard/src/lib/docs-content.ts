@@ -175,9 +175,9 @@ pnpm install` }),
 
       H2({ children: 'Environment Variables' }),
       P({ children: ['Copy the example environment file and fill in at least one model provider API key. See the ', A({ href: '/docs/self-hosting/env-vars', children: 'Environment Variables' }), ' reference for the full list.'] }),
-      CodeBlock({ language: 'bash', children: `cp .env.example .env
-# Edit .env with your API keys` }),
-      Tip({ children: 'At minimum you need one LLM provider key (YOKEBOT_LLM_API_KEY). Everything else is optional for local development.' }),
+      CodeBlock({ language: 'bash', children: `cp packages/engine/.env.example packages/engine/.env
+# Edit packages/engine/.env with your API keys` }),
+      Tip({ children: 'At minimum you need one LLM provider key (e.g. DEEPINFRA_API_KEY or OPENROUTER_API_KEY). Everything else is optional for local development.' }),
 
       H2({ children: 'Database' }),
       P({ children: 'By default YokeBot uses SQLite, which requires zero configuration. The database file is created automatically in the engine package directory on first run.' }),
@@ -185,8 +185,8 @@ pnpm install` }),
       CodeBlock({ language: 'bash', children: 'DATABASE_URL=postgresql://user:password@localhost:5432/yokebot' }),
 
       H2({ children: 'Start the Dev Server' }),
-      CodeBlock({ language: 'bash', children: 'pnpm dev' }),
-      P({ children: 'This command starts both the engine (API server) and the dashboard (Vite dev server) concurrently. By default the dashboard is available at http://localhost:5173 and the engine API at http://localhost:3000.' }),
+      CodeBlock({ language: 'bash', children: 'pnpm dev:all' }),
+      P({ children: 'This command starts both the engine (API server) and the dashboard (Vite dev server) concurrently. By default the dashboard is available at http://localhost:5173 and the engine API at http://localhost:3001.' }),
 
       H2({ children: 'Verify the Installation' }),
       OL({ children: [
@@ -200,7 +200,7 @@ pnpm install` }),
       P({ children: 'To update a self-hosted instance, pull the latest changes and reinstall dependencies:' }),
       CodeBlock({ language: 'bash', children: `git pull origin main
 pnpm install
-pnpm dev` }),
+pnpm dev:all` }),
 
       H2({ children: 'Next Steps' }),
       UL({ children: [
@@ -516,7 +516,7 @@ After processing each document, post a summary in #data-imports.` }),
 
       H2({ children: 'Image Generation' }),
       P({ children: 'Agents can generate images using the Flux model. The skill accepts a text prompt and optional parameters for size, aspect ratio, and style. Generated images are stored and displayed inline in chat messages.' }),
-      CodeBlock({ language: 'text', children: 'Skill: image_generation\nProvider: Flux\nRequired env: YOKEBOT_MEDIA_API_KEY\nParameters: prompt (required), width, height, aspect_ratio, num_images' }),
+      CodeBlock({ language: 'text', children: 'Skill: image_generation\nProvider: Flux\nRequired env: FAL_API_KEY\nParameters: prompt (required), width, height, aspect_ratio, num_images' }),
 
       H2({ children: 'Video Generation' }),
       P({ children: 'YokeBot supports two video generation models:' }),
@@ -524,7 +524,7 @@ After processing each document, post a summary in #data-imports.` }),
         LI({ children: 'Kling \u2014 high-quality video generation from text prompts.' }),
         LI({ children: 'Wan \u2014 fast video generation suitable for iterative workflows.' }),
       ] }),
-      P({ children: 'Set the YOKEBOT_MEDIA_API_KEY environment variable to enable video generation skills.' }),
+      P({ children: 'Set the FAL_API_KEY environment variable to enable video generation skills.' }),
 
       H2({ children: '3D Model Generation' }),
       P({ children: 'The 3D generation skill uses the Hunyuan model to create 3D models from text descriptions. Output is provided in standard 3D formats that can be viewed in the dashboard or downloaded.' }),
@@ -1195,7 +1195,7 @@ export const handler: SkillHandler = async (params) => {
 
       H2({ children: 'Prerequisites' }),
       P({ children: 'On YokeBot Cloud, media generation is included with your plan. For self-hosted instances, set:' }),
-      CodeBlock({ language: 'bash', children: 'YOKEBOT_MEDIA_API_KEY=your_media_provider_key' }),
+      CodeBlock({ language: 'bash', children: 'FAL_API_KEY=your_media_provider_key' }),
 
       H2({ children: 'How Agents Use Media Skills' }),
       P({ children: 'Agents with media generation skills can produce content autonomously as part of their task work or in response to chat messages. For example:' }),
@@ -1575,13 +1575,13 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
     ssl_certificate_key /etc/ssl/private/yokebot.key;
 
     location /api/ {
-        proxy_pass http://localhost:3000/;
+        proxy_pass http://localhost:3001/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
     location / {
-        proxy_pass http://localhost:5173/;
+        proxy_pass http://localhost:3000/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
@@ -1628,32 +1628,35 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
       CodeBlock({ language: 'bash', children: `git clone https://github.com/yokebots/yokebot.git
 cd yokebot
 cp .env.example .env
-# Edit .env with your API keys and configuration
+# Edit .env — set POSTGRES_PASSWORD and add your API keys
 
 docker compose up -d` }),
       P({ children: 'This starts three services:' }),
       UL({ children: [
-        LI({ children: [Code({ children: 'yokebot-engine' }), ' \u2014 the API server on port 3000.'] }),
-        LI({ children: [Code({ children: 'yokebot-dashboard' }), ' \u2014 the web UI on port 5173.'] }),
-        LI({ children: [Code({ children: 'yokebot-db' }), ' \u2014 a Postgres 16 instance on port 5432.'] }),
+        LI({ children: [Code({ children: 'engine' }), ' \u2014 the API server on port 3001.'] }),
+        LI({ children: [Code({ children: 'dashboard' }), ' \u2014 the web UI on port 3000.'] }),
+        LI({ children: [Code({ children: 'postgres' }), ' \u2014 a Postgres 17 + pgvector instance (internal only, not exposed to host).'] }),
       ] }),
 
       H2({ children: 'Configuration' }),
-      P({ children: 'The docker-compose.yml reads all configuration from your .env file. Key variables for Docker deployment:' }),
-      CodeBlock({ language: 'bash', children: `# Database (auto-configured with Docker Compose Postgres)
-DATABASE_URL=postgresql://yokebot:yokebot@yokebot-db:5432/yokebot
+      P({ children: 'Docker Compose reads configuration from your .env file. Copy the example and set a secure Postgres password:' }),
+      CodeBlock({ language: 'bash', children: `cp .env.example .env
+# Edit .env — at minimum, set POSTGRES_PASSWORD to a secure random value` }),
+      P({ children: 'The DATABASE_URL is configured automatically by docker-compose.yml using your POSTGRES_PASSWORD. Key variables for Docker deployment:' }),
+      CodeBlock({ language: 'bash', children: `# Postgres password (REQUIRED — docker-compose will fail without this)
+POSTGRES_PASSWORD=your_secure_random_password
 
-# External URL (used for OAuth callbacks and webhooks)
-PUBLIC_URL=https://yokebot.yourdomain.com
+# LLM providers (at least one required)
+DEEPINFRA_API_KEY=your-key
+# OPENROUTER_API_KEY=your-key
 
-# API keys (required)
-YOKEBOT_LLM_API_KEY=your_llm_provider_key
-YOKEBOT_MEDIA_API_KEY=your_media_provider_key
+# Media generation (optional)
+# FAL_API_KEY=your-key
 
-# Supabase (required for auth)
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
+# Supabase (optional — only needed for multi-user auth)
+# SUPABASE_URL=https://your-project.supabase.co
+# SUPABASE_ANON_KEY=your_anon_key
+# SUPABASE_JWT_SECRET=your_jwt_secret` }),
 
       H2({ children: 'Updating' }),
       CodeBlock({ language: 'bash', children: `git pull origin main
@@ -1685,7 +1688,7 @@ docker compose logs -f dashboard # dashboard only` }),
     keywords: ['env', 'environment', 'variables', 'configuration', 'reference', '.env'],
     content: () => [
       H2({ children: 'Overview' }),
-      P({ children: 'YokeBot is configured primarily through environment variables. For local development, create a .env file in the repository root. For Docker deployments, the same .env file is read by Docker Compose.' }),
+      P({ children: 'YokeBot is configured primarily through environment variables. For local development, create a .env file in packages/engine/ (copy from packages/engine/.env.example). For Docker deployments, create a .env file in the repository root (copy from .env.example).' }),
 
       H2({ children: 'Database' }),
       Table({
@@ -1696,21 +1699,27 @@ docker compose logs -f dashboard # dashboard only` }),
       }),
 
       H2({ children: 'Authentication (Supabase)' }),
+      P({ children: 'Supabase is optional for local single-user development. Without these variables, the engine uses a built-in dev user automatically.' }),
       Table({
         headers: ['Variable', 'Required', 'Default', 'Description'],
         rows: [
-          ['SUPABASE_URL', 'Yes', '\u2014', 'Your Supabase project URL.'],
-          ['SUPABASE_ANON_KEY', 'Yes', '\u2014', 'Supabase anonymous (public) key for client-side auth.'],
-          ['SUPABASE_SERVICE_ROLE_KEY', 'Yes', '\u2014', 'Supabase service role key for server-side operations.'],
+          ['SUPABASE_JWT_SECRET', 'No*', '\u2014', 'JWT secret for token verification. *Required for multi-user auth.'],
+          ['SUPABASE_URL', 'No*', '\u2014', 'Your Supabase project URL. *Required for multi-user auth.'],
+          ['SUPABASE_ANON_KEY', 'No*', '\u2014', 'Supabase anonymous (public) key.'],
+          ['SUPABASE_SERVICE_ROLE_KEY', 'No', '\u2014', 'Supabase service role key. Only needed for admin user management.'],
         ],
       }),
 
       H2({ children: 'LLM Providers' }),
+      P({ children: 'At least one LLM provider API key is required for agents to function.' }),
       Table({
         headers: ['Variable', 'Required', 'Default', 'Description'],
         rows: [
-          ['YOKEBOT_LLM_API_KEY', 'Yes*', '\u2014', 'Primary LLM provider API key (chat, embeddings, STT). *At least one LLM provider is required.'],
-          ['YOKEBOT_LLM2_API_KEY', 'No', '\u2014', 'Secondary/fallback LLM provider API key.'],
+          ['DEEPINFRA_API_KEY', 'Yes*', '\u2014', 'DeepInfra API key. Primary LLM provider for most agent templates.'],
+          ['OPENROUTER_API_KEY', 'No', '\u2014', 'OpenRouter API key. Secondary provider, covers GPT-4o-mini, Grok, etc.'],
+          ['YOKEBOT_FALLBACK_ENDPOINT', 'No', '\u2014', 'Custom OpenAI-compatible endpoint URL for fallback routing.'],
+          ['YOKEBOT_FALLBACK_MODEL', 'No', 'deepseek-chat', 'Model name for the fallback endpoint.'],
+          ['YOKEBOT_FALLBACK_API_KEY', 'No', '\u2014', 'API key for the fallback endpoint.'],
         ],
       }),
 
@@ -1718,7 +1727,7 @@ docker compose logs -f dashboard # dashboard only` }),
       Table({
         headers: ['Variable', 'Required', 'Default', 'Description'],
         rows: [
-          ['YOKEBOT_MEDIA_API_KEY', 'No', '\u2014', 'Media provider API key. Required for image, video, 3D, music, and SFX generation.'],
+          ['FAL_API_KEY', 'No', '\u2014', 'fal.ai API key. Required for image, video, 3D, music, and SFX generation.'],
         ],
       }),
 
@@ -1735,10 +1744,19 @@ docker compose logs -f dashboard # dashboard only` }),
       Table({
         headers: ['Variable', 'Required', 'Default', 'Description'],
         rows: [
-          ['PORT', 'No', '3000', 'Port the engine API listens on.'],
-          ['PUBLIC_URL', 'No', 'http://localhost:3000', 'The public-facing URL. Used for OAuth callbacks and webhook URLs.'],
+          ['PORT', 'No', '3001', 'Port the engine API listens on.'],
+          ['PUBLIC_URL', 'No', 'http://localhost:3001', 'The public-facing URL. Used for OAuth callbacks and webhook URLs.'],
           ['NODE_ENV', 'No', 'development', 'Set to "production" for production deployments.'],
           ['LOG_LEVEL', 'No', 'info', 'Logging level: debug, info, warn, error.'],
+        ],
+      }),
+
+      H2({ children: 'Security' }),
+      Table({
+        headers: ['Variable', 'Required', 'Default', 'Description'],
+        rows: [
+          ['YOKEBOT_ENCRYPTION_KEY', 'Recommended', '\u2014', '32-byte hex key for encrypting stored credentials. Without this, credentials are stored in plaintext. Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'],
+          ['CORS_ALLOWED_ORIGINS', 'No', 'http://localhost:5173', 'Comma-separated origins allowed to call the API.'],
         ],
       }),
 
@@ -1750,19 +1768,15 @@ docker compose logs -f dashboard # dashboard only` }),
         ],
       }),
 
-      H2({ children: 'Notifications' }),
+      H2({ children: 'Email (Resend)' }),
       Table({
         headers: ['Variable', 'Required', 'Default', 'Description'],
         rows: [
-          ['SMTP_HOST', 'No', '\u2014', 'SMTP server for email notifications.'],
-          ['SMTP_PORT', 'No', '587', 'SMTP port.'],
-          ['SMTP_USER', 'No', '\u2014', 'SMTP username.'],
-          ['SMTP_PASS', 'No', '\u2014', 'SMTP password.'],
-          ['SMTP_FROM', 'No', 'noreply@yokebot.com', 'From address for email notifications.'],
+          ['RESEND_API_KEY', 'No', '\u2014', 'Resend API key for sending email notifications and onboarding drip emails.'],
         ],
       }),
 
-      Tip({ children: 'Start with the minimum required variables (Supabase + one LLM provider) and add others as you enable more features.' }),
+      Tip({ children: 'Start with the minimum required variables (one LLM provider key) and add others as you enable more features. Supabase is only needed for multi-user auth.' }),
     ],
   },
 

@@ -1,56 +1,26 @@
 # YokeBot
 
-Agent orchestration with team chat, task management, and approval system — the operating system for your AI-powered business.
+AI agent workforce platform — deploy a team of AI agents that work together to run your business.
 
-## What is YokeBot?
+**[yokebot.com](https://yokebot.com)**
 
-YokeBot is an open-source AI agent workforce platform. Deploy a team of AI agents, give them jobs, tools, and channels — then manage them from a visual dashboard like real employees.
+## Get Started
 
-**Key features:**
-- Visual dashboard for non-developers
-- Built-in team chat + task management (Mission Control)
-- Universal credit system for all usage (LLM, media, skills)
-- Star-rated model catalog (12+ models)
-- Skills marketplace with SKILL.md format
-- Container isolation (Docker per agent)
-- Model-agnostic — bring your own keys or use YokeBot credits
-- Proactive agents that think, suggest, and initiate
-- Approval queue for high-risk agent actions
-- Billing & subscription system with Stripe integration
+- **Cloud** — Sign up at [yokebot.com](https://yokebot.com) and start immediately
+- **Self-Hosted** — Follow the [Self-Hosted Setup](https://yokebot.com/docs/getting-started/self-hosted) guide
+- **Docker** — See the [Docker Compose](https://yokebot.com/docs/self-hosting/docker) guide
 
-## Quick Start
+## Documentation
 
-```bash
-git clone https://github.com/yokebots/yokebot.git
-cd yokebot
-pnpm install
-pnpm dev
-```
+Full docs at [yokebot.com/docs](https://yokebot.com/docs), including:
 
-## Self-Host vs Cloud
-
-| | Self-Host (Free) | YokeBot Cloud |
-|---|---|---|
-| **Cost** | Free forever | From $29/mo |
-| **Models** | Bring your own keys | Universal credits (pay per use) |
-| **Docker** | You manage | We manage |
-| **Setup** | Developer-friendly | One-click |
-
-**Self-host:** Run YokeBot on your own hardware with your own API keys. Full privacy, full control.
-
-**Cloud:** [yokebot.com](https://yokebot.com) — we handle everything. Pick a plan, deploy agents, done.
-
-## Skills
-
-YokeBot uses a `SKILL.md` format for defining agent capabilities. Skills are plain Markdown files that describe tools, parameters, and handlers. Bundled skills include web search, Slack notifications, code interpreter, and Google Sheets integration.
+- [Getting Started](https://yokebot.com/docs/getting-started)
+- [Create Your First Agent](https://yokebot.com/docs/getting-started/first-agent)
+- [Environment Variables](https://yokebot.com/docs/self-hosting/env-vars)
+- [API Reference](https://yokebot.com/docs/api/overview)
 
 ## License
 
-- Core platform: [AGPLv3](LICENSE)
-- `/ee` directory: [YokeBot Enterprise License](ee/LICENSE)
-- SDKs and client libraries: MIT
-
-## Links
-
-- Website: [yokebot.com](https://yokebot.com)
-- GitHub: [github.com/yokebots/yokebot](https://github.com/yokebots/yokebot)
+- Core (`packages/engine`, `packages/dashboard`, `skills/`) — [AGPLv3](LICENSE)
+- Enterprise (`ee/`) — [YokeBot Enterprise License](ee/LICENSE)
+- SDKs and client libraries — MIT
