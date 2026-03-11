@@ -1634,3 +1634,42 @@ export async function markTaskRead(taskId: string): Promise<{ ok: boolean }> {
 export async function getUnreadTaskIds(): Promise<{ taskIds: string[] }> {
   return request('/api/tasks/unread')
 }
+
+// ---- API Keys ----
+
+export interface ApiKeyInfo {
+  id: string
+  teamId: string
+  createdBy: string
+  name: string
+  keyPrefix: string
+  scopes: string
+  lastUsedAt: string | null
+  expiresAt: string | null
+  revokedAt: string | null
+  createdAt: string
+  plaintext?: string
+}
+
+export async function createApiKey(name: string, scopes?: string[], expiresAt?: string): Promise<ApiKeyInfo> {
+  return request('/api/api-keys', {
+    method: 'POST',
+    body: JSON.stringify({ name, scopes, expiresAt }),
+  })
+}
+
+export async function listApiKeys(): Promise<ApiKeyInfo[]> {
+  return request('/api/api-keys')
+}
+
+export async function revokeApiKey(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/api-keys/${id}/revoke`, { method: 'POST' })
+}
+
+export async function regenerateApiKey(id: string): Promise<ApiKeyInfo> {
+  return request(`/api/api-keys/${id}/regenerate`, { method: 'POST' })
+}
+
+export async function deleteApiKey(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/api-keys/${id}`, { method: 'DELETE' })
+}

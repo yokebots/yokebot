@@ -267,6 +267,22 @@ export const BulkSetTagsSchema = z.object({
   resourceId: z.string().min(1).max(200),
 })
 
+// ---- API Keys ----
+
+const validScopes = ['*', 'agents:read', 'agents:write', 'tasks:read', 'tasks:write', 'chat:read', 'chat:write', 'data:read', 'data:write', 'files:read', 'files:write', 'kb:read', 'kb:write']
+
+export const CreateApiKeySchema = z.object({
+  name: z.string().min(1).max(100).trim(),
+  scopes: z.array(z.string().max(50).refine((s) => validScopes.includes(s), { message: 'Invalid scope' })).optional(),
+  expiresAt: z.string().max(100).refine(
+    (val) => {
+      const d = new Date(val)
+      return !isNaN(d.getTime()) && d > new Date()
+    },
+    { message: 'Expiration must be a valid future date' },
+  ).optional(),
+})
+
 // ---- Validation helper ----
 
 export function validate<T>(schema: z.ZodType<T>, data: unknown): T {

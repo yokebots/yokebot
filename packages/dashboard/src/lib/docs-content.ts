@@ -1795,15 +1795,41 @@ docker compose logs -f dashboard # dashboard only` }),
 
       H2({ children: 'Base URL' }),
       P({ children: 'For self-hosted instances, the default base URL is:' }),
-      CodeBlock({ language: 'text', children: 'http://localhost:3000/api/v1' }),
-      P({ children: 'For YokeBot Cloud:' }),
-      CodeBlock({ language: 'text', children: 'https://api.yokebot.com/v1' }),
+      CodeBlock({ language: 'text', children: 'http://localhost:3001/api' }),
+      P({ children: 'All endpoints below are relative to this base URL. For example, listing agents is:' }),
+      CodeBlock({ language: 'text', children: 'GET http://localhost:3001/api/agents' }),
 
       H2({ children: 'Authentication' }),
-      P({ children: 'All API requests require a Bearer token in the Authorization header. Obtain a token by authenticating via Supabase:' }),
-      CodeBlock({ language: 'bash', children: `curl -X GET https://api.yokebot.com/v1/agents \\
+      P({ children: 'The API supports two authentication methods:' }),
+
+      H3({ children: '1. JWT Tokens (Dashboard)' }),
+      P({ children: 'Supabase JWT tokens are used by the dashboard. Requires both Authorization and X-Team-Id headers.' }),
+      CodeBlock({ language: 'bash', children: `curl -X GET http://localhost:3001/api/agents \\
   -H "Authorization: Bearer YOUR_SUPABASE_ACCESS_TOKEN" \\
+  -H "X-Team-Id: YOUR_TEAM_ID" \\
   -H "Content-Type: application/json"` }),
+
+      H3({ children: '2. API Keys (Programmatic Access)' }),
+      P({ children: 'API keys are ideal for CI/CD pipelines, scripts, Zapier integrations, and mobile apps. Create them in Settings > API Keys.' }),
+      CodeBlock({ language: 'bash', children: `curl -X GET http://localhost:3001/api/agents \\
+  -H "Authorization: Bearer yk_live_YOUR_API_KEY" \\
+  -H "Content-Type: application/json"` }),
+      P({ children: 'API keys embed the team context, so no X-Team-Id header is needed.' }),
+
+      H3({ children: 'Scopes' }),
+      P({ children: 'API keys can be scoped to limit access. Available scopes:' }),
+      Table({
+        headers: ['Scope', 'Access'],
+        rows: [
+          ['*', 'Full access (default)'],
+          ['agents:read / agents:write', 'Agent management'],
+          ['tasks:read / tasks:write', 'Task management'],
+          ['chat:read / chat:write', 'Chat channels and messages'],
+          ['data:read / data:write', 'Source of record (data tables)'],
+          ['files:read / files:write', 'Workspace files'],
+          ['kb:read / kb:write', 'Knowledge base documents'],
+        ],
+      }),
 
       H2({ children: 'Agents' }),
       Table({
@@ -1814,7 +1840,8 @@ docker compose logs -f dashboard # dashboard only` }),
           ['GET', '/agents/:id', 'Get agent details.'],
           ['PATCH', '/agents/:id', 'Update an agent.'],
           ['DELETE', '/agents/:id', 'Delete an agent.'],
-          ['POST', '/agents/:id/wake', 'Trigger an immediate heartbeat.'],
+          ['POST', '/agents/:id/start', 'Start the agent (enable heartbeat scheduling).'],
+          ['POST', '/agents/:id/stop', 'Stop the agent (pause heartbeat scheduling).'],
         ],
       }),
 
@@ -1836,12 +1863,13 @@ docker compose logs -f dashboard # dashboard only` }),
       Table({
         headers: ['Method', 'Endpoint', 'Description'],
         rows: [
-          ['GET', '/channels', 'List channels.'],
-          ['POST', '/channels', 'Create a channel.'],
-          ['GET', '/channels/:id/messages', 'Get messages in a channel.'],
-          ['POST', '/channels/:id/messages', 'Send a message to a channel.'],
-          ['GET', '/dm/:userId', 'Get direct messages with a user or agent.'],
-          ['POST', '/dm/:userId', 'Send a direct message.'],
+          ['GET', '/chat/channels', 'List channels.'],
+          ['POST', '/chat/channels', 'Create a channel.'],
+          ['PATCH', '/chat/channels/:id', 'Update a channel.'],
+          ['DELETE', '/chat/channels/:id', 'Delete a channel.'],
+          ['GET', '/chat/channels/:id/messages', 'Get messages in a channel.'],
+          ['POST', '/chat/channels/:id/messages', 'Send a message to a channel.'],
+          ['GET', '/chat/dm/:agentId', 'Get or create a DM channel with an agent.'],
         ],
       }),
 
@@ -1892,17 +1920,34 @@ docker compose logs -f dashboard # dashboard only` }),
         ],
       }),
 
+      H2({ children: 'API Key Management' }),
+      Table({
+        headers: ['Method', 'Endpoint', 'Description'],
+        rows: [
+          ['POST', '/api-keys', 'Create a new API key (admin only, returns plaintext once).'],
+          ['GET', '/api-keys', 'List API keys for the team (admin only, no secrets).'],
+          ['DELETE', '/api-keys/:id', 'Permanently delete an API key (admin only).'],
+          ['POST', '/api-keys/:id/revoke', 'Revoke an API key (soft delete, keeps audit trail).'],
+          ['POST', '/api-keys/:id/regenerate', 'Revoke and recreate a key with same name/scopes.'],
+        ],
+      }),
+
       H2({ children: 'Rate Limits' }),
-      P({ children: 'The API enforces rate limits to protect against abuse:' }),
-      UL({ children: [
-        LI({ children: 'Standard endpoints: 100 requests per minute per user.' }),
-        LI({ children: 'Document upload: 10 requests per minute per user.' }),
-        LI({ children: 'Agent wake: 20 requests per minute per team.' }),
-      ] }),
+      P({ children: 'Dashboard (JWT) requests: 5,000 requests per 15 minutes.' }),
+      P({ children: 'API key requests use per-key limits based on subscription tier:' }),
+      Table({
+        headers: ['Tier', 'Standard Endpoints', 'Chat/LLM Endpoints'],
+        rows: [
+          ['Free / No subscription', '20/min', '5/min'],
+          ['Starter Crew ($29/mo)', '60/min', '20/min'],
+          ['Growth Crew ($59/mo)', '200/min', '50/min'],
+          ['Power Crew ($149/mo)', '600/min', '100/min'],
+        ],
+      }),
       P({ children: 'Rate limit headers are included in every response:' }),
-      CodeBlock({ language: 'text', children: `X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 87
-X-RateLimit-Reset: 1718450400` }),
+      CodeBlock({ language: 'text', children: `RateLimit-Limit: 60
+RateLimit-Remaining: 47
+RateLimit-Reset: 30` }),
     ],
   },
 

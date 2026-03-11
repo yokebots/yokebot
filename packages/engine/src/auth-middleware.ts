@@ -1,14 +1,18 @@
 /**
- * auth-middleware.ts — JWT verification for Supabase auth
+ * auth-middleware.ts — JWT verification for Supabase auth + API key auth
  *
  * Verifies the Bearer token from the dashboard against Supabase.
  * Supports both HS256 (legacy/anon key) and ES256 (new Supabase Auth tokens)
  * by fetching the JWKS public key from Supabase's well-known endpoint.
+ *
+ * Also supports API key authentication via `yk_live_` prefixed tokens.
  */
 
 import type { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import crypto from 'node:crypto'
+import { validateApiKey, type ApiKey } from './api-keys.ts'
+import type { Db } from './db/types.ts'
 
 export interface AuthUser {
   id: string
@@ -17,11 +21,12 @@ export interface AuthUser {
   teamRole?: string
 }
 
-// Extend Express Request to include user
+// Extend Express Request to include user and apiKey
 declare global {
   namespace Express {
     interface Request {
       user?: AuthUser
+      apiKey?: ApiKey
     }
   }
 }
@@ -31,6 +36,14 @@ const SUPABASE_URL = process.env.SUPABASE_URL ?? ''
 
 // Paths that don't require authentication
 const PUBLIC_PATHS = ['/health', '/api/ollama', '/api/config', '/api/contact', '/api/unsubscribe']
+
+// Module-level DB reference for API key validation (set at startup)
+let _apiKeyDb: Db | null = null
+
+/** Called once at startup from index.ts to inject the DB reference */
+export function setApiKeyDb(db: Db): void {
+  _apiKeyDb = db
+}
 
 // Cached JWKS public key for ES256 verification
 let cachedPublicKey: crypto.KeyObject | null = null
@@ -121,6 +134,12 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
 
   const token = queryToken || authHeader!.slice(7)
 
+  // API key path — keys start with yk_live_
+  if (token.startsWith('yk_live_')) {
+    void validateApiKeyAuth(token, req, res, next)
+    return
+  }
+
   // Peek at the token header to determine algorithm
   const headerB64 = token.split('.')[0]
   let alg = 'HS256'
@@ -149,6 +168,34 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
       res.status(401).json({ error: 'Invalid or expired token' })
     }
   }
+}
+
+async function validateApiKeyAuth(
+  token: string,
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  if (!_apiKeyDb) {
+    res.status(500).json({ error: 'API key validation not available' })
+    return
+  }
+
+  const key = await validateApiKey(_apiKeyDb, token)
+  if (!key) {
+    res.status(401).json({ error: 'Invalid, revoked, or expired API key' })
+    return
+  }
+
+  // Set user context from the API key creator
+  req.user = {
+    id: key.createdBy,
+    email: '',
+    activeTeamId: key.teamId,
+    teamRole: 'member',
+  }
+  req.apiKey = key
+  next()
 }
 
 async function verifyES256(token: string, req: Request, res: Response, next: NextFunction): Promise<void> {

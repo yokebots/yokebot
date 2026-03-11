@@ -455,6 +455,21 @@ const SQLITE_DDL = `
     UNIQUE(user_id, team_id)
   );
 
+  -- API keys for programmatic access
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    created_by TEXT NOT NULL,
+    name TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    scopes TEXT NOT NULL DEFAULT '*',
+    last_used_at TEXT,
+    expires_at TEXT,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -494,6 +509,8 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_approvals_team_status ON approvals(team_id, status);
   CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_onboarding_drips_pending ON onboarding_drips(status, next_send_at);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_team ON api_keys(team_id);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 `
 
 const POSTGRES_DDL = `
@@ -966,6 +983,21 @@ const POSTGRES_DDL = `
     UNIQUE(user_id, team_id)
   );
 
+  -- API keys for programmatic access
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    created_by TEXT NOT NULL,
+    name TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    scopes TEXT NOT NULL DEFAULT '*',
+    last_used_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -1011,6 +1043,8 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_approvals_team_status ON approvals(team_id, status);
   CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_onboarding_drips_pending ON onboarding_drips(status, next_send_at);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_team ON api_keys(team_id);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 
   -- =====================================================================
   -- Row Level Security (RLS)
@@ -1067,6 +1101,7 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS workflow_runs ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS workflow_run_steps ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS onboarding_drips ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS api_keys ENABLE ROW LEVEL SECURITY;
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses

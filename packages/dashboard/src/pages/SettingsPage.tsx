@@ -27,7 +27,11 @@ const DEFAULT_ALERTS: AlertRow[] = [
 export function SettingsPage() {
   const location = useLocation()
   const { activeTeam, refresh: refreshTeams } = useTeam()
-  const activeTab: SettingsTab = location.pathname.endsWith('/notifications') ? 'notifications' : 'identity'
+  const activeTab: SettingsTab = location.pathname.endsWith('/notifications')
+    ? 'notifications'
+    : location.pathname.endsWith('/api-keys')
+      ? 'api-keys'
+      : 'identity'
   const [savingNotifs, setSavingNotifs] = useState(false)
   const [notifSaved, setNotifSaved] = useState(false)
 
@@ -47,6 +51,17 @@ export function SettingsPage() {
   const [inAppEnabled, setInAppEnabled] = useState(true)
   const [emailEnabled, setEmailEnabled] = useState(true)
   const [alerts, setAlerts] = useState<AlertRow[]>(DEFAULT_ALERTS)
+
+  // API Keys state
+  const [apiKeys, setApiKeys] = useState<engine.ApiKeyInfo[]>([])
+  const [apiKeysLoading, setApiKeysLoading] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newKeyName, setNewKeyName] = useState('')
+  const [newKeyScopes, setNewKeyScopes] = useState<string[]>(['*'])
+  const [newKeyExpiry, setNewKeyExpiry] = useState('')
+  const [createdKey, setCreatedKey] = useState<string | null>(null)
+  const [keyCopied, setKeyCopied] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<{ type: 'revoke' | 'delete' | 'regenerate'; keyId: string; keyName: string } | null>(null)
 
   const loadNotificationPrefs = useCallback(async () => {
     if (!activeTeam) return
@@ -87,6 +102,58 @@ export function SettingsPage() {
       setAdditionalContext(profile.additionalContext ?? '')
     } catch { /* no profile yet */ }
   }, [activeTeam?.id, activeTeam?.name])
+
+  const loadApiKeys = useCallback(async () => {
+    if (!activeTeam) return
+    setApiKeysLoading(true)
+    try {
+      const keys = await engine.listApiKeys()
+      setApiKeys(keys)
+    } catch { /* offline */ }
+    setApiKeysLoading(false)
+  }, [activeTeam?.id])
+
+  const handleCreateKey = async () => {
+    if (!newKeyName.trim()) return
+    try {
+      const result = await engine.createApiKey(
+        newKeyName.trim(),
+        newKeyScopes.includes('*') ? undefined : newKeyScopes,
+        newKeyExpiry || undefined,
+      )
+      setCreatedKey(result.plaintext!)
+      setShowCreateModal(false)
+      setNewKeyName('')
+      setNewKeyScopes(['*'])
+      setNewKeyExpiry('')
+      await loadApiKeys()
+    } catch { /* error */ }
+  }
+
+  const handleRevokeKey = async (id: string) => {
+    try {
+      await engine.revokeApiKey(id)
+      await loadApiKeys()
+    } catch { /* error */ }
+    setConfirmAction(null)
+  }
+
+  const handleDeleteKey = async (id: string) => {
+    try {
+      await engine.deleteApiKey(id)
+      await loadApiKeys()
+    } catch { /* error */ }
+    setConfirmAction(null)
+  }
+
+  const handleRegenerateKey = async (id: string) => {
+    try {
+      const result = await engine.regenerateApiKey(id)
+      setCreatedKey(result.plaintext!)
+      await loadApiKeys()
+    } catch { /* error */ }
+    setConfirmAction(null)
+  }
 
   const saveTeamName = async () => {
     if (!activeTeam || !teamName.trim()) return
@@ -132,6 +199,7 @@ export function SettingsPage() {
 
   useEffect(() => { loadTeamProfile() }, [loadTeamProfile])
   useEffect(() => { loadNotificationPrefs() }, [loadNotificationPrefs])
+  useEffect(() => { if (activeTab === 'api-keys') loadApiKeys() }, [activeTab, loadApiKeys])
 
   const toggleAlert = async (idx: number, field: 'inApp' | 'email' | 'slack' | 'telegram') => {
     const updated = alerts.map((a, i) => i === idx ? { ...a, [field]: !a[field] } : a)
@@ -397,6 +465,263 @@ export function SettingsPage() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+      {/* API Keys Tab */}
+      {activeTab === 'api-keys' && (
+        <div className="max-w-3xl space-y-6">
+          {/* Key created success banner */}
+          {createdKey && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-800">
+                <span className="material-symbols-outlined text-[16px]">warning</span>
+                Copy your API key now — it won't be shown again
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-white px-3 py-2 text-xs font-mono text-text-main border border-amber-200 break-all">
+                  {createdKey}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(createdKey)
+                    setKeyCopied(true)
+                    setTimeout(() => setKeyCopied(false), 2000)
+                  }}
+                  className="rounded-lg bg-forest-green px-3 py-2 text-sm font-medium text-white hover:bg-forest-green/90"
+                >
+                  {keyCopied ? 'Copied!' : 'Copy'}
+                </button>
+                <button
+                  onClick={() => { setCreatedKey(null); setKeyCopied(false) }}
+                  className="rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-muted hover:bg-light-surface-alt"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Header + Create */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-text-main">API Keys</h3>
+              <p className="text-xs text-text-muted">Create keys for programmatic access to the YokeBot API (CI/CD, scripts, integrations).</p>
+            </div>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-1 rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green/90"
+            >
+              <span className="material-symbols-outlined text-[16px]">add</span>
+              Create Key
+            </button>
+          </div>
+
+          {/* Keys Table */}
+          {apiKeysLoading ? (
+            <div className="py-12 text-center text-sm text-text-muted">Loading...</div>
+          ) : apiKeys.length === 0 ? (
+            <div className="rounded-lg border border-border-subtle bg-white p-8 text-center">
+              <span className="material-symbols-outlined mb-2 text-3xl text-text-muted">key</span>
+              <p className="text-sm text-text-muted">No API keys yet. Create one to get started.</p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-border-subtle bg-white">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border-subtle bg-light-surface-alt/50">
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">Key</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">Scopes</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">Last Used</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">Status</th>
+                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-text-muted">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {apiKeys.map((key) => {
+                    const isRevoked = !!key.revokedAt
+                    const isExpired = key.expiresAt && new Date(key.expiresAt) < new Date()
+                    const status = isRevoked ? 'Revoked' : isExpired ? 'Expired' : 'Active'
+                    const statusColor = isRevoked ? 'text-red-600' : isExpired ? 'text-amber-600' : 'text-green-600'
+                    return (
+                      <tr key={key.id} className="border-b border-border-subtle last:border-0">
+                        <td className="px-4 py-3 text-sm font-medium text-text-main">{key.name}</td>
+                        <td className="px-4 py-3">
+                          <code className="text-xs text-text-muted font-mono">yk_live_{key.keyPrefix}...</code>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-text-muted">
+                          {key.scopes === '*' ? 'Full access' : key.scopes.split(',').length + ' scopes'}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-text-muted">
+                          {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : 'Never'}
+                        </td>
+                        <td className={`px-4 py-3 text-xs font-medium ${statusColor}`}>{status}</td>
+                        <td className="px-4 py-3 text-right">
+                          {!isRevoked && (
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => setConfirmAction({ type: 'regenerate', keyId: key.id, keyName: key.name })}
+                                className="rounded px-2 py-1 text-xs text-text-muted hover:bg-light-surface-alt"
+                                title="Regenerate"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">refresh</span>
+                              </button>
+                              <button
+                                onClick={() => setConfirmAction({ type: 'revoke', keyId: key.id, keyName: key.name })}
+                                className="rounded px-2 py-1 text-xs text-amber-600 hover:bg-amber-50"
+                                title="Revoke"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">block</span>
+                              </button>
+                              <button
+                                onClick={() => setConfirmAction({ type: 'delete', keyId: key.id, keyName: key.name })}
+                                className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                                title="Delete"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">delete</span>
+                              </button>
+                            </div>
+                          )}
+                          {isRevoked && (
+                            <button
+                              onClick={() => setConfirmAction({ type: 'delete', keyId: key.id, keyName: key.name })}
+                              className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">delete</span>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Create Key Modal */}
+          {showCreateModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+                <h3 className="mb-4 text-lg font-bold text-text-main">Create API Key</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-secondary">Name</label>
+                    <input
+                      type="text"
+                      value={newKeyName}
+                      onChange={(e) => setNewKeyName(e.target.value)}
+                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+                      placeholder="e.g. CI/CD Pipeline, Zapier Integration"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-secondary">Scopes</label>
+                    <div className="space-y-1">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={newKeyScopes.includes('*')}
+                          onChange={(e) => setNewKeyScopes(e.target.checked ? ['*'] : [])}
+                          className="accent-forest-green"
+                        />
+                        Full access (all scopes)
+                      </label>
+                      {!newKeyScopes.includes('*') && (
+                        <div className="mt-2 grid grid-cols-2 gap-1 pl-2">
+                          {['agents', 'tasks', 'chat', 'data', 'files', 'kb'].map((resource) => (
+                            <div key={resource} className="space-y-0.5">
+                              {['read', 'write'].map((perm) => {
+                                const scope = `${resource}:${perm}`
+                                return (
+                                  <label key={scope} className="flex items-center gap-1.5 text-xs text-text-secondary">
+                                    <input
+                                      type="checkbox"
+                                      checked={newKeyScopes.includes(scope)}
+                                      onChange={(e) => {
+                                        setNewKeyScopes(e.target.checked
+                                          ? [...newKeyScopes, scope]
+                                          : newKeyScopes.filter((s) => s !== scope))
+                                      }}
+                                      className="accent-forest-green"
+                                    />
+                                    {resource}:{perm}
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-secondary">Expiration (optional)</label>
+                    <input
+                      type="date"
+                      value={newKeyExpiry}
+                      onChange={(e) => setNewKeyExpiry(e.target.value)}
+                      min={new Date().toISOString().split('T')[0]}
+                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    onClick={() => { setShowCreateModal(false); setNewKeyName(''); setNewKeyScopes(['*']); setNewKeyExpiry('') }}
+                    className="rounded-lg border border-border-subtle px-4 py-2 text-sm text-text-muted hover:bg-light-surface-alt"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreateKey}
+                    disabled={!newKeyName.trim()}
+                    className="rounded-lg bg-forest-green px-4 py-2 text-sm font-medium text-white hover:bg-forest-green/90 disabled:opacity-50"
+                  >
+                    Create Key
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Confirm Action Modal */}
+          {confirmAction && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+                <h3 className="mb-2 text-lg font-bold text-text-main">
+                  {confirmAction.type === 'revoke' ? 'Revoke' : confirmAction.type === 'delete' ? 'Delete' : 'Regenerate'} API Key
+                </h3>
+                <p className="mb-4 text-sm text-text-muted">
+                  {confirmAction.type === 'revoke' && `This will immediately invalidate the key "${confirmAction.keyName}". Any services using it will lose access.`}
+                  {confirmAction.type === 'delete' && `This will permanently delete the key "${confirmAction.keyName}". This cannot be undone.`}
+                  {confirmAction.type === 'regenerate' && `This will revoke the current key "${confirmAction.keyName}" and create a new one. Any services using the old key will lose access.`}
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setConfirmAction(null)}
+                    className="rounded-lg border border-border-subtle px-4 py-2 text-sm text-text-muted hover:bg-light-surface-alt"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirmAction.type === 'revoke') handleRevokeKey(confirmAction.keyId)
+                      else if (confirmAction.type === 'delete') handleDeleteKey(confirmAction.keyId)
+                      else handleRegenerateKey(confirmAction.keyId)
+                    }}
+                    className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${
+                      confirmAction.type === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'
+                    }`}
+                  >
+                    {confirmAction.type === 'revoke' ? 'Revoke Key' : confirmAction.type === 'delete' ? 'Delete Key' : 'Regenerate Key'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </SettingsLayout>

@@ -6,6 +6,7 @@ const TABS = [
   { id: 'team', label: 'Team', path: '/settings/team' },
   { id: 'integrations', label: 'Integrations', path: '/settings/integrations' },
   { id: 'notifications', label: 'Notifications', path: '/settings/notifications' },
+  { id: 'api-keys', label: 'API Keys', path: '/settings/api-keys' },
   { id: 'billing', label: 'Billing', path: '/settings/billing' },
 ] as const
 

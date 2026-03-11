@@ -27,12 +27,13 @@ import { logActivity, listActivity, countActivity } from './activity.ts'
 import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS, chatCompletion, type ChatMessage as LlmMessage } from './model.ts'
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
 import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, getTeamAgentIds, findUserByEmail } from './teams.ts'
-import { authMiddleware } from './auth-middleware.ts'
+import { authMiddleware, setApiKeyDb } from './auth-middleware.ts'
+import { createApiKey, listApiKeys, revokeApiKey, regenerateApiKey, deleteApiKey, hasScope } from './api-keys.ts'
 import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
 import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
 import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
-import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema, CreateWorkflowSchema, UpdateWorkflowSchema, CaptureWorkflowSchema, AddWorkflowStepSchema, UpdateWorkflowStepSchema, ReorderWorkflowStepsSchema, CreateTagSchema, UpdateTagSchema, TagResourceSchema, BulkSetTagsSchema } from './validation.ts'
+import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema, CreateWorkflowSchema, UpdateWorkflowSchema, CaptureWorkflowSchema, AddWorkflowStepSchema, UpdateWorkflowStepSchema, ReorderWorkflowStepsSchema, CreateTagSchema, UpdateTagSchema, TagResourceSchema, BulkSetTagsSchema, CreateApiKeySchema } from './validation.ts'
 import { createWorkflow, getWorkflow, listWorkflows, updateWorkflow, deleteWorkflow, addStep, updateStep, deleteStep, listSteps, reorderSteps, startRun, getRun, listRuns, cancelRun, listRunSteps, captureWorkflow, findWorkflowsByTableTrigger } from './workflows.ts'
 import { advanceWorkflow, onTaskCompleted, approveWorkflowStep } from './workflow-executor.ts'
 import { uploadDocument, listDocuments, getDocument, deleteDocument, getDocumentChunks, searchKb } from './knowledge-base.ts'
@@ -78,6 +79,9 @@ async function main() {
   // Initialize database (async — picks SQLite or Postgres based on DATABASE_URL)
   const db = await createDb({ dataDir: DATA_DIR })
 
+  // Inject DB into auth middleware for API key validation
+  setApiKeyDb(db)
+
   // Register hosted mode routing if enabled (reads API keys from env vars instead of DB)
   if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
     try {
@@ -108,7 +112,15 @@ async function main() {
   const CORS_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
     ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((s) => s.trim())
     : ['http://localhost:5173', 'http://localhost:3000']
-  app.use(cors({ origin: CORS_ORIGINS, credentials: true }))
+  app.use(cors({
+    origin: (origin, callback) => {
+      // Allow server-to-server requests (no Origin header) — e.g. API key calls from scripts/CI
+      if (!origin) return callback(null, true)
+      if (CORS_ORIGINS.includes(origin)) return callback(null, true)
+      callback(new Error('Not allowed by CORS'))
+    },
+    credentials: true,
+  }))
 
   // Stripe webhook needs raw body for signature verification — must come BEFORE express.json()
   app.use('/api/billing/webhook', express.raw({ type: 'application/json' }))
@@ -116,24 +128,62 @@ async function main() {
   // Body size limit
   app.use(express.json({ limit: '1mb' }))
 
+  // Rate limit tiers for API key requests (per key, per minute)
+  const API_KEY_RATE_LIMITS: Record<string, number> = {
+    none: 20, team: 60, business: 200, enterprise: 600,
+  }
+  const API_KEY_CHAT_LIMITS: Record<string, number> = {
+    none: 5, team: 20, business: 50, enterprise: 100,
+  }
+
+  /** Look up the subscription tier for an API key's team */
+  async function getApiKeyTier(req: Request): Promise<string> {
+    if (!req.apiKey) return 'none'
+    try {
+      const sub = await getSubscription(db, req.apiKey.teamId)
+      return sub?.tier ?? 'none'
+    } catch { return 'none' }
+  }
+
   // Rate limiting — general (per user/team, generous for dashboard polling)
   app.use(rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5000,
+    max: async (req) => {
+      // API key requests get tighter per-minute limits (converted to 15-min window)
+      if (req.apiKey) {
+        const tier = await getApiKeyTier(req)
+        return (API_KEY_RATE_LIMITS[tier] ?? 20) * 15
+      }
+      return 5000 // JWT/dashboard
+    },
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later' },
-    keyGenerator: (req) => req.headers['x-team-id'] as string ?? req.ip ?? 'unknown',
+    keyGenerator: (req) => {
+      // API key requests rate-limit per key ID
+      if (req.apiKey) return `apikey:${req.apiKey.id}`
+      return req.headers['x-team-id'] as string ?? req.ip ?? 'unknown'
+    },
     skip: (req) => req.path === '/health' || req.path === '/api/config',
   }))
 
   // Stricter rate limit for chat completions (LLM calls are expensive)
   const chatLimiter = rateLimit({
     windowMs: 60 * 1000, // 1 minute
-    max: 10,
+    max: async (req) => {
+      if (req.apiKey) {
+        const tier = await getApiKeyTier(req)
+        return API_KEY_CHAT_LIMITS[tier] ?? 5
+      }
+      return 10 // JWT/dashboard
+    },
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Chat rate limit exceeded, please wait' },
+    keyGenerator: (req) => {
+      if (req.apiKey) return `apikey:chat:${req.apiKey.id}`
+      return req.ip ?? 'unknown'
+    },
   })
 
   // Request timing (log slow requests)
@@ -161,6 +211,85 @@ async function main() {
   // Billing API routes (checkout, webhook, status)
   const { registerBillingRoutes } = await import('./billing-routes.ts')
   registerBillingRoutes(app, db)
+
+  // ===== API Key Management (admin only) =====
+
+  app.post('/api/api-keys', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      requireRole(req, res, 'admin')
+      if (res.headersSent) return
+      const { name, scopes, expiresAt } = validate(CreateApiKeySchema, req.body)
+      const scopeStr = scopes?.join(',') ?? '*'
+      const key = await createApiKey(db, req.user!.activeTeamId!, req.user!.id, name, scopeStr, expiresAt)
+      res.status(201).json(key)
+    } catch (err) { next(err) }
+  })
+
+  app.get('/api/api-keys', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      requireRole(req, res, 'admin')
+      if (res.headersSent) return
+      const keys = await listApiKeys(db, req.user!.activeTeamId!)
+      res.json(keys)
+    } catch (err) { next(err) }
+  })
+
+  app.delete('/api/api-keys/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      requireRole(req, res, 'admin')
+      if (res.headersSent) return
+      const id = req.params.id as string
+      const ok = await deleteApiKey(db, id, req.user!.activeTeamId!)
+      if (!ok) { res.status(404).json({ error: 'API key not found' }); return }
+      res.json({ ok: true })
+    } catch (err) { next(err) }
+  })
+
+  app.post('/api/api-keys/:id/revoke', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      requireRole(req, res, 'admin')
+      if (res.headersSent) return
+      const id = req.params.id as string
+      const ok = await revokeApiKey(db, id, req.user!.activeTeamId!)
+      if (!ok) { res.status(404).json({ error: 'API key not found or already revoked' }); return }
+      res.json({ ok: true })
+    } catch (err) { next(err) }
+  })
+
+  app.post('/api/api-keys/:id/regenerate', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      requireRole(req, res, 'admin')
+      if (res.headersSent) return
+      const id = req.params.id as string
+      const newKey = await regenerateApiKey(db, id, req.user!.activeTeamId!, req.user!.id)
+      if (!newKey) { res.status(404).json({ error: 'API key not found' }); return }
+      res.json(newKey)
+    } catch (err) { next(err) }
+  })
+
+  // ===== Scope enforcement for API key requests =====
+  // Maps URL path prefixes → required scopes (read for GET, write for mutations)
+  const SCOPE_MAP: Array<{ prefix: string; readScope: string; writeScope: string }> = [
+    { prefix: '/api/agents', readScope: 'agents:read', writeScope: 'agents:write' },
+    { prefix: '/api/tasks', readScope: 'tasks:read', writeScope: 'tasks:write' },
+    { prefix: '/api/chat', readScope: 'chat:read', writeScope: 'chat:write' },
+    { prefix: '/api/data', readScope: 'data:read', writeScope: 'data:write' },
+    { prefix: '/api/sor', readScope: 'data:read', writeScope: 'data:write' },
+    { prefix: '/api/files', readScope: 'files:read', writeScope: 'files:write' },
+    { prefix: '/api/workspace', readScope: 'files:read', writeScope: 'files:write' },
+    { prefix: '/api/kb', readScope: 'kb:read', writeScope: 'kb:write' },
+    { prefix: '/api/knowledge-base', readScope: 'kb:read', writeScope: 'kb:write' },
+  ]
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (!req.apiKey) { next(); return }
+    const match = SCOPE_MAP.find((s) => req.path.startsWith(s.prefix))
+    if (!match) { next(); return }
+    const isRead = req.method === 'GET' || req.method === 'HEAD'
+    const required = isRead ? match.readScope : match.writeScope
+    if (hasScope(req.apiKey.scopes, required)) { next(); return }
+    res.status(403).json({ error: `API key missing required scope: ${required}` })
+  })
 
   // ===== Ownership verification helper =====
   // Prevents IDOR: verifies an object belongs to the requesting user's team

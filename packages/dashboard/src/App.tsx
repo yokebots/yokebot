@@ -153,6 +153,7 @@ function AppRoutes() {
         <Route path="activity" element={<ActivityPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/notifications" element={<SettingsPage />} />
+        <Route path="settings/api-keys" element={<SettingsPage />} />
         <Route path="settings/billing" element={<BillingPage />} />
         <Route path="settings/usage" element={<UsagePage />} />
         <Route path="settings/integrations" element={<IntegrationsPage />} />

@@ -1130,6 +1130,50 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 24,
+    name: 'api_keys',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS api_keys (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            created_by TEXT NOT NULL,
+            name TEXT NOT NULL,
+            key_prefix TEXT NOT NULL,
+            key_hash TEXT NOT NULL,
+            scopes TEXT NOT NULL DEFAULT '*',
+            last_used_at TIMESTAMPTZ,
+            expires_at TIMESTAMPTZ,
+            revoked_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_api_keys_team ON api_keys(team_id)`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`)
+        await db.run(`ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS api_keys (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            created_by TEXT NOT NULL,
+            name TEXT NOT NULL,
+            key_prefix TEXT NOT NULL,
+            key_hash TEXT NOT NULL,
+            scopes TEXT NOT NULL DEFAULT '*',
+            last_used_at TEXT,
+            expires_at TEXT,
+            revoked_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_api_keys_team ON api_keys(team_id)`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`)
+      }
+    },
+  },
 ]
 
 /**
