@@ -14,6 +14,7 @@ export interface ServiceDefinition {
   setupUrl: string
   setupInstructions: string
   icon: string
+  selfHostedOnly?: boolean // hide from hosted users (platform provides this via credits)
 }
 
 const SERVICES: ServiceDefinition[] = [
@@ -27,6 +28,7 @@ const SERVICES: ServiceDefinition[] = [
     setupUrl: 'https://brave.com/search/api/',
     setupInstructions: 'Create a Brave Search API account and copy your API key from the dashboard.',
     icon: 'search',
+    selfHostedOnly: true,
   },
   {
     id: 'tavily',
@@ -37,6 +39,7 @@ const SERVICES: ServiceDefinition[] = [
     setupUrl: 'https://tavily.com',
     setupInstructions: 'Sign up at Tavily and copy your API key from the dashboard. Tavily is the default scraping provider — bring your own key to avoid credit charges.',
     icon: 'web',
+    selfHostedOnly: true,
   },
   {
     id: 'firecrawl',
@@ -47,6 +50,7 @@ const SERVICES: ServiceDefinition[] = [
     setupUrl: 'https://firecrawl.dev',
     setupInstructions: 'Sign up at Firecrawl and copy your API key from the dashboard.',
     icon: 'web',
+    selfHostedOnly: true,
   },
   {
     id: 'newsapi',
@@ -57,6 +61,7 @@ const SERVICES: ServiceDefinition[] = [
     setupUrl: 'https://newsapi.org',
     setupInstructions: 'Register at NewsAPI.org and copy your API key.',
     icon: 'newspaper',
+    selfHostedOnly: true,
   },
   // Communication
   {

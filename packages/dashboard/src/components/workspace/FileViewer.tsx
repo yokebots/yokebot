@@ -21,6 +21,7 @@ function getExt(path: string): string {
 export function FileViewer({ filePath, onTaskClick }: FileViewerProps) {
   const ext = getExt(filePath)
   const [content, setContent] = useState<string | null>(null)
+  const [isBinary, setIsBinary] = useState(false)
   const [createdBy, setCreatedBy] = useState('')
   const [authorType, setAuthorType] = useState<'agent' | 'human'>('human')
   const [linkedTask, setLinkedTask] = useState<{ id: string; title: string } | null>(null)
@@ -35,6 +36,7 @@ export function FileViewer({ filePath, onTaskClick }: FileViewerProps) {
     try {
       const res = await engine.readFile(filePath)
       setContent(res.content)
+      setIsBinary(res.binary ?? false)
       setEditContent(res.content)
       setCreatedBy(res.createdBy ?? '')
       setAuthorType(res.authorType ?? 'human')
@@ -83,10 +85,12 @@ export function FileViewer({ filePath, onTaskClick }: FileViewerProps) {
 
   // Image preview
   if (IMAGE_EXTS.has(ext)) {
+    const mimeType = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`
+    const src = isBinary ? `data:${mimeType};base64,${content}` : `data:${mimeType};base64,${btoa(content)}`
     return (
       <div className="flex flex-1 items-center justify-center overflow-auto p-4 bg-gray-50">
         <img
-          src={`data:image/${ext};base64,${btoa(content)}`}
+          src={src}
           alt={filePath}
           className="max-w-full max-h-full object-contain rounded-lg shadow-sm"
         />
@@ -96,10 +100,11 @@ export function FileViewer({ filePath, onTaskClick }: FileViewerProps) {
 
   // PDF viewer
   if (PDF_EXTS.has(ext)) {
+    const src = isBinary ? `data:application/pdf;base64,${content}` : `data:application/pdf;base64,${btoa(content)}`
     return (
       <div className="flex-1 overflow-hidden">
         <embed
-          src={`data:application/pdf;base64,${btoa(content)}`}
+          src={src}
           type="application/pdf"
           className="h-full w-full"
         />

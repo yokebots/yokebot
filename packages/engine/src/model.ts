@@ -15,6 +15,7 @@
  */
 
 import type { Db } from './db/types.ts'
+import { encryptValue, decryptValue } from './credentials.ts'
 
 // ---- Core types ----
 
@@ -374,19 +375,26 @@ export interface StoredProvider {
 export async function getStoredProvider(db: Db, id: string): Promise<StoredProvider | null> {
   const row = await db.queryOne<Record<string, unknown>>('SELECT * FROM model_providers WHERE id = $1', [id])
   if (!row) return null
-  return { id: row.id as string, apiKey: row.api_key as string, enabled: (row.enabled as number) === 1, updatedAt: row.updated_at as string }
+  const rawKey = row.api_key as string
+  const apiKey = (rawKey.startsWith('enc:') || rawKey.startsWith('plain:')) ? decryptValue(rawKey) : rawKey
+  return { id: row.id as string, apiKey, enabled: (row.enabled as number) === 1, updatedAt: row.updated_at as string }
 }
 
 export async function listStoredProviders(db: Db): Promise<StoredProvider[]> {
   const rows = await db.query<Record<string, unknown>>('SELECT * FROM model_providers ORDER BY id')
-  return rows.map((r) => ({ id: r.id as string, apiKey: r.api_key as string, enabled: (r.enabled as number) === 1, updatedAt: r.updated_at as string }))
+  return rows.map((r) => {
+    const rawKey = r.api_key as string
+    const apiKey = (rawKey.startsWith('enc:') || rawKey.startsWith('plain:')) ? decryptValue(rawKey) : rawKey
+    return { id: r.id as string, apiKey, enabled: (r.enabled as number) === 1, updatedAt: r.updated_at as string }
+  })
 }
 
 export async function upsertProvider(db: Db, id: string, apiKey: string, enabled: boolean): Promise<void> {
+  const encryptedKey = apiKey ? encryptValue(apiKey) : ''
   await db.run(
     `INSERT INTO model_providers (id, api_key, enabled) VALUES ($1, $2, $3)
      ON CONFLICT(id) DO UPDATE SET api_key = excluded.api_key, enabled = excluded.enabled, updated_at = ${db.now()}`,
-    [id, apiKey, enabled ? 1 : 0],
+    [id, encryptedKey, enabled ? 1 : 0],
   )
 }
 

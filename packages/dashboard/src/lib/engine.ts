@@ -420,7 +420,7 @@ export const listFiles = (dir = '', recursive = false) =>
   )
 
 export const readFile = (path: string) =>
-  request<{ path: string; content: string; createdBy: string; authorType?: 'agent' | 'human'; task?: { id: string; title: string } | null }>(`/api/workspace/file?path=${encodeURIComponent(path)}`)
+  request<{ path: string; content: string; binary?: boolean; createdBy: string; authorType?: 'agent' | 'human'; task?: { id: string; title: string } | null }>(`/api/workspace/file?path=${encodeURIComponent(path)}`)
 
 export const writeFile = (path: string, content: string, agentId: string) =>
   request<{ success: boolean }>('/api/workspace/file', {

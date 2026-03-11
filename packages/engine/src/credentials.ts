@@ -35,7 +35,12 @@ function getKey(): Buffer | null {
 
 function encrypt(plaintext: string): string {
   const key = getKey()
-  if (!key) return `plain:${plaintext}`
+  if (!key) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Cannot store credentials: YOKEBOT_ENCRYPTION_KEY is not set. Set a 32-byte hex key (64 characters) before storing API keys.')
+    }
+    return `plain:${plaintext}`
+  }
 
   const iv = crypto.randomBytes(IV_LENGTH)
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv)
@@ -63,6 +68,9 @@ function decrypt(stored: string): string {
   decipher.setAuthTag(tag)
   return decipher.update(ciphertext) + decipher.final('utf8')
 }
+
+// ---- Exported for model_providers encryption ----
+export { encrypt as encryptValue, decrypt as decryptValue }
 
 // ---- Public API ----
 
