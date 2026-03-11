@@ -1794,24 +1794,26 @@ docker compose logs -f dashboard # dashboard only` }),
       P({ children: 'The YokeBot engine exposes a REST API for managing agents, tasks, chat, knowledge bases, and data tables. The dashboard uses this API under the hood, and you can call it directly for custom integrations.' }),
 
       H2({ children: 'Base URL' }),
-      P({ children: 'For self-hosted instances, the default base URL is:' }),
+      P({ children: 'For YokeBot Cloud:' }),
+      CodeBlock({ language: 'text', children: 'https://api.yokebot.com/api' }),
+      P({ children: 'For self-hosted instances, the default is:' }),
       CodeBlock({ language: 'text', children: 'http://localhost:3001/api' }),
-      P({ children: 'All endpoints below are relative to this base URL. For example, listing agents is:' }),
-      CodeBlock({ language: 'text', children: 'GET http://localhost:3001/api/agents' }),
+      P({ children: 'All endpoints below are relative to the base URL. For example, listing agents:' }),
+      CodeBlock({ language: 'text', children: 'GET https://api.yokebot.com/api/agents' }),
 
       H2({ children: 'Authentication' }),
       P({ children: 'The API supports two authentication methods:' }),
 
       H3({ children: '1. JWT Tokens (Dashboard)' }),
       P({ children: 'Supabase JWT tokens are used by the dashboard. Requires both Authorization and X-Team-Id headers.' }),
-      CodeBlock({ language: 'bash', children: `curl -X GET http://localhost:3001/api/agents \\
+      CodeBlock({ language: 'bash', children: `curl -X GET https://api.yokebot.com/api/agents \\
   -H "Authorization: Bearer YOUR_SUPABASE_ACCESS_TOKEN" \\
   -H "X-Team-Id: YOUR_TEAM_ID" \\
   -H "Content-Type: application/json"` }),
 
       H3({ children: '2. API Keys (Programmatic Access)' }),
       P({ children: 'API keys are ideal for CI/CD pipelines, scripts, Zapier integrations, and mobile apps. Create them in Settings > API Keys.' }),
-      CodeBlock({ language: 'bash', children: `curl -X GET http://localhost:3001/api/agents \\
+      CodeBlock({ language: 'bash', children: `curl -X GET https://api.yokebot.com/api/agents \\
   -H "Authorization: Bearer yk_live_YOUR_API_KEY" \\
   -H "Content-Type: application/json"` }),
       P({ children: 'API keys embed the team context, so no X-Team-Id header is needed.' }),
