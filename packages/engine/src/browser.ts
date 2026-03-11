@@ -96,7 +96,12 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
 
   const child = spawn('npx', ['@playwright/mcp@latest', '--headless'], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: {
+      HOME: process.env.HOME,
+      PATH: process.env.PATH,
+      DISPLAY: process.env.DISPLAY,
+      NODE_ENV: process.env.NODE_ENV,
+    },
   })
 
   const readline = createInterface({ input: child.stdout! })
@@ -222,7 +227,6 @@ export async function executeBrowserTool(
     browser_type: 'browser_type',
     browser_select_option: 'browser_select_option',
     browser_press_key: 'browser_press_key',
-    browser_evaluate: 'browser_evaluate',
     browser_screenshot: 'browser_take_screenshot',
     browser_close: 'browser_close',
   }

@@ -7,7 +7,7 @@
  */
 
 import { readFileSync, existsSync, readdirSync } from 'fs'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
 import type { Db } from './db/types.ts'
 import type { ToolDef } from './model.ts'
 
@@ -79,6 +79,8 @@ export function loadSkillsFromDir(skillsDir: string): Skill[] {
 
 export function loadSkill(skillsDir: string, skillName: string): Skill | null {
   const skillMdPath = join(skillsDir, skillName, 'SKILL.md')
+  const resolved = resolve(skillMdPath)
+  if (!resolved.startsWith(resolve(skillsDir) + sep)) return null
   if (!existsSync(skillMdPath)) return null
   const content = readFileSync(skillMdPath, 'utf-8')
   return parseSkillFile(content, skillMdPath)
@@ -94,7 +96,7 @@ const RESERVED_TOOL_NAMES = new Set([
   'query_source_of_record', 'update_source_of_record',
   'generate_image', 'generate_video', 'generate_3d',
   'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type',
-  'browser_select_option', 'browser_press_key', 'browser_evaluate', 'browser_close',
+  'browser_select_option', 'browser_press_key', 'browser_close',
 ])
 
 export function parseToolSchemas(instructions: string): ToolDef[] {

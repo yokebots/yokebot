@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="assets/logo.png" alt="YokeBot Logo" width="200" />
+</p>
+
+<p align="center">
   <img src="assets/banner.jpeg" alt="YokeBot — AI Agent Workforce" width="100%" />
 </p>
 
@@ -11,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/yokebots/yokebot/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPLv3-blue.svg" alt="License" /></a>
   <a href="https://github.com/yokebots/yokebot/stargazers"><img src="https://img.shields.io/github/stars/yokebots/yokebot?style=social" alt="Stars" /></a>
-  <a href="https://discord.gg/kqfFr87KqV"><img src="https://img.shields.io/discord/1234567890?label=Discord&logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://discord.gg/kqfFr87KqV"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
   <a href="https://yokebot.com"><img src="https://img.shields.io/badge/Cloud-yokebot.com-blueviolet" alt="Cloud" /></a>
 </p>
 
