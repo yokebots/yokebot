@@ -9,7 +9,7 @@ import 'dotenv/config'
 import express, { type Request, type Response, type NextFunction } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
-import rateLimit from 'express-rate-limit'
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 import { homedir } from 'os'
 import { join } from 'path'
 import { createDb } from './db/index.ts'
@@ -20,7 +20,7 @@ import { createApproval, listPendingApprovals, resolveApproval, countPendingAppr
 import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
 import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
 import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getChannelMessages, getThreadReplies, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
-import { initWorkspace, listFiles, readFile, writeFile, writeBinaryFile, renameFile, deleteFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
+import { initWorkspace, listFiles, readFile, readBinaryFile, writeFile, writeBinaryFile, renameFile, deleteFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
 // Note: WorkspaceConfig kept for backward compat — workspace is now DB-backed
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
@@ -105,8 +105,12 @@ async function main() {
   // Trust proxy — Railway uses 1 reverse proxy layer (X-Forwarded-For)
   app.set('trust proxy', 1)
 
-  // Security headers
-  app.use(helmet())
+  // Security headers — relax cross-origin policies for dashboard ↔ engine
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginOpenerPolicy: false,
+    contentSecurityPolicy: false, // CSP not useful for a JSON API
+  }))
 
   // CORS — restrict to known origins in production
   const CORS_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
@@ -162,7 +166,7 @@ async function main() {
     keyGenerator: (req) => {
       // API key requests rate-limit per key ID
       if (req.apiKey) return `apikey:${req.apiKey.id}`
-      return req.headers['x-team-id'] as string ?? req.ip ?? 'unknown'
+      return req.headers['x-team-id'] as string ?? ipKeyGenerator(req.ip ?? '0.0.0.0')
     },
     skip: (req) => req.path === '/health' || req.path === '/api/config',
   }))
@@ -182,7 +186,7 @@ async function main() {
     message: { error: 'Chat rate limit exceeded, please wait' },
     keyGenerator: (req) => {
       if (req.apiKey) return `apikey:chat:${req.apiKey.id}`
-      return req.ip ?? 'unknown'
+      return ipKeyGenerator(req.ip ?? '0.0.0.0')
     },
   })
 
@@ -791,7 +795,7 @@ async function main() {
     'application/json', 'application/zip',
   ])
 
-  const uploadLimiter = rateLimit({ windowMs: 60_000, max: 20, keyGenerator: (req) => req.user?.activeTeamId ?? req.ip ?? 'unknown' })
+  const uploadLimiter = rateLimit({ windowMs: 60_000, max: 20, keyGenerator: (req) => req.user?.activeTeamId ?? ipKeyGenerator(req.ip ?? '0.0.0.0') })
 
   app.post('/api/tasks/:id/attachments', uploadLimiter, express.json({ limit: '15mb' }), async (req, res) => {
     if (!requireRole(req, res, 'member')) return
@@ -1251,6 +1255,15 @@ async function main() {
     if (file.taskId) {
       const t = await getTask(db, file.taskId)
       if (t) task = { id: t.id, title: t.title }
+    }
+    // For binary files (images, PDFs), return base64-encoded content
+    const ext = path.split('.').pop()?.toLowerCase() ?? ''
+    const BINARY_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf'])
+    if (BINARY_EXTS.has(ext)) {
+      const binaryContent = await readBinaryFile(db, teamId, path)
+      if (binaryContent) {
+        return res.json({ path, content: binaryContent.toString('base64'), binary: true, createdBy: authorName, authorType, task })
+      }
     }
     res.json({ path, content: file.content, createdBy: authorName, authorType, task })
   })
@@ -1747,7 +1760,8 @@ async function main() {
 
   app.get('/api/services', async (req, res) => {
     const teamId = req.user!.activeTeamId!
-    const services = listServices()
+    const hostedMode = process.env.YOKEBOT_HOSTED_MODE === 'true'
+    const services = listServices().filter((s) => !hostedMode || !s.selfHostedOnly)
     const creds = await listCredentials(db, teamId)
     const credMap = new Map(creds.map((c) => [c.serviceId, c]))
     res.json(services.map((s) => ({
@@ -2673,7 +2687,7 @@ ${truncated}`,
 
   // ===== Contact Form (public, rate limited) =====
 
-  const contactLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 3, keyGenerator: (req) => req.ip ?? 'unknown' })
+  const contactLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 3, keyGenerator: (req) => ipKeyGenerator(req.ip ?? '0.0.0.0') })
 
   app.post('/api/contact', contactLimiter, async (req: Request, res: Response) => {
     try {

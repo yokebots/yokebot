@@ -1174,6 +1174,25 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 25,
+    name: 'add_new_skill_credit_costs',
+    async up(db: Db) {
+      const newSkills = [
+        { name: 'summarize_video', credits: 10 },
+        { name: 'generate_captions', credits: 10 },
+        { name: 'search_properties', credits: 5 },
+        { name: 'search_companies', credits: 3 },
+      ]
+
+      for (const s of newSkills) {
+        await db.run(
+          `INSERT INTO skill_credit_costs (skill_name, credits_per_use) VALUES ($1, $2) ON CONFLICT (skill_name) DO NOTHING`,
+          [s.name, s.credits],
+        )
+      }
+    },
+  },
 ]
 
 /**

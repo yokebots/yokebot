@@ -588,18 +588,240 @@ registerHandler('embed_text', async (args) => {
   return `Generated ${data.data.length} embedding(s), ${dims} dimensions each.\nTokens used: ${data.usage?.total_tokens ?? 'unknown'}\n\nEmbeddings stored in context for similarity operations.`
 })
 
-// ---- Render Video (Remotion — programmatic video creation) ----
-registerHandler('render_video', async (args) => {
-  // Remotion rendering requires @remotion/renderer + @remotion/bundler which are heavy dependencies.
-  // For now, return the composition code so the agent can present it to the user.
-  // Full server-side rendering will be wired up when Remotion is integrated into the engine.
+// ---- Render Video (Remotion — server-side rendering) ----
+registerHandler('render_video', async (args, _creds, ctx) => {
   const code = args.compositionCode as string
-  const duration = (args.durationInFrames as number) || 150
+  if (!code || code.trim().length === 0) return 'Error: compositionCode is required'
+
+  const durationInFrames = (args.durationInFrames as number) || 150
   const fps = (args.fps as number) || 30
   const width = (args.width as number) || 1920
   const height = (args.height as number) || 1080
-  return `Remotion composition ready for rendering.\n\nSettings: ${width}x${height} @ ${fps}fps, ${duration} frames (${(duration / fps).toFixed(1)}s)\n\nComposition code:\n\`\`\`tsx\n${code}\n\`\`\`\n\nNote: Server-side rendering will execute this composition and return a video URL. For now, this code can be previewed in a Remotion studio.`
+  const inputProps = (args.inputProps as Record<string, unknown>) || {}
+
+  try {
+    const { renderComposition } = await import('./remotion.js')
+    const result = await renderComposition({ compositionCode: code, durationInFrames, fps, width, height, inputProps })
+
+    // Save to workspace
+    const { writeBinaryFile } = await import('./workspace.js')
+    const filename = `video-${Date.now()}.mp4`
+    await writeBinaryFile(ctx.db, ctx.teamId, filename, result.buffer, 'video/mp4', ctx.agentId)
+
+    return `Video rendered successfully!\n\nFile: ${filename}\nDuration: ${result.durationSeconds.toFixed(1)}s\nResolution: ${width}x${height} @ ${fps}fps\nSize: ${(result.buffer.length / 1024 / 1024).toFixed(1)}MB`
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown render error'
+    return `Video render failed: ${msg}`
+  }
 })
+
+// ---- Summarize Video (Voxtral transcription + LLM summary) ----
+registerHandler('summarize_video', async (args) => {
+  const apiKey = process.env.DEEPINFRA_API_KEY
+  if (!apiKey) return 'Error: DEEPINFRA_API_KEY not configured'
+  const urlCheck = validateUrl(args.videoUrl as string)
+  if (!urlCheck.ok) return `Invalid video URL: ${urlCheck.error}`
+
+  const videoRes = await fetch(urlCheck.url)
+  if (!videoRes.ok) return `Failed to download video: ${videoRes.status}`
+  const contentLength = Number(videoRes.headers.get('content-length') ?? 0)
+  if (contentLength > 100 * 1024 * 1024) return 'Video file too large (max 100MB)'
+  const videoBlob = await videoRes.blob()
+
+  const formData = new FormData()
+  formData.append('file', videoBlob, 'video.mp4')
+  formData.append('model', 'mistralai/Voxtral-Mini-4B-Realtime-2602')
+  if (args.language) formData.append('language', args.language as string)
+  formData.append('response_format', 'verbose_json')
+
+  const res = await fetch('https://api.deepinfra.com/v1/openai/audio/transcriptions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}` },
+    body: formData,
+  })
+  if (!res.ok) return `Transcription error: ${res.status}`
+  const data = await res.json() as { text: string; segments?: Array<{ start: number; end: number; text: string }> }
+
+  let transcript = data.text
+  if (data.segments && data.segments.length > 0) {
+    transcript = data.segments.map((s) =>
+      `[${Math.floor(s.start / 60)}:${String(Math.floor(s.start % 60)).padStart(2, '0')}] ${s.text.trim()}`
+    ).join('\n')
+  }
+
+  return `Here is the full transcript of the video. Please provide a clear, structured summary highlighting the key points, main topics discussed, and any action items or conclusions.\n\n---\nTRANSCRIPT:\n${transcript}\n---`
+})
+
+// ---- Generate Captions / Subtitles ----
+registerHandler('generate_captions', async (args) => {
+  const apiKey = process.env.DEEPINFRA_API_KEY
+  if (!apiKey) return 'Error: DEEPINFRA_API_KEY not configured'
+  const urlCheck = validateUrl(args.mediaUrl as string)
+  if (!urlCheck.ok) return `Invalid media URL: ${urlCheck.error}`
+
+  const mediaRes = await fetch(urlCheck.url)
+  if (!mediaRes.ok) return `Failed to download media: ${mediaRes.status}`
+  const contentLength = Number(mediaRes.headers.get('content-length') ?? 0)
+  if (contentLength > 100 * 1024 * 1024) return 'Media file too large (max 100MB)'
+  const mediaBlob = await mediaRes.blob()
+
+  const formData = new FormData()
+  formData.append('file', mediaBlob, 'media.mp4')
+  formData.append('model', 'mistralai/Voxtral-Mini-4B-Realtime-2602')
+  if (args.language) formData.append('language', args.language as string)
+  formData.append('response_format', 'verbose_json')
+
+  const res = await fetch('https://api.deepinfra.com/v1/openai/audio/transcriptions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}` },
+    body: formData,
+  })
+  if (!res.ok) return `Transcription error: ${res.status}`
+  const data = await res.json() as { text: string; segments?: Array<{ start: number; end: number; text: string }> }
+
+  if (!data.segments || data.segments.length === 0) {
+    return 'No timed segments returned — cannot generate captions from this media.'
+  }
+
+  const format = ((args.format as string) ?? 'srt').toLowerCase()
+
+  if (format === 'vtt') {
+    const lines = ['WEBVTT', '']
+    for (const seg of data.segments) {
+      lines.push(`${formatVTTTime(seg.start)} --> ${formatVTTTime(seg.end)}`)
+      lines.push(seg.text.trim())
+      lines.push('')
+    }
+    return lines.join('\n')
+  }
+
+  // Default: SRT
+  const lines: string[] = []
+  data.segments.forEach((seg, i) => {
+    lines.push(`${i + 1}`)
+    lines.push(`${formatSRTTime(seg.start)} --> ${formatSRTTime(seg.end)}`)
+    lines.push(seg.text.trim())
+    lines.push('')
+  })
+  return lines.join('\n')
+})
+
+function formatSRTTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  const ms = Math.round((seconds % 1) * 1000)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`
+}
+
+function formatVTTTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  const ms = Math.round((seconds % 1) * 1000)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`
+}
+
+// ---- Search Properties (Firecrawl + Zillow) ----
+registerHandler('search_properties', async (args, creds) => {
+  const apiKey = creds.firecrawl
+  const location = truncateInput(args.location as string, 200)
+  if (!location) return 'Error: location is required'
+
+  const listingType = (args.listingType as string) ?? 'for_sale'
+  const params = new URLSearchParams()
+  params.set('searchQueryState', JSON.stringify({
+    usersSearchTerm: location,
+    filterState: {
+      ...(args.minPrice ? { price: { min: args.minPrice as number } } : {}),
+      ...(args.maxPrice ? { price: { ...(args.minPrice ? { min: args.minPrice as number } : {}), max: args.maxPrice as number } } : {}),
+      ...(args.beds ? { beds: { min: args.beds as number } } : {}),
+    },
+    isListVisible: true,
+  }))
+
+  const zillowUrl = listingType === 'for_rent'
+    ? `https://www.zillow.com/homes/for_rent/${encodeURIComponent(location)}/`
+    : `https://www.zillow.com/homes/${encodeURIComponent(location)}/`
+
+  const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: zillowUrl, formats: ['markdown'], waitFor: 3000 }),
+  })
+  if (!res.ok) return `Firecrawl error: ${res.status} ${await res.text()}`
+  const data = await res.json() as { data?: { markdown?: string } }
+  const markdown = data.data?.markdown ?? 'No listing data returned'
+
+  // Truncate to 10KB to avoid blowing up context
+  const truncated = markdown.length > 10240 ? markdown.slice(0, 10240) + '\n\n... (truncated)' : markdown
+  return `Property listings for "${location}" (${listingType}):\n\n${truncated}`
+}, ['firecrawl'])
+
+// ---- Company Enrichment (Apollo) ----
+registerHandler('search_companies', async (args, creds) => {
+  const apiKey = creds.apollo
+  const domain = args.domain as string | undefined
+  const name = args.name as string | undefined
+
+  if (!domain && !name) return 'Error: provide either domain or name'
+
+  if (domain) {
+    // Domain enrichment
+    const res = await fetch('https://api.apollo.io/api/v1/organizations/enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey },
+      body: JSON.stringify({ domain: truncateInput(domain, 200) }),
+    })
+    if (!res.ok) return `Apollo error: ${res.status}`
+    const data = await res.json() as { organization?: Record<string, unknown> }
+    const org = data.organization
+    if (!org) return `No company data found for domain: ${domain}`
+
+    return formatCompanyData(org)
+  }
+
+  // Name search
+  const body: Record<string, unknown> = {
+    organization_name: truncateInput(name!, 200),
+    page: 1,
+    per_page: 5,
+  }
+  if (args.industry) body.organization_industry_tag_ids = [args.industry]
+
+  const res = await fetch('https://api.apollo.io/api/v1/mixed_companies/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return `Apollo error: ${res.status}`
+  const data = await res.json() as { organizations?: Array<Record<string, unknown>> }
+  const orgs = data.organizations ?? []
+  if (orgs.length === 0) return `No companies found matching "${name}"`
+
+  return orgs.map((org) => formatCompanyData(org)).join('\n\n---\n\n')
+}, ['apollo'])
+
+function formatCompanyData(org: Record<string, unknown>): string {
+  const fields = [
+    ['Name', org.name],
+    ['Domain', org.primary_domain || org.domain],
+    ['Industry', org.industry],
+    ['Employees', org.estimated_num_employees],
+    ['Revenue', org.annual_revenue_printed || org.annual_revenue],
+    ['Founded', org.founded_year],
+    ['HQ', [org.city, org.state, org.country].filter(Boolean).join(', ')],
+    ['Description', org.short_description],
+    ['Technologies', Array.isArray(org.current_technologies) ? (org.current_technologies as string[]).slice(0, 20).join(', ') : undefined],
+    ['Funding', org.total_funding_printed || org.total_funding],
+    ['LinkedIn', org.linkedin_url],
+    ['Website', org.website_url],
+  ]
+  return fields
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `**${k}:** ${v}`)
+    .join('\n')
+}
 
 // ============================================================
 // LLM-only handlers — return formatted prompts for the agent
