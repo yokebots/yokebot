@@ -181,6 +181,10 @@ async function connectStdio(config: McpServerConfig): Promise<ToolDef[]> {
   const args = config.args ? JSON.parse(config.args) as string[] : []
   const envVars = config.envVars ? JSON.parse(config.envVars) as Record<string, string> : {}
 
+  // Block sensitive env var overrides
+  const BLOCKED_KEYS = ['PATH', 'LD_PRELOAD', 'NODE_OPTIONS', 'DATABASE_URL', 'YOKEBOT_ENCRYPTION_KEY']
+  for (const key of BLOCKED_KEYS) delete envVars[key]
+
   const child = spawn(config.command!, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, ...envVars },

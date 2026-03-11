@@ -30,7 +30,11 @@ function validateUrl(rawUrl: string): { ok: true; url: string } | { ok: false; e
       host.endsWith('.local') ||
       host === '0.0.0.0' ||
       host === 'metadata.google.internal' ||
-      host === '169.254.169.254' // cloud metadata endpoint
+      host === '169.254.169.254' || // cloud metadata endpoint
+      host.startsWith('[fc') || host.startsWith('[fd') || // IPv6 ULA
+      host.startsWith('[fe80:') || // IPv6 link-local
+      /^0[0-7]+\./.test(host) || // octal IP encoding
+      /^0x[0-9a-f]+/i.test(host) // hex IP encoding
     ) {
       return { ok: false, error: 'Internal/private URLs not allowed' }
     }
@@ -198,7 +202,7 @@ registerHandler('send_email', async (args, creds) => {
   const { Resend } = await import('resend')
   const resend = new Resend(apiKey)
   const { data, error } = await resend.emails.send({
-    from: (args.from as string) || 'YokeBot <noreply@mail.yokebot.com>',
+    from: 'YokeBot <noreply@mail.yokebot.com>',
     to: [args.to as string],
     subject: args.subject as string,
     html: args.body as string,
@@ -500,6 +504,8 @@ registerHandler('transcribe_audio', async (args) => {
   // Download the audio file first
   const audioRes = await fetch(urlCheck.url)
   if (!audioRes.ok) return `Failed to download audio: ${audioRes.status}`
+  const contentLength = Number(audioRes.headers.get('content-length') ?? 0)
+  if (contentLength > 50 * 1024 * 1024) return 'Audio file too large (max 50MB)'
   const audioBlob = await audioRes.blob()
 
   const formData = new FormData()
@@ -739,6 +745,8 @@ registerHandler('seo_audit', async (args) => {
   try {
     const res = await fetch(url, { headers: { 'User-Agent': 'YokeBot-SEO/1.0' } })
     if (!res.ok) return `Failed to fetch ${url}: ${res.status}`
+    const seoContentLength = Number(res.headers.get('content-length') ?? 0)
+    if (seoContentLength > 5 * 1024 * 1024) return 'Page too large to audit (max 5MB)'
     const html = await res.text()
     // Extract key SEO elements
     const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/i)

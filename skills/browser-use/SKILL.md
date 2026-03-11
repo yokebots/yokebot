@@ -85,17 +85,6 @@ Always start with `browser_navigate` followed by `browser_snapshot`. Use accessi
     }
   },
   {
-    "name": "browser_evaluate",
-    "description": "Execute JavaScript on the current page and return the result.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "expression": { "type": "string", "description": "JavaScript expression to evaluate" }
-      },
-      "required": ["expression"]
-    }
-  },
-  {
     "name": "browser_screenshot",
     "description": "Take a screenshot of the current page. Optionally save to the knowledge base.",
     "parameters": {
