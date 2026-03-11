@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router'
 import { MarketingLayout, FeatureCta } from '@/layouts/MarketingLayout'
+import { useSEO } from '@/lib/use-seo'
 
 const features = [
   { slug: 'agents', icon: 'smart_toy', title: 'AI Agents', desc: 'Deploy intelligent digital workers that learn, adapt, and execute tasks autonomously.' },
@@ -11,6 +12,7 @@ const features = [
 ]
 
 export function FeaturesIndexPage() {
+  useSEO({ title: 'Platform Features', description: 'Everything you need to run an AI workforce. Agents, task management, team chat, goals, workspace, and real-time meetings — all in one platform.', path: '/features' })
   const navigate = useNavigate()
 
   return (

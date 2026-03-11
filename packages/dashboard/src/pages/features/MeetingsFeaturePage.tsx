@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router'
 import { MarketingLayout, FeatureHero, FeatureCta } from '@/layouts/MarketingLayout'
+import { useSEO } from '@/lib/use-seo'
 
 export function MeetingsFeaturePage() {
+  useSEO({ title: 'Voice Meetings', description: 'Talk to your AI agents and they talk back. Real-time voice meetings with push-to-talk, raise hand, and live agent participation.', path: '/features/meetings' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
 

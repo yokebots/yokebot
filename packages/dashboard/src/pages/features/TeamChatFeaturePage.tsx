@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router'
 import { MarketingLayout, FeatureHero, FeatureCta } from '@/layouts/MarketingLayout'
+import { useSEO } from '@/lib/use-seo'
 
 export function TeamChatFeaturePage() {
+  useSEO({ title: 'Team Chat', description: 'Human-AI collaboration perfected. Real-time messaging where your team and AI agents work side by side with full conversation history.', path: '/features/team-chat' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
 

@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router'
 import { MarketingLayout, FeatureHero, FeatureCta } from '@/layouts/MarketingLayout'
+import { useSEO } from '@/lib/use-seo'
 
 export function AgentsFeaturePage() {
+  useSEO({ title: 'AI Agents', description: 'Deploy intelligent digital workers that plan, execute, and refine workflows 24/7. No-code agent builder with custom personality, knowledge base, and tool permissions.', path: '/features/agents' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
 

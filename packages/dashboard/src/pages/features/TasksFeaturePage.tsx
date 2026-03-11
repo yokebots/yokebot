@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router'
 import { MarketingLayout, FeatureHero, FeatureCta } from '@/layouts/MarketingLayout'
+import { useSEO } from '@/lib/use-seo'
 
 export function TasksFeaturePage() {
+  useSEO({ title: 'Task Management', description: 'Orchestrate your AI workforce with unified Kanban boards, timelines, and deadline management. Humans and agents collaborate on the same task board.', path: '/features/tasks' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
 

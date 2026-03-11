@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { MarketingLayout } from '@/layouts/MarketingLayout'
+import { useSEO } from '@/lib/use-seo'
 
 const ENGINE_URL = import.meta.env.VITE_ENGINE_URL || 'http://localhost:3001'
 
 export function ContactPage() {
+  useSEO({ title: 'Contact Us', description: 'Have a question or want to learn more about YokeBot? Drop us a line and we\'ll get back to you soon.', path: '/contact' })
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [message, setMessage] = useState('')

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ParticleConstellation } from '@/components/ParticleConstellation'
 import { FeaturesMegaMenu } from '@/components/FeaturesMegaMenu'
+import { useSEO } from '@/lib/use-seo'
 
 const agentCards = [
   { icon: 'person_search', bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-100', hoverBg: 'group-hover:bg-blue-600', name: 'Lead Gen Specialist', role: 'Outreach & Qualify', action: 'Analyzing 50 leads...', actionIcon: 'sync', spin: true },
@@ -47,6 +48,7 @@ const faqItems = [
 ]
 
 export function HomePage() {
+  useSEO({ title: 'YokeBot — AI Agent Workforce Platform', description: 'Deploy a team of AI agents that plan, collaborate, and execute autonomously. Manage your entire AI workforce from one unified dashboard with chat, tasks, and files side by side.', path: '/' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
   const [openFaq, setOpenFaq] = useState<number | null>(null)

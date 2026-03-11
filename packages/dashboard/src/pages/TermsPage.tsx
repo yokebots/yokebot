@@ -1,6 +1,8 @@
 import { Link } from 'react-router'
+import { useSEO } from '@/lib/use-seo'
 
 export function TermsPage() {
+  useSEO({ title: 'Terms of Service', description: 'YokeBot terms of service covering hosted and self-hosted usage of the AI agent workforce platform.', path: '/terms' })
   return (
     <div className="min-h-screen bg-light-bg">
       {/* Header */}

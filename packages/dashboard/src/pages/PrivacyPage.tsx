@@ -1,6 +1,8 @@
 import { Link } from 'react-router'
+import { useSEO } from '@/lib/use-seo'
 
 export function PrivacyPage() {
+  useSEO({ title: 'Privacy Policy', description: 'How YokeBot handles your data. We never train on your data or share it with third parties. Self-host option for full data sovereignty.', path: '/privacy' })
   return (
     <div className="min-h-screen bg-light-bg">
       {/* Header */}

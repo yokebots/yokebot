@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router'
 import { MarketingLayout, FeatureHero, FeatureCta } from '@/layouts/MarketingLayout'
+import { useSEO } from '@/lib/use-seo'
 
 export function WorkspaceFeaturePage() {
+  useSEO({ title: 'Workspace', description: 'Your team\'s shared brain. Files, data tables, and knowledge base — all accessible to humans and AI agents in one organized workspace.', path: '/features/workspace' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
 

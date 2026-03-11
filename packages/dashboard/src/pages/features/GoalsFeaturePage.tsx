@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router'
 import { MarketingLayout, FeatureHero, FeatureCta } from '@/layouts/MarketingLayout'
+import { useSEO } from '@/lib/use-seo'
 
 export function GoalsFeaturePage() {
+  useSEO({ title: 'Goals & KPIs', description: 'Set business targets and let your AI agents autonomously create and execute action plans. Live performance metrics and strategic alignment.', path: '/features/goals' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
 

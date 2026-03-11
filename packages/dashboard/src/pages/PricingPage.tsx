@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { MarketingLayout } from '@/layouts/MarketingLayout'
 import { PLANS, CREDIT_PACKS } from '@/lib/pricing-data'
+import { useSEO } from '@/lib/use-seo'
 
 const pricingFaq = [
   {
@@ -22,11 +23,12 @@ const pricingFaq = [
   },
   {
     q: 'Is there a free tier?',
-    a: 'Every new account gets 500 free credits to explore the platform. After that, choose a plan that fits your needs. You can also self-host YokeBot for free forever with your own API keys.',
+    a: 'Every new account gets 1,250 free credits to explore the platform. After that, choose a plan that fits your needs. You can also self-host YokeBot for free forever with your own API keys.',
   },
 ]
 
 export function PricingPage() {
+  useSEO({ title: 'Pricing', description: 'Plans from $29/mo. Deploy 3 to 30 AI agents with 24/7 availability, universal credits, and configurable heartbeat intervals. Start free with 1,250 credits.', path: '/pricing' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
   const [openFaq, setOpenFaq] = useState<number | null>(null)
