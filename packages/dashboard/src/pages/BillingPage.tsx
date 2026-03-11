@@ -60,13 +60,22 @@ export function BillingPage() {
     setLoading(false)
   }
 
+  const safeRedirect = (url: string) => {
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol !== 'https:') return
+      if (!parsed.hostname.endsWith('stripe.com')) return
+      window.location.href = url
+    } catch { /* invalid URL */ }
+  }
+
   const handleSubscribe = async (envKey: string) => {
     const priceId = import.meta.env[envKey]
     if (!priceId) return
     setCheckoutLoading(envKey)
     try {
       const { url } = await engine.createSubscriptionCheckout(priceId)
-      window.location.href = url
+      safeRedirect(url)
     } catch {
       setCheckoutLoading(null)
     }
@@ -78,7 +87,7 @@ export function BillingPage() {
     setCheckoutLoading(envKey)
     try {
       const { url } = await engine.createCreditPackCheckout(priceId)
-      window.location.href = url
+      safeRedirect(url)
     } catch {
       setCheckoutLoading(null)
     }
@@ -87,7 +96,7 @@ export function BillingPage() {
   const handleManageSubscription = async () => {
     try {
       const { url } = await engine.createBillingPortal()
-      window.location.href = url
+      safeRedirect(url)
     } catch { /* no billing account */ }
   }
 

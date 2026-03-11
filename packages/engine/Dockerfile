@@ -53,11 +53,14 @@ ENV YOKEBOT_PORT=3001
 ENV YOKEBOT_SKILLS_DIR=/app/skills
 ENV YOKEBOT_DATA_DIR=/app/data
 
-# Create data directory for workspace files
-RUN mkdir -p /app/data/workspace
+# Create non-root user and data directory
+RUN groupadd -r yokebot && useradd -r -g yokebot -m yokebot \
+    && mkdir -p /app/data/workspace \
+    && chown -R yokebot:yokebot /app/data
 
 EXPOSE 3001
 
+USER yokebot
 WORKDIR /app/packages/engine
 
 # Run API server + scheduler worker as separate processes

@@ -26,7 +26,14 @@ export function UpgradeModal({ isOpen, onClose, title, message, currentTier }: P
     setLoading(plan.tier)
     try {
       const { url } = await engine.createSubscriptionCheckout(priceId)
-      if (url) window.location.href = url
+      if (url) {
+        try {
+          const parsed = new URL(url)
+          if (parsed.protocol === 'https:' && parsed.hostname.endsWith('stripe.com')) {
+            window.location.href = url
+          }
+        } catch { /* invalid URL */ }
+      }
     } catch {
       setLoading(null)
     }

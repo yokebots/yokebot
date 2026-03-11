@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import * as engine from '@/lib/engine'
 import { supabase } from '@/lib/supabase'
 
@@ -273,5 +274,10 @@ function CsvTable({ content }: { content: string }) {
 /** Markdown renderer using `marked` library */
 function MarkdownRenderer({ content }: { content: string }) {
   const html = marked.parse(content, { breaks: true }) as string
-  return <div dangerouslySetInnerHTML={{ __html: html }} />
+  const sanitized = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['p', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'code', 'pre', 'blockquote', 'a', 'br', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'span', 'div', 'del', 'sup', 'sub'],
+    ALLOWED_ATTR: ['href', 'title', 'alt', 'src', 'class'],
+    ALLOW_DATA_ATTR: false,
+  })
+  return <div dangerouslySetInnerHTML={{ __html: sanitized }} />
 }
