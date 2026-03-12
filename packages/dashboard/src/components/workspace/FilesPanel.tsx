@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 import { FileContextMenu } from './FileContextMenu'
-import { downloadTextFile, downloadAsZip, tableToCsv } from '@/lib/export-utils'
+import { downloadTextFile, downloadBinaryFile, downloadAsZip, tableToCsv } from '@/lib/export-utils'
 
 interface FlatFile {
   path: string
@@ -275,7 +275,19 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     try {
       const res = await engine.readFile(path)
       const name = path.split('/').pop() ?? path
-      downloadTextFile(name, res.content)
+      const ext = name.split('.').pop()?.toLowerCase() ?? ''
+      const BINARY_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm', 'glb', 'gltf', 'pdf', 'mp3', 'wav', 'ogg'])
+      if (res.binary && BINARY_EXTS.has(ext)) {
+        const mimeMap: Record<string, string> = {
+          jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+          webp: 'image/webp', mp4: 'video/mp4', webm: 'video/webm', pdf: 'application/pdf',
+          glb: 'model/gltf-binary', gltf: 'model/gltf+json', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
+        }
+        const bytes = Uint8Array.from(atob(res.content), c => c.charCodeAt(0))
+        downloadBinaryFile(name, bytes.buffer, mimeMap[ext] ?? 'application/octet-stream')
+      } else {
+        downloadTextFile(name, res.content)
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to download file')
     }

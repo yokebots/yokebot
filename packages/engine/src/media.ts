@@ -59,10 +59,10 @@ export async function downloadAndSave(
   }
   const mimeType = guessMimeType(filename)
 
-  // Save to DB
-  await writeBinaryFile(db, teamId, relativePath, buffer, mimeType, 'system')
+  // Save to DB (returns deduplicated path if a file already exists at this path)
+  const savedPath = await writeBinaryFile(db, teamId, relativePath, buffer, mimeType, 'system')
 
-  return relativePath
+  return savedPath
 }
 
 /**

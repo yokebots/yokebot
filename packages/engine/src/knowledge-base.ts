@@ -588,6 +588,13 @@ export async function searchMemories(
   query: string,
   topK = 5,
 ): Promise<KbMemory[]> {
+  // Quick check: skip expensive embedding API call if team has no memories
+  const countRow = await db.queryOne<{ cnt: number }>(
+    'SELECT COUNT(*) as cnt FROM kb_memories WHERE team_id = $1',
+    [teamId],
+  )
+  if (!countRow || countRow.cnt === 0) return []
+
   const apiKey = process.env.DEEPINFRA_API_KEY
 
   if (apiKey && db.driver === 'postgres') {

@@ -14,7 +14,7 @@ import { getMessages, addMessage, getAgent } from './agent.ts'
 import { listFiles, readFile, writeFile, renameFile, deleteFile } from './workspace.ts'
 import { createTask, listTasks, updateTask } from './tasks.ts'
 import { applyTagsByName } from './tags.ts'
-import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel } from './chat.ts'
+import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel, broadcastAgentProgress, type AgentProgressEvent } from './chat.ts'
 import { createApproval } from './approval.ts'
 import { listSorTables, listSorRows, addSorRow, updateSorRow, getSorTableByName, checkSorPermission, createSorTable, addSorColumn, setSorPermission } from './sor.ts'
 import { getAgentSkills, getSkillTools, loadSkillsFromDir, installSkill } from './skills.ts'
@@ -106,6 +106,45 @@ export interface ToolContext {
   skillsDir: string
   skipCredits?: boolean
   currentTaskId?: string
+  /** Mutable tools array — install_skill pushes new tools into the live session */
+  tools?: ToolDef[]
+}
+
+/** Human-readable labels for common tools */
+const TOOL_LABELS: Record<string, string> = {
+  think: 'Thinking',
+  respond: 'Composing response',
+  web_search: 'Searching the web',
+  install_skill: 'Installing skill',
+  list_available_skills: 'Checking available skills',
+  generate_image: 'Generating image',
+  generate_video: 'Generating video',
+  generate_3d: 'Generating 3D model',
+  render_video: 'Rendering video',
+  write_workspace_file: 'Writing file',
+  read_workspace_file: 'Reading file',
+  list_workspace_files: 'Browsing files',
+  create_task: 'Creating task',
+  update_task: 'Updating task',
+  list_tasks: 'Reviewing tasks',
+  send_chat_message: 'Sending message',
+  browser_navigate: 'Browsing web',
+  browser_click: 'Interacting with page',
+  browser_type: 'Typing on page',
+  browser_snapshot: 'Taking screenshot',
+  query_source_of_record: 'Querying data',
+  update_source_of_record: 'Updating data',
+  send_email: 'Sending email',
+  slack_notify: 'Posting to Slack',
+  transcribe_audio: 'Transcribing audio',
+  summarize_video: 'Summarizing video',
+  generate_captions: 'Generating captions',
+  search_properties: 'Searching properties',
+  search_companies: 'Researching companies',
+}
+
+function getToolLabel(toolName: string): string {
+  return TOOL_LABELS[toolName] ?? toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 /** Helper to reduce boilerplate when defining tool schemas. */
@@ -177,7 +216,7 @@ function getBuiltinTools(): ToolDef[] {
       status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'Initial status (defaults to backlog)' },
       assignedAgentId: { type: 'string', description: 'Agent ID to assign the task to (defaults to self). Use list_tasks to see other agents.' },
       assignedUserId: { type: 'string', description: 'Human team member user ID to assign the task to. Use list_team_members to look up IDs.' },
-      deadline: { type: 'string', description: 'Deadline in ISO 8601 format (e.g. 2026-03-15). Set a reasonable deadline based on task complexity and urgency.' },
+      deadline: { type: 'string', description: 'Deadline in ISO 8601 format (e.g. 2026-03-15). Default to TODAY unless the user specifies a later date or there are many active tasks ahead of this one.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Tag names to apply (e.g. ["VIP", "follow-up"]). Tags are auto-created if they don\'t exist.' },
     }, ['title']),
 
@@ -252,20 +291,20 @@ function getBuiltinTools(): ToolDef[] {
     }, ['content']),
 
     // Media generation
-    toolDef('generate_image', 'Generate an image using AI. Returns the URL of the generated image.', {
+    toolDef('generate_image', 'Generate an image using AI. Returns the URL of the generated image. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
       prompt: { type: 'string', description: 'Text description of the image to generate' },
-      modelId: { type: 'string', description: 'Model to use. Default: "nano-banana-pro"' },
-    }, ['prompt']),
+      modelId: { type: 'string', description: 'Image model to use. Options (cheapest first): "flux-2-klein" (50 credits, fast/cheap), "qwen-image-2.0" (150 credits, good quality), "seedream-4.5" (175 credits, solid mid-tier), "flux-2-dev" (50 credits, LoRA support), "seedream-5.0-lite" (150 credits, web search), "nano-banana-pro" (600 credits, premium 4K). NO DEFAULT — you must choose or ask the human.' },
+    }, ['prompt', 'modelId']),
 
-    toolDef('generate_video', 'Generate a video using AI. Returns the URL of the generated video.', {
+    toolDef('generate_video', 'Generate a video using AI. Returns the URL of the generated video. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
       prompt: { type: 'string', description: 'Text description of the video to generate' },
-      modelId: { type: 'string', description: 'Model to use: "kling-3.0" or "seedance-2.0". Default: "kling-3.0"' },
-    }, ['prompt']),
+      modelId: { type: 'string', description: 'Video model to use. Options: "wan-2.6" (3000 credits, budget), "kling-2.6-pro" (3000 credits, long-form), "kling-3.0" (3000 credits, high-fidelity), "kling-o3" (3000 credits, omni/editing). NO DEFAULT — you must choose or ask the human.' },
+    }, ['prompt', 'modelId']),
 
-    toolDef('generate_3d', 'Generate a 3D model from an image. Returns the URL of the .glb file.', {
+    toolDef('generate_3d', 'Generate a 3D model from an image. Returns the URL of the .glb file. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
       imageUrl: { type: 'string', description: 'URL of the input image to convert to 3D' },
-      modelId: { type: 'string', description: 'Model to use. Default: "hunyuan-3d-v3.1-pro"' },
-    }, ['imageUrl']),
+      modelId: { type: 'string', description: '3D model to use. Options: "hunyuan-3d-v2.1" (1200 credits, budget), "hunyuan-3d-v3.1-pro" (2000 credits, high quality). NO DEFAULT — you must choose or ask the human.' },
+    }, ['imageUrl', 'modelId']),
 
     // Workflows
     toolDef('create_workflow', 'Create a reusable multi-step workflow. Each step creates a task and can auto-proceed or require human approval.', {
@@ -627,7 +666,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     // ---- Media Generation ----
     case 'generate_image': {
-      const modelId = (args.modelId as string) || 'nano-banana-pro'
+      const modelId = args.modelId as string
+      if (!modelId) return 'Error: modelId is required. Ask the human which model to use. Options: flux-2-klein (50 credits), qwen-image-2.0 (150 credits), seedream-4.5 (175 credits), flux-2-dev (50 credits), seedream-5.0-lite (150 credits), nano-banana-pro (600 credits, premium).'
       const logical = getLogicalModel(modelId)
       if (!logical || logical.type !== 'image') return `Unknown image model: ${modelId}`
       const falModelId = logical.backends[0]?.providerModelId
@@ -661,7 +701,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'generate_video': {
-      const modelId = (args.modelId as string) || 'kling-3.0'
+      const modelId = args.modelId as string
+      if (!modelId) return 'Error: modelId is required. Ask the human which model to use. Options: wan-2.6 (3000 credits, budget), kling-2.6-pro (3000 credits), kling-3.0 (3000 credits), kling-o3 (3000 credits, omni).'
       const logical = getLogicalModel(modelId)
       if (!logical || logical.type !== 'video') return `Unknown video model: ${modelId}`
       const falModelId = logical.backends[0]?.providerModelId
@@ -694,7 +735,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'generate_3d': {
-      const modelId = (args.modelId as string) || 'hunyuan-3d-v3.1-pro'
+      const modelId = args.modelId as string
+      if (!modelId) return 'Error: modelId is required. Ask the human which model to use. Options: hunyuan-3d-v2.1 (1200 credits, budget), hunyuan-3d-v3.1-pro (2000 credits, high quality).'
       const logical = getLogicalModel(modelId)
       if (!logical || logical.type !== '3d') return `Unknown 3D model: ${modelId}`
       const falModelId = logical.backends[0]?.providerModelId
@@ -799,7 +841,33 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const installed = (await getAgentSkills(ctx.db, ctx.agentId)).map(s => s.skillName)
       if (installed.includes(skillName)) return `Skill "${skillName}" is already installed.`
       await installSkill(ctx.db, ctx.agentId, skillName)
-      return `Skill "${skillName}" installed successfully. Its tools will be available on your next action cycle.`
+
+      // Announce in chat so the human sees it (use team channel if no specific channel)
+      try {
+        let announceChannelId = ctx.channelId
+        if (!announceChannelId) {
+          const { getTeamChannel } = await import('./chat.ts')
+          const teamChannel = await getTeamChannel(ctx.db, ctx.teamId)
+          announceChannelId = teamChannel.id
+        }
+        await sendMessage(ctx.db, announceChannelId, 'agent', ctx.agentId,
+          `Installing the **${skillName}** skill to gain new capabilities.`, undefined, ctx.teamId)
+      } catch { /* don't fail the install if chat announcement fails */ }
+      await logActivity(ctx.db, 'skill_installed', ctx.agentId,
+        `Installed skill: ${skillName}`, { skillName }, ctx.teamId)
+
+      // Dynamically load the new skill's tools into the current session
+      if (ctx.tools) {
+        const newSkillTools = getSkillTools(ctx.skillsDir, [skillName])
+        for (const t of newSkillTools) {
+          // Avoid duplicates
+          if (!ctx.tools.some(existing => existing.function.name === t.function.name)) {
+            ctx.tools.push(t)
+          }
+        }
+      }
+
+      return `Skill "${skillName}" installed successfully. Its tools are now available in this session.`
     }
 
     case 'list_team_members': {
@@ -859,7 +927,7 @@ export interface RunResult {
  * The CoT instructions ensure agents reason before every action, leading
  * to better prioritization, fewer mistakes, and more thoughtful responses.
  */
-export function buildAgentSystemPrompt(agentName: string, customPrompt?: string | null, timezone?: string | null): string {
+export function buildAgentSystemPrompt(agentName: string, customPrompt?: string | null, timezone?: string | null, creditBalance?: number | null): string {
   let identity = customPrompt?.trim()
     ? customPrompt.trim()
     : `You are ${agentName}, a proactive AI agent.`
@@ -891,6 +959,7 @@ ISO date: ${isoDate}
 CRITICAL: You MUST use this date for ALL scheduling, deadlines, and time-related reasoning.
 Do NOT rely on your training data for the current date — today is ${isoDate}.
 Never set a deadline or meeting in the past. When someone says "next week", calculate from ${isoDate}.
+When creating tasks, default the deadline to TODAY (${isoDate}) — act immediately. Only push the deadline out if the user explicitly requests a later date or there are already many active tasks queued ahead.
 
 ## How you work
 
@@ -949,6 +1018,26 @@ Before creating ANY file, you MUST:
 - **Never dump your internal thinking.** Your assessment, prioritization, and planning happen in the "think" tool. Your final response should only contain the outcome — what you did, what you need, or what you recommend.
 - **Focus on actions and results.** Say "Finished the blog post (1,800 words)" not "I assessed the task list, prioritized the blog post, planned my approach, and executed the writing."
 
+## Media Generation — MANDATORY
+
+Before generating ANY image, video, or 3D model, you MUST:
+1. **Ask the human which model to use** if they didn't already specify one. Present the options with credit costs so they can make an informed choice.
+2. **Never silently default to the most expensive model.** If the human says "make me an image" without specifying a model, respond with the available options and their credit costs and ask which one they'd like.
+3. **If the human specifies a model or says "cheapest" / "best quality" / etc., pick accordingly** — no need to ask again.
+
+## Resource Intelligence — MANDATORY
+
+Credits are real money. Treat them like a company budget — be smart about spending regardless of the current balance.${creditBalance != null ? `\n\n**Current team balance: ${creditBalance.toLocaleString()} credits.**` : ''}
+
+**Efficiency rules:**
+- **Don't spin your wheels.** If a task isn't working after 3-4 tool calls, stop and ask the human for guidance. Do NOT retry the same approach 10+ times — that burns credits with nothing to show for it.
+- **Save your work as you go.** Before attempting any expensive action (image/video/3D generation), write your research, plan, or draft to a workspace file first. If the action fails or you run out of iterations, the work is preserved and you can pick it up next cycle.
+- **Know the cost before you act.** Image generation costs 50-600 credits. Video rendering costs 50+ credits. Each LLM thinking iteration costs 20+ credits. A web search costs 25-55 credits. Be intentional — don't call expensive tools speculatively.
+- **Batch your thinking.** Plan your full approach in ONE think call, then execute. Don't use 5 separate think calls to decide what to do — that's 100+ credits on thinking alone.
+- **Fail gracefully.** If a tool call fails, save what you have, report the issue to the human, and move on. Do not retry the same failing action in a loop.
+- **Prioritize cheap actions first.** Read existing files, check task status, list what's available — these are free. Do your homework before spending credits on generation or search.
+- **One iteration, one meaningful action.** Each iteration costs credits. Make every iteration count — don't waste an iteration just to think without acting, or to post a status update nobody asked for.
+
 ## Guidelines
 
 - Be concise and professional in all communications.
@@ -987,18 +1076,20 @@ export async function runReactLoop(
   skillsDir: string,
   config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
   logicalModelId?: string,
+  channelId?: string,
 ): Promise<RunResult> {
   // Save the user message
+  const reactStart = Date.now()
   await addMessage(db, agentId, 'user', userMessage, teamId)
 
   // Conversation compaction: summarize old messages if history is long
   let conversationSummary: string | null = null
+  const fullHistory = await getMessages(db, agentId, 30)
   try {
     const summaryRow = await db.queryOne<{ summary: string; messages_summarized: number }>(
       `SELECT summary, messages_summarized FROM conversation_summaries WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`,
       [agentId],
     )
-    const fullHistory = await getMessages(db, agentId, 50)
     const summarizedCount = summaryRow?.messages_summarized ?? 0
     const newMessagesSinceSummary = fullHistory.length - summarizedCount
 
@@ -1029,17 +1120,16 @@ export async function runReactLoop(
     }
   } catch { /* compaction is best-effort */ }
 
-  // Build the message history
-  const history = await getMessages(db, agentId, 50)
+  // Build the message history (reuse fullHistory, no second fetch)
   const messages: ChatMessage[] = conversationSummary
     ? [
         { role: 'system', content: systemPrompt },
         { role: 'system', content: `## Previous Conversation Summary\n\n${conversationSummary}` },
-        ...history.slice(-10).map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
+        ...fullHistory.slice(-10).map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
       ]
     : [
         { role: 'system', content: systemPrompt },
-        ...history.map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
+        ...fullHistory.map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
       ]
 
   // Merge builtin tools with installed skill tools + MCP tools
@@ -1047,7 +1137,26 @@ export async function runReactLoop(
   const skillTools = getSkillTools(skillsDir, installedSkills)
   const mcpTools = await loadMcpTools(db, agentId)
   const tools = [...getBuiltinTools(), ...skillTools, ...mcpTools]
-  const toolCtx: ToolContext = { db, agentId, teamId, skillsDir, skipCredits: config.skipCredits, currentTaskId: config.currentTaskId }
+
+  // Look up agent name for progress broadcasts
+  const agentRow = await getAgent(db, agentId)
+  const agentName = agentRow?.name ?? agentId
+
+  // Progress broadcast helper
+  const emitProgress = (type: AgentProgressEvent['type'], label: string, iteration: number, detail?: string) => {
+    broadcastAgentProgress(teamId, {
+      agentId,
+      agentName,
+      type,
+      label,
+      detail: detail?.slice(0, 500),
+      iteration,
+      maxIterations: config.maxIterations,
+      timestamp: Date.now(),
+    })
+  }
+
+  const toolCtx: ToolContext = { db, agentId, teamId, channelId, skillsDir, skipCredits: config.skipCredits, currentTaskId: config.currentTaskId, tools }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
 
@@ -1070,6 +1179,9 @@ export async function runReactLoop(
   // Initial trim before first LLM call
   let trimmedMessages = trimMessagesToFit(messages, maxInputTokens, toolsTokens)
 
+  const setupMs = Date.now() - reactStart
+  console.log(`[runtime] React loop setup: ${setupMs}ms (${fullHistory.length} msgs, ${tools.length} tools)`)
+
   for (let i = 0; i < config.maxIterations; i++) {
     // Deduct LLM credits before each ReAct iteration (hosted mode only, skip for free agents like AdvisorBot)
     if (HOSTED_MODE && logicalModelId && !config.skipCredits) {
@@ -1087,6 +1199,7 @@ export async function runReactLoop(
     // Re-trim before each LLM call (tool results accumulate mid-loop)
     trimmedMessages = trimMessagesToFit(messages, maxInputTokens, toolsTokens)
 
+    emitProgress('thinking', `Thinking... (step ${i + 1} of ${config.maxIterations})`, i + 1)
     const completion = await chatCompletionWithFallback(modelConfig, trimmedMessages, tools)
 
     // If the model returned tool calls, execute them
@@ -1099,6 +1212,16 @@ export async function runReactLoop(
       })
 
       for (const toolCall of completion.tool_calls) {
+        // Broadcast tool_start progress (include arg preview for context)
+        const toolLabel = getToolLabel(toolCall.function.name)
+        let argPreview: string | undefined
+        try {
+          const parsed = JSON.parse(toolCall.function.arguments)
+          // Pick the most useful arg for display
+          argPreview = parsed.query ?? parsed.skillName ?? parsed.path ?? parsed.message?.slice(0, 100) ?? parsed.url ?? undefined
+        } catch { /* ignore parse errors */ }
+        emitProgress('tool_start', toolLabel, i + 1, argPreview)
+
         // Timeout tool execution at 30 seconds to prevent hung tools from blocking the loop
         let result: string
         try {
@@ -1111,6 +1234,9 @@ export async function runReactLoop(
         }
         toolCallLog.push({ name: toolCall.function.name, result })
 
+        // Broadcast tool_result
+        emitProgress('tool_result', `${toolLabel} complete`, i + 1, result.slice(0, 300))
+
         // Log tool execution to activity log (skip 'think' — too noisy)
         if (toolCall.function.name !== 'think') {
           await logActivity(db, 'tool_executed', agentId, `${toolCall.function.name}: ${result.slice(0, 200)}`, {
@@ -1121,6 +1247,7 @@ export async function runReactLoop(
 
         // If this is a "respond" call, capture the response
         if (toolCall.function.name === 'respond') {
+          emitProgress('responding', 'Composing response', i + 1)
           const args = JSON.parse(toolCall.function.arguments) as { message: string }
           response = args.message
         }
@@ -1136,6 +1263,7 @@ export async function runReactLoop(
       // If agent responded, we're done
       if (response !== null) {
         await addMessage(db, agentId, 'assistant', response, teamId)
+        emitProgress('idle', 'Done', i + 1)
         return { response, iterations: i + 1, toolCalls: toolCallLog }
       }
 
@@ -1161,6 +1289,7 @@ export async function runReactLoop(
         if (taskCompleted || taskBlocked) {
           const fallback = response ?? (taskCompleted ? 'Task completed.' : 'Waiting for approval.')
           await addMessage(db, agentId, 'assistant', fallback, teamId)
+          emitProgress('idle', 'Done', i + 1)
           return { response: fallback, iterations: i + 1, toolCalls: toolCallLog, taskCompleted, taskBlocked }
         }
       }
@@ -1203,6 +1332,7 @@ export async function runReactLoop(
         if (remainder.length === 0 && text.includes('[no-op]')) {
           response = 'no-op'
           await addMessage(db, agentId, 'assistant', response, teamId)
+          emitProgress('idle', 'Done', i + 1)
           return { response, iterations: i + 1, toolCalls: toolCallLog }
         }
 
@@ -1212,6 +1342,7 @@ export async function runReactLoop(
       // No text-based tool syntax detected — genuine text response
       response = completion.content
       await addMessage(db, agentId, 'assistant', response, teamId)
+      emitProgress('idle', 'Done', i + 1)
       return { response, iterations: i + 1, toolCalls: toolCallLog }
     }
 
@@ -1220,7 +1351,8 @@ export async function runReactLoop(
   }
 
   // If we hit max iterations without a response
-  const fallback = response ?? 'I was unable to complete the task within the iteration limit.'
+  const fallback = response ?? "I'm still working on this but need a bit more time. I've saved my progress — I'll pick it back up on my next check-in."
   await addMessage(db, agentId, 'assistant', fallback, teamId)
+  emitProgress('idle', 'Done', config.maxIterations)
   return { response: fallback, iterations: config.maxIterations, toolCalls: toolCallLog }
 }

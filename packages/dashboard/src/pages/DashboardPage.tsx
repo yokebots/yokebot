@@ -5,6 +5,8 @@ import * as engine from '@/lib/engine'
 import type { ActivityLogEntry } from '@/lib/engine'
 import { Link, useSearchParams } from 'react-router'
 import { useRealtimeEvent } from '@/lib/use-realtime'
+import { useAgentProgress } from '@/hooks/useAgentProgress'
+import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 
 function WelcomeScreen() {
   return (
@@ -100,6 +102,8 @@ export function DashboardPage() {
     setCreditBalance(credits)
   }, []))
 
+  const { progressMap } = useAgentProgress()
+
   const statusColors: Record<string, string> = {
     running: 'bg-green-500',
     stopped: 'bg-gray-400',
@@ -127,6 +131,41 @@ export function DashboardPage() {
         totalTasks={stats.totalTasks}
         connected={true}
       />
+
+      {/* Active Agents ticker — shows only when agents are working */}
+      {progressMap.size > 0 && (
+        <div className="mb-8 rounded-xl border border-accent-green/30 bg-white p-4 shadow-card">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="relative flex h-3 w-3 items-center justify-center">
+              <span className="absolute h-2.5 w-2.5 rounded-full bg-accent-green/30" style={{ animation: 'pulse 2s ease-in-out infinite' }} />
+              <span className="relative h-1.5 w-1.5 rounded-full bg-accent-green" />
+            </span>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-accent-green">
+              {progressMap.size} agent{progressMap.size !== 1 ? 's' : ''} working
+            </h2>
+          </div>
+          <div className="space-y-1">
+            {Array.from(progressMap.entries()).map(([agentId, steps]) => {
+              const latest = steps[steps.length - 1]
+              if (!latest) return null
+              return (
+                <div key={agentId} className="rounded-lg">
+                  <div className="flex items-center gap-3 px-2 py-1.5 text-xs">
+                    <span className="font-medium text-text-main shrink-0">{latest.agentName}</span>
+                    <span className="flex-1 truncate text-text-muted">{latest.label}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-text-muted/60">
+                      Step {latest.iteration}/{latest.maxIterations}
+                    </span>
+                  </div>
+                  <div className="px-2 pb-1">
+                    <AgentProgressPanel steps={steps} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Canceled subscription banner */}
       {(subscriptionStatus === 'canceled' || subscriptionStatus === 'inactive') && creditBalance <= 0 && (

@@ -24,9 +24,39 @@ const chatSseClients = new Map<string, Set<Response>>() // channelId → SSE cli
 
 // Global broadcast hook — set by index.ts at startup so sendMessage() can push SSE events
 let _onNewMessage: ((teamId: string, channelId: string, messageId: number) => void) | null = null
+let _onAgentTyping: ((teamId: string, data: { channelId: string; agentId: string; agentName: string; status: 'typing' | 'working' | 'idle' }) => void) | null = null
+let _onAgentProgress: ((teamId: string, data: AgentProgressEvent) => void) | null = null
+
+export interface AgentProgressEvent {
+  agentId: string
+  agentName: string
+  type: 'thinking' | 'tool_start' | 'tool_result' | 'responding' | 'idle'
+  label: string
+  detail?: string
+  iteration: number
+  maxIterations: number
+  timestamp: number
+}
 
 export function setNewMessageBroadcast(fn: (teamId: string, channelId: string, messageId: number) => void): void {
   _onNewMessage = fn
+}
+
+export function setAgentTypingBroadcast(fn: typeof _onAgentTyping): void {
+  _onAgentTyping = fn
+}
+
+export function setAgentProgressBroadcast(fn: typeof _onAgentProgress): void {
+  _onAgentProgress = fn
+}
+
+export function broadcastAgentStatus(teamId: string, channelId: string, agentId: string, agentName: string, status: 'typing' | 'working' | 'idle'): void {
+  console.log(`[chat] Agent status: ${agentName} → ${status}`)
+  _onAgentTyping?.(teamId, { channelId, agentId, agentName, status })
+}
+
+export function broadcastAgentProgress(teamId: string, event: AgentProgressEvent): void {
+  _onAgentProgress?.(teamId, event)
 }
 
 export function addChatSseClient(channelId: string, res: Response): void {
@@ -367,25 +397,15 @@ export async function processMentions(
   const agentMentions = mentions.filter(m => m.type === 'agent')
   const otherMentions = mentions.filter(m => m.type !== 'agent')
 
-  // Process agent mentions concurrently with per-agent timeout (60s)
+  // Process agent mentions concurrently with per-agent timeout (120s)
   if (agentMentions.length > 0) {
-    const AGENT_TIMEOUT_MS = 60_000
+    // respondToMention handles its own typing/working broadcasts via global SSE.
+    // Phase 1 (ack) is awaited; Phase 2 (work) runs in the background.
     await Promise.allSettled(agentMentions.map(async (mention) => {
-      broadcastChatEvent(channelId, {
-        type: 'typing', channelId,
-        agentId: mention.id, agentName: mention.displayName,
-      })
       try {
-        await Promise.race([
-          respondToMention(db, mention.id, teamId, channelId, message),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Agent mention response timed out')), AGENT_TIMEOUT_MS)),
-        ])
+        await respondToMention(db, mention.id, teamId, channelId, message)
       } catch (err) {
         console.error(`[chat] Failed to process mention agent:${mention.id}:`, err)
-      } finally {
-        broadcastChatEvent(channelId, {
-          type: 'stop_typing', channelId, agentId: mention.id,
-        })
       }
     }))
   }

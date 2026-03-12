@@ -393,9 +393,15 @@ async function main() {
   // This lets sendMessage() and createNotification() push real-time SSE events
   // without needing direct access to the SSE client map.
   {
-    const { setNewMessageBroadcast } = await import('./chat.ts')
+    const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast } = await import('./chat.ts')
     setNewMessageBroadcast((teamId, channelId, messageId) => {
       broadcastToTeam(teamId, 'new_message', { channelId, messageId })
+    })
+    setAgentTypingBroadcast((teamId, data) => {
+      broadcastToTeam(teamId, 'agent_typing', data)
+    })
+    setAgentProgressBroadcast((teamId, data) => {
+      broadcastToTeam(teamId, 'agent_progress', data)
     })
 
     const { setNotificationBroadcast } = await import('./notifications.ts')
@@ -588,7 +594,10 @@ async function main() {
     const tzRow = await db.queryOne<{ timezone: string | null }>(
       'SELECT timezone FROM team_profiles WHERE team_id = $1', [teamId],
     )
-    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, tzRow?.timezone)
+    const chatBalance = process.env.YOKEBOT_HOSTED_MODE === 'true'
+      ? await (await import('./billing.ts')).getCreditBalance(db, teamId)
+      : null
+    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, tzRow?.timezone, chatBalance)
 
     try {
       const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
@@ -607,6 +616,7 @@ async function main() {
         SKILLS_DIR,
         runtimeConfig,
         agent.modelId || undefined,
+        dmChannel.id,
       )
 
       // Store agent response in DM channel (skip iteration-limit fallback messages)

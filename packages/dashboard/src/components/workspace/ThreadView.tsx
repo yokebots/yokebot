@@ -148,15 +148,25 @@ export function MessageBubble({
   const icon = agent?.icon ?? (isAgent ? 'smart_toy' : isSystem ? 'info' : 'person')
 
   // Strip [think] blocks and tool-call syntax from display
-  const displayContent = message.content
+  const cleanedContent = message.content
     .replace(/\[think\][\s\S]*?\[\/think\]\s*/g, '')
     .replace(/\[([a-z_]+)\][\s\S]*?\[\/\1\]/g, '')
     .replace(/\[\/?[a-z_]+\]/g, '')
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, '') // strip markdown images
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  if (!displayContent) return null
+  // Extract markdown images before stripping them from text
+  const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g
+  const embeddedImages: Array<{ alt: string; url: string }> = []
+  let imgMatch
+  while ((imgMatch = imageRegex.exec(cleanedContent)) !== null) {
+    embeddedImages.push({ alt: imgMatch[1], url: imgMatch[2] })
+  }
+  const displayContent = cleanedContent
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+    .trim()
+
+  if (!displayContent && embeddedImages.length === 0) return null
 
   const COLLAPSE_THRESHOLD = 300
   const isLong = displayContent.length > COLLAPSE_THRESHOLD
@@ -193,7 +203,16 @@ export function MessageBubble({
           <span className="text-[11px] font-bold" style={{ color }}>{displayName}</span>
           <span className="text-[10px] text-text-muted">{timeStr}</span>
         </div>
+        {/* Embedded images (GIFs, markdown images) */}
+        {embeddedImages.length > 0 && (
+          <div className="mt-1 mb-1">
+            {embeddedImages.map((img, i) => (
+              <img key={i} src={img.url} alt={img.alt} className="rounded-lg max-w-[280px] max-h-[200px] object-contain" loading="lazy" />
+            ))}
+          </div>
+        )}
         {/* Content — full on desktop, collapsible on mobile */}
+        {displayContent && (<>
         <div className={`relative text-sm text-text-main leading-relaxed break-words whitespace-pre-wrap ${mobileCollapsed ? 'max-md:max-h-[6.5em] max-md:overflow-hidden' : ''}`}>
           {renderMentionContent(displayContent, undefined, onFileClick, undefined, onTaskClick)}
           {mobileCollapsed && (
@@ -212,6 +231,7 @@ export function MessageBubble({
             {expanded ? 'Show less' : 'Read more'}
           </button>
         )}
+        </>)}
         {/* Thread badge */}
         {!compact && message.replyCount > 0 && onThreadClick && (
           <button

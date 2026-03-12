@@ -20,6 +20,13 @@ const INDUSTRIES = [
   'Manufacturing', 'Professional Services', 'Other',
 ]
 
+const CATEGORIES = [
+  'Business / Startup', 'Freelance / Consulting', 'Creative / Content',
+  'Student / Academic', 'Personal Productivity', 'Software Development',
+  'Marketing / Growth', 'Sales / CRM', 'Community / Nonprofit',
+  'Research', 'Other',
+]
+
 
 const TUTORIAL_SLIDES = [
   {
@@ -116,6 +123,11 @@ export function OnboardingPage() {
   const [scanned, setScanned] = useState(false)
   const [scanError, setScanError] = useState('')
   const [scanFields, setScanFields] = useState<ScanFields>(EMPTY_SCAN)
+  const [noWebsite, setNoWebsite] = useState(false)
+  const [hasWebsite, setHasWebsite] = useState(false)
+  const [noWebsiteContext, setNoWebsiteContext] = useState('')
+  const [noWebsiteCategory, setNoWebsiteCategory] = useState('')
+  const [noWebsiteName, setNoWebsiteName] = useState('')
   const [primaryGoal, setPrimaryGoal] = useState('')
   const [secondaryGoals, setSecondaryGoals] = useState('')
   const [saving, setSaving] = useState(false)
@@ -627,18 +639,33 @@ export function OnboardingPage() {
     if (!activeTeam) return
     setSaving(true)
     try {
-      // Build a combined business summary from structured fields for storage
-      const summaryParts = SCAN_FIELD_ORDER
-        .filter((k) => k !== 'companyName' && k !== 'industry' && scanFields[k])
-        .map((k) => `${SCAN_FIELD_LABELS[k].label}: ${scanFields[k]}`)
-      const businessSummary = summaryParts.join('\n')
+      let companyName: string | null = null
+      let industry: string | null = null
+      let businessSummary: string | null = null
+      let targetMarket: string | null = null
+
+      if (noWebsite) {
+        // No-website path: use simplified fields
+        companyName = noWebsiteName || null
+        industry = noWebsiteCategory || null
+        businessSummary = noWebsiteContext || null
+      } else {
+        // Website scan path: build combined summary from structured fields
+        companyName = scanFields.companyName || null
+        industry = scanFields.industry || null
+        targetMarket = scanFields.targetMarket || null
+        const summaryParts = SCAN_FIELD_ORDER
+          .filter((k) => k !== 'companyName' && k !== 'industry' && scanFields[k])
+          .map((k) => `${SCAN_FIELD_LABELS[k].label}: ${scanFields[k]}`)
+        businessSummary = summaryParts.join('\n') || null
+      }
 
       await engine.updateTeamProfile(activeTeam.id, {
-        companyName: scanFields.companyName || null,
+        companyName,
         companyUrl: companyUrl || null,
-        industry: scanFields.industry || null,
-        businessSummary: businessSummary || null,
-        targetMarket: scanFields.targetMarket || null,
+        industry,
+        businessSummary,
+        targetMarket,
         primaryGoal: [primaryGoal, secondaryGoals].filter(Boolean).join(' | Secondary: ') || null,
       } as Partial<engine.TeamProfile>)
 
@@ -682,7 +709,16 @@ export function OnboardingPage() {
   // Step 3: Auto-send context on mount
   useEffect(() => {
     if (step === 3 && advisorReady && advisorAgentId && messages.length === 0) {
-      const contextLines = [
+      const contextLines = (noWebsite ? [
+        `New user just joined! Here's their context:`,
+        noWebsiteName ? `Name / Project: ${noWebsiteName}` : '',
+        noWebsiteCategory ? `Category: ${noWebsiteCategory}` : '',
+        noWebsiteContext ? `About: ${noWebsiteContext}` : '',
+        primaryGoal ? `Primary goal: ${primaryGoal}` : '',
+        secondaryGoals ? `Secondary goals: ${secondaryGoals}` : '',
+        ``,
+        `Based on this context, recommend 2-3 agents that would help them most. Use the recommend_agents tool.`,
+      ] : [
         `New user just joined! Here's their business context:`,
         scanFields.companyName ? `Company: ${scanFields.companyName}` : '',
         scanFields.industry ? `Industry: ${scanFields.industry}` : '',
@@ -697,7 +733,7 @@ export function OnboardingPage() {
         secondaryGoals ? `Secondary goals: ${secondaryGoals}` : '',
         ``,
         `Based on this business context, recommend 2-3 agents that would help them most. Use the recommend_agents tool.`,
-      ].filter(Boolean).join('\n')
+      ]).filter(Boolean).join('\n')
 
       sendAdvisorMessage(contextLines)
     }
@@ -1042,43 +1078,89 @@ export function OnboardingPage() {
                 Welcome, {firstName}!
               </h1>
               <p className="mt-2 text-lg text-text-secondary">
-                Let's learn about your business so your AI agents have the right context.
+                Tell us a bit about yourself so your AI agents have the right context.
               </p>
             </div>
 
             <div className="space-y-6 rounded-2xl border border-border-subtle bg-white p-8 shadow-card">
-              {/* Website URL + Scan */}
-              <div>
-                <label className="mb-2 block text-base font-medium text-text-main">Website URL</label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={companyUrl}
-                    onChange={(e) => setCompanyUrl(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && companyUrl.trim()) handleScanWebsite() }}
-                    placeholder="https://yourcompany.com"
-                    disabled={scanning}
-                    className="flex-1 rounded-lg border border-border-subtle px-3 py-2.5 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50"
-                  />
-                  <button
-                    onClick={handleScanWebsite}
-                    disabled={scanning || !companyUrl.trim()}
-                    className="flex items-center gap-1.5 rounded-lg bg-forest-green px-5 py-2.5 text-base font-medium text-white hover:bg-forest-green-hover transition-colors disabled:opacity-50"
-                  >
-                    {scanning ? (
-                      <>
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                        Scanning...
-                      </>
-                    ) : (
-                      <>
-                        <span className="material-symbols-outlined text-[16px]">search</span>
-                        Scan
-                      </>
-                    )}
-                  </button>
+              {/* Path selection — only show when neither path has been chosen */}
+              {!scanned && !scanning && !noWebsite && !hasWebsite && (
+                <div className="space-y-4">
+                  <p className="text-base text-text-secondary text-center">How would you like to get started?</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Option 1: I have a website */}
+                    <button
+                      onClick={() => setHasWebsite(true)}
+                      className="flex flex-col items-center gap-2 rounded-xl border-2 border-forest-green bg-forest-green/5 p-5 text-center transition-colors hover:bg-forest-green/10"
+                    >
+                      <span className="material-symbols-outlined text-[28px] text-forest-green">language</span>
+                      <span className="text-base font-semibold text-text-main">I have a website</span>
+                      <span className="text-sm text-text-muted">We'll scan it to auto-fill your profile</span>
+                    </button>
+                    {/* Option 2: No website */}
+                    <button
+                      onClick={() => setNoWebsite(true)}
+                      className="flex flex-col items-center gap-2 rounded-xl border-2 border-border-subtle p-5 text-center transition-colors hover:border-forest-green hover:bg-forest-green/5"
+                    >
+                      <span className="material-symbols-outlined text-[28px] text-text-muted">edit_note</span>
+                      <span className="text-base font-semibold text-text-main">No website yet</span>
+                      <span className="text-sm text-text-muted">Describe what you're working on instead</span>
+                    </button>
+                  </div>
                 </div>
-                {scanning && (
+              )}
+
+              {/* Website URL + Scan */}
+              {hasWebsite && !noWebsite && !scanned && !scanning && (
+                <div>
+                  <label className="mb-2 block text-base font-medium text-text-main">Website URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={companyUrl}
+                      onChange={(e) => setCompanyUrl(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && companyUrl.trim()) handleScanWebsite() }}
+                      placeholder="https://yourcompany.com"
+                      disabled={scanning}
+                      className="flex-1 rounded-lg border border-border-subtle px-3 py-2.5 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50"
+                    />
+                    <button
+                      onClick={handleScanWebsite}
+                      disabled={scanning || !companyUrl.trim()}
+                      className="flex items-center gap-1.5 rounded-lg bg-forest-green px-5 py-2.5 text-base font-medium text-white hover:bg-forest-green-hover transition-colors disabled:opacity-50"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">search</span>
+                      Scan
+                    </button>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <p className="text-sm text-text-muted">
+                      We'll scan your site to auto-fill your profile.
+                    </p>
+                    <button
+                      onClick={() => { setHasWebsite(false); setNoWebsite(true) }}
+                      className="text-sm text-text-muted hover:text-forest-green transition-colors"
+                    >
+                      No website?
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!noWebsite && scanning && (
+                <div>
+                  <label className="mb-2 block text-base font-medium text-text-main">Website URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={companyUrl}
+                      disabled
+                      className="flex-1 rounded-lg border border-border-subtle px-3 py-2.5 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50"
+                    />
+                    <button disabled className="flex items-center gap-1.5 rounded-lg bg-forest-green px-5 py-2.5 text-base font-medium text-white disabled:opacity-50">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                      Scanning...
+                    </button>
+                  </div>
                   <div className="mt-3 space-y-1.5">
                     <div className="h-2 w-full overflow-hidden rounded-full bg-border-subtle">
                       <div
@@ -1088,16 +1170,11 @@ export function OnboardingPage() {
                     </div>
                     <p className="text-sm text-text-muted">{scanStatus}</p>
                   </div>
-                )}
-                {!scanned && !scanning && (
-                  <p className="mt-2 text-sm text-text-muted">
-                    We'll scan your site to auto-fill your business profile. Or skip and fill in manually below.
-                  </p>
-                )}
-              </div>
+                </div>
+              )}
 
-              {/* Scanned / manual fields */}
-              {scanned && (
+              {/* Scanned / manual business fields (website path) */}
+              {!noWebsite && scanned && (
                 <div className="space-y-4">
                   {scanError ? (
                     <div className="flex items-center gap-2 pb-1">
@@ -1107,14 +1184,13 @@ export function OnboardingPage() {
                   ) : (
                     <div className="flex items-center gap-2 pb-1">
                       <span className="material-symbols-outlined text-[18px] text-forest-green">check_circle</span>
-                      <p className="text-base font-medium text-forest-green">Business profile generated — review and edit as needed</p>
+                      <p className="text-base font-medium text-forest-green">Profile generated — review and edit as needed</p>
                     </div>
                   )}
 
                   {SCAN_FIELD_ORDER.map((key) => {
                     const { label, icon } = SCAN_FIELD_LABELS[key]
                     const value = scanFields[key]
-                    // Industry uses a dropdown
                     if (key === 'industry') {
                       return (
                         <div key={key} className="flex items-start gap-3">
@@ -1154,18 +1230,72 @@ export function OnboardingPage() {
                 </div>
               )}
 
-              {/* Manual entry when not scanned */}
-              {!scanned && !scanning && (
-                <button
-                  onClick={() => setScanned(true)}
-                  className="text-base text-forest-green hover:text-forest-green-hover transition-colors"
-                >
-                  Or fill in manually without scanning
-                </button>
+              {/* No-website path — simplified form */}
+              {noWebsite && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 pb-1">
+                    <span className="material-symbols-outlined text-[18px] text-forest-green">edit_note</span>
+                    <p className="text-base font-medium text-text-main">Tell us about yourself</p>
+                    <button
+                      onClick={() => { setNoWebsite(false); setHasWebsite(true) }}
+                      className="ml-auto text-sm text-text-muted hover:text-forest-green transition-colors"
+                    >
+                      I have a website instead
+                    </button>
+                  </div>
+
+                  {/* Name / Project */}
+                  <div className="flex items-start gap-3">
+                    <span className="material-symbols-outlined mt-2.5 text-[20px] text-text-muted shrink-0">badge</span>
+                    <div className="flex-1">
+                      <label className="mb-1 block text-sm font-medium text-text-muted uppercase tracking-wide">Your Name or Project Name</label>
+                      <input
+                        type="text"
+                        value={noWebsiteName}
+                        onChange={(e) => setNoWebsiteName(e.target.value)}
+                        placeholder="e.g., John's Side Project, Acme Startup, My Portfolio..."
+                        className="w-full rounded-lg border border-border-subtle px-3 py-2 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Category */}
+                  <div className="flex items-start gap-3">
+                    <span className="material-symbols-outlined mt-2.5 text-[20px] text-text-muted shrink-0">category</span>
+                    <div className="flex-1">
+                      <label className="mb-1 block text-sm font-medium text-text-muted uppercase tracking-wide">Category</label>
+                      <select
+                        value={noWebsiteCategory}
+                        onChange={(e) => setNoWebsiteCategory(e.target.value)}
+                        className="w-full rounded-lg border border-border-subtle px-3 py-2 text-base text-text-main focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                      >
+                        <option value="">What best describes you?</option>
+                        {CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Free-form context */}
+                  <div className="flex items-start gap-3">
+                    <span className="material-symbols-outlined mt-2.5 text-[20px] text-text-muted shrink-0">description</span>
+                    <div className="flex-1">
+                      <label className="mb-1 block text-sm font-medium text-text-muted uppercase tracking-wide">What are you working on?</label>
+                      <textarea
+                        value={noWebsiteContext}
+                        onChange={(e) => setNoWebsiteContext(e.target.value)}
+                        placeholder="Describe what you do, what you're building, or what you need help with. The more context you give, the better your agents will understand you."
+                        rows={4}
+                        className="w-full resize-none rounded-lg border border-border-subtle px-3 py-2 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
+                      />
+                    </div>
+                  </div>
+                </div>
               )}
 
-              {/* Goals */}
-              {scanned && (
+              {/* Goals — shown for both paths */}
+              {(scanned || noWebsite) && (
                 <>
                   {/* Primary Goal */}
                   <div>
@@ -1207,8 +1337,8 @@ export function OnboardingPage() {
                   </button>
 
                   <p className="text-center text-sm text-text-muted">
-                    Your answers here become the foundation of business context for your team of agents.
-                    If you have multiple businesses, you can create more teams later.
+                    Your answers here become the foundation of context for your AI agents.
+                    You can always update this later in Settings.
                   </p>
                 </>
               )}

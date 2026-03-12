@@ -103,6 +103,18 @@ export const MODEL_CATALOG: LogicalModel[] = [
     backends: [{ providerId: 'deepinfra', providerModelId: 'deepseek-ai/DeepSeek-V3.2', priority: 1 }],
   },
   {
+    id: 'nemotron-3-super',
+    name: 'Nemotron 3 Super',
+    description: 'NVIDIA agentic powerhouse — 12B active params, 1M context, 5x throughput, built for multi-step tool calling',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 1000000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'nvidia/nemotron-3-super-120b-a12b:free', priority: 1 },
+      { providerId: 'deepinfra', providerModelId: 'nvidia/NVIDIA-Nemotron-3-Super-120B-A12B', priority: 2 },
+    ],
+  },
+  {
     id: 'minimax-m2.5',
     name: 'MiniMax M2.5',
     description: 'Orchestrator for complex multi-step workflows',
@@ -192,6 +204,31 @@ export const MODEL_CATALOG: LogicalModel[] = [
     type: 'image',
     category: 'image',
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/nano-banana-pro', priority: 1 }],
+  },
+
+  {
+    id: 'flux-2-klein',
+    name: 'FLUX.2 Klein',
+    description: 'Ultra-cheap image generation — great for prototyping and batch work',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/flux-2/klein/4b', priority: 1 }],
+  },
+  {
+    id: 'qwen-image-2.0',
+    name: 'Qwen Image 2.0',
+    description: 'Affordable high-quality image generation + editing in one model',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/qwen-image-2/text-to-image', priority: 1 }],
+  },
+  {
+    id: 'seedream-4.5',
+    name: 'Seedream 4.5',
+    description: 'ByteDance mid-tier image gen — solid quality at a fair price',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/bytedance/seedream/v4.5/text-to-image', priority: 1 }],
   },
 
   // ---- Image Editing (via fal.ai) ----
@@ -551,6 +588,10 @@ export async function getAvailableModels(db: Db): Promise<LogicalModel[]> {
 
 // ---- Chat completion ----
 
+const LLM_TIMEOUT_MS = 30_000  // 30s — if it's not back by then, it's dead
+const LLM_MAX_RETRIES = 1     // 1 retry on timeout/5xx
+const LLM_RETRY_DELAY_MS = 2_000
+
 export async function chatCompletion(
   config: ModelConfig,
   messages: ChatMessage[],
@@ -562,17 +603,41 @@ export async function chatCompletion(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
 
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(120_000) })
-  if (!res.ok) { const text = await res.text(); throw new Error(`Model API error ${res.status}: ${text}`) }
+  let lastErr: Error | null = null
+  for (let attempt = 0; attempt <= LLM_MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(LLM_TIMEOUT_MS) })
 
-  const data = await res.json() as {
-    choices: Array<{ message: { content: string | null; tool_calls?: ToolCall[] } }>
-    usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+      // Retry on 5xx server errors
+      if (res.status >= 500 && attempt < LLM_MAX_RETRIES) {
+        const text = await res.text()
+        console.log(`[model] Retry ${attempt + 1}/${LLM_MAX_RETRIES} after ${res.status}: ${text.slice(0, 100)}`)
+        await new Promise(r => setTimeout(r, LLM_RETRY_DELAY_MS))
+        continue
+      }
+
+      if (!res.ok) { const text = await res.text(); throw new Error(`Model API error ${res.status}: ${text}`) }
+
+      const data = await res.json() as {
+        choices: Array<{ message: { content: string | null; tool_calls?: ToolCall[] } }>
+        usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+      }
+
+      const choice = data.choices[0]
+      if (!choice) throw new Error('No choices returned from model API')
+      return { content: choice.message.content, tool_calls: choice.message.tool_calls ?? [], usage: data.usage }
+    } catch (err) {
+      lastErr = err as Error
+      const isTimeout = lastErr.name === 'TimeoutError' || lastErr.name === 'AbortError'
+      if (isTimeout && attempt < LLM_MAX_RETRIES) {
+        console.log(`[model] Retry ${attempt + 1}/${LLM_MAX_RETRIES} after timeout (${LLM_TIMEOUT_MS}ms)`)
+        await new Promise(r => setTimeout(r, LLM_RETRY_DELAY_MS))
+        continue
+      }
+      throw lastErr
+    }
   }
-
-  const choice = data.choices[0]
-  if (!choice) throw new Error('No choices returned from model API')
-  return { content: choice.message.content, tool_calls: choice.message.tool_calls ?? [], usage: data.usage }
+  throw lastErr ?? new Error('Chat completion failed')
 }
 
 // ---- Fallback support ----

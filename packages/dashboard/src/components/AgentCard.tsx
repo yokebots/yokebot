@@ -1,4 +1,6 @@
 import type { Agent } from '@/types/agent'
+import type { AgentProgressEvent } from '@/hooks/useAgentProgress'
+import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 
 const statusDot: Record<string, string> = {
   active: 'bg-accent-green status-dot-pulse',
@@ -7,9 +9,13 @@ const statusDot: Record<string, string> = {
   offline: 'bg-gray-400',
 }
 
-export function AgentCard({ agent }: { agent: Agent }) {
+export function AgentCard({ agent, progressSteps }: { agent: Agent; progressSteps?: AgentProgressEvent[] }) {
+  const isWorking = progressSteps && progressSteps.length > 0
+
   return (
-    <div className="agent-card group relative rounded-xl border border-border-subtle bg-white p-5 shadow-card hover:shadow-lg">
+    <div className={`agent-card group relative rounded-xl border bg-white p-5 shadow-card hover:shadow-lg transition-all ${
+      isWorking ? 'border-accent-green/40 shadow-accent-green/10' : 'border-border-subtle'
+    }`}>
       {/* Header */}
       <div className="mb-4 flex items-start justify-between">
         <div className="flex items-center gap-3">
@@ -45,6 +51,13 @@ export function AgentCard({ agent }: { agent: Agent }) {
           />
         </div>
       </div>
+
+      {/* Progress panel — shows when agent is actively working */}
+      {isWorking && (
+        <div className="mb-4">
+          <AgentProgressPanel steps={progressSteps} />
+        </div>
+      )}
 
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-border-subtle pt-4">

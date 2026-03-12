@@ -264,13 +264,20 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
   return (
     <div className="relative w-full">
       <div className="relative">
-        {/* Styled preview overlay — always visible when mentions exist */}
-        {hasMentions && value.trim() && (
+        {/* Styled preview overlay — visible when mentions exist and not focused */}
+        {hasMentions && value.trim() && !isFocused && (
           <div
-            className={`absolute inset-0 z-10 flex items-start rounded-xl border bg-white px-4 py-2.5 pr-16 text-sm pointer-events-none overflow-hidden whitespace-pre-wrap ${
-              isFocused ? 'border-forest-green' : 'border-border-subtle'
-            }`}
+            className="absolute inset-0 z-[2] flex items-start rounded-xl border border-border-subtle bg-white px-4 py-2.5 pr-28 text-sm overflow-hidden whitespace-pre-wrap cursor-text"
             style={{ minHeight: '40px', maxHeight: '120px' }}
+            onMouseDown={(e) => {
+              // Prevent the div from stealing focus — instead focus the textarea at end
+              e.preventDefault()
+              if (inputRef.current) {
+                inputRef.current.focus()
+                inputRef.current.selectionStart = value.length
+                inputRef.current.selectionEnd = value.length
+              }
+            }}
           >
             <span className="break-words">
               {renderMentionContent(value)}
@@ -287,10 +294,8 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className={`w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-16 text-sm focus:border-forest-green focus:ring-1 focus:ring-forest-green/30 focus:outline-none disabled:opacity-50 ${
-            hasMentions && value.trim() ? '' : 'text-text-main'
-          }`}
-          style={{ minHeight: '40px', maxHeight: '120px', caretColor: '#1F2937', color: hasMentions && value.trim() ? 'transparent' : undefined }}
+          className="w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-28 text-sm text-text-main focus:border-forest-green focus:ring-1 focus:ring-forest-green/30 focus:outline-none disabled:opacity-50"
+          style={{ minHeight: '40px', maxHeight: '120px' }}
           onInput={(e) => {
             // Auto-resize textarea
             const target = e.target as HTMLTextAreaElement
@@ -298,8 +303,8 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
             target.style.height = Math.min(target.scrollHeight, 120) + 'px'
           }}
         />
-        {/* GIF + Emoji buttons */}
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+        {/* GIF + Emoji buttons — z-[3] to stay above mention overlay */}
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 z-[3] flex items-center gap-0.5">
           {onFileAttach && (
             <button
               type="button"

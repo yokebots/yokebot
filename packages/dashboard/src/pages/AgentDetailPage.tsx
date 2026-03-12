@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { EngineAgent, LogicalModel, AgentSkill, ModelCreditCost, BillingStatus } from '@/lib/engine'
+import { useAgentProgress } from '@/hooks/useAgentProgress'
+import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 
 function StarRating({ stars, label }: { stars: number; label: string }) {
   return (
@@ -31,6 +33,8 @@ export function AgentDetailPage() {
   const [agentSkills, setAgentSkills] = useState<AgentSkill[]>([])
   const [availableSkills, setAvailableSkills] = useState<Array<{ metadata: { name: string; description: string; tags: string[]; source: string }; filePath: string }>>([])
   const [installingSkill, setInstallingSkill] = useState(false)
+  const { progressMap } = useAgentProgress()
+  const agentProgress = agentId ? progressMap.get(agentId) : undefined
 
   const loadData = async () => {
     if (!agentId) return
@@ -151,6 +155,22 @@ export function AgentDetailPage() {
           </span>
         </div>
         <div className="flex gap-2">
+          {tab === 'config' && (
+            <button
+              onClick={saveConfig}
+              disabled={saving}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                saveSuccess
+                  ? 'bg-green-50 text-green-700 border border-green-200'
+                  : 'bg-forest-green text-white hover:bg-forest-green/90 disabled:opacity-50'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {saveSuccess ? 'check_circle' : 'save'}
+              </span>
+              {saving ? 'Saving...' : saveSuccess ? 'Saved' : 'Save Changes'}
+            </button>
+          )}
           <button
             onClick={toggleStatus}
             className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium ${
@@ -434,6 +454,20 @@ export function AgentDetailPage() {
           )}
 
           {tab === 'activity' && (
+            <div className="space-y-4">
+            {/* Live progress panel — always expanded on detail page */}
+            {agentProgress && agentProgress.length > 0 && (
+              <div className="rounded-lg border border-accent-green/30 bg-white p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="relative flex h-3 w-3 items-center justify-center">
+                    <span className="absolute h-2.5 w-2.5 rounded-full bg-accent-green/30" style={{ animation: 'pulse 2s ease-in-out infinite' }} />
+                    <span className="relative h-1.5 w-1.5 rounded-full bg-accent-green" />
+                  </span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-accent-green">Working now</span>
+                </div>
+                <AgentProgressPanel steps={agentProgress} defaultExpanded />
+              </div>
+            )}
             <div className="rounded-lg border border-border-subtle bg-white p-4">
               <div className="space-y-3">
                 <div className="flex items-center gap-3 text-sm">
@@ -447,6 +481,7 @@ export function AgentDetailPage() {
                   <span className="ml-auto text-xs text-text-muted">{new Date(agent.updatedAt).toLocaleString()}</span>
                 </div>
               </div>
+            </div>
             </div>
           )}
         </div>

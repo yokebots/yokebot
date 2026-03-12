@@ -202,6 +202,8 @@ export async function writeFile(
 
 /**
  * Write binary content to the workspace (for media files).
+ * If a file already exists at the path, auto-appends a numeric suffix
+ * to prevent silent overwrites (e.g. image.png → image_2.png).
  */
 export async function writeBinaryFile(
   db: Db,
@@ -210,24 +212,53 @@ export async function writeBinaryFile(
   content: Buffer,
   mimeType: string,
   createdBy = '',
-): Promise<void> {
-  const normalizedPath = sanitizePath(filePath)
+): Promise<string> {
+  const normalizedPath = await deduplicatePath(db, teamId, sanitizePath(filePath))
   const id = randomUUID()
 
   if (db.driver === 'postgres') {
     await db.run(
       `INSERT INTO workspace_files (id, team_id, path, content, binary_content, mime_type, size, created_by, updated_at)
-       VALUES ($1, $2, $3, '', $4, $5, $6, $7, NOW())
-       ON CONFLICT (team_id, path) DO UPDATE SET binary_content = $4, mime_type = $5, size = $6, created_by = $7, updated_at = NOW()`,
+       VALUES ($1, $2, $3, '', $4, $5, $6, $7, NOW())`,
       [id, teamId, normalizedPath, content, mimeType, content.length, createdBy],
     )
   } else {
     await db.run(
-      `INSERT OR REPLACE INTO workspace_files (id, team_id, path, content, binary_content, mime_type, size, created_by, updated_at)
+      `INSERT INTO workspace_files (id, team_id, path, content, binary_content, mime_type, size, created_by, updated_at)
        VALUES ($1, $2, $3, '', $4, $5, $6, $7, datetime('now'))`,
       [id, teamId, normalizedPath, content, mimeType, content.length, createdBy],
     )
   }
+
+  return normalizedPath
+}
+
+/**
+ * If a file already exists at the given path, append a numeric suffix
+ * before the extension to avoid overwriting. e.g. "foo.png" → "foo_2.png"
+ */
+async function deduplicatePath(db: Db, teamId: string, path: string): Promise<string> {
+  const exists = await db.queryOne<{ id: string }>(
+    'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',
+    [teamId, path],
+  )
+  if (!exists) return path
+
+  const dotIdx = path.lastIndexOf('.')
+  const base = dotIdx > 0 ? path.slice(0, dotIdx) : path
+  const ext = dotIdx > 0 ? path.slice(dotIdx) : ''
+
+  for (let n = 2; n <= 100; n++) {
+    const candidate = `${base}_${n}${ext}`
+    const taken = await db.queryOne<{ id: string }>(
+      'SELECT id FROM workspace_files WHERE team_id = $1 AND path = $2',
+      [teamId, candidate],
+    )
+    if (!taken) return candidate
+  }
+
+  // Fallback: append UUID fragment
+  return `${base}_${randomUUID().slice(0, 6)}${ext}`
 }
 
 /**

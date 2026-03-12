@@ -1193,6 +1193,96 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 26,
+    name: 'reprice_underwater_models_and_add_affordable_image_gen',
+    async up(db: Db) {
+      // ---- Fix underwater model credit costs ----
+      // Power tier floor: $0.000298/credit. All prices verified against live provider pages March 2026.
+      const modelUpdates = [
+        { id: 'nano-banana-pro', credits: 600 },       // fal.ai $0.15/img → break-even 503, +19% Power margin
+        { id: 'deepseek-v3.2', credits: 20 },           // DeepInfra $0.28/$0.88 → $0.00524/hb, break-even 18, +16% Power
+        { id: 'glm-5', credits: 60 },                   // DeepInfra $0.80/$2.56 → $0.0152/hb, break-even 51, +15% Power
+        { id: 'hunyuan-3d-v2.1', credits: 1200 },       // fal.ai $0.30/gen → break-even 1007, +16% Power
+        { id: 'hunyuan-3d-v3.1-pro', credits: 2000 },   // fal.ai $0.375 base (+$0.15/option) → covers base + 1 option
+        { id: 'kling-3.0', credits: 3000 },              // fal.ai $0.112-0.168/s × 5s = $0.56-0.84, +6-37% Power
+        { id: 'kling-2.6-pro', credits: 3000 },          // fal.ai $0.07-0.168/s × 5s = $0.35-0.84, +6-62% Power
+        { id: 'wan-2.6', credits: 3000 },                // fal.ai $0.10-0.15/s × 5s = $0.50-0.75, +16-44% Power
+        { id: 'mirelo-sfx', credits: 250 },              // fal.ai $0.07 (1 sample 10s) → break-even 235, +6% Power
+        { id: 'flux-schnell', credits: 15 },             // fal.ai $0.003/img → was 10 (break-even), +33% Power now
+        { id: 'devstral-2', credits: 50 },               // $0.40/$2.00 → $0.0112/hb, was 40 (6% Power), +16% Power now
+      ]
+      for (const u of modelUpdates) {
+        await db.run(
+          'UPDATE model_credit_costs SET credits_per_use = $1 WHERE model_id = $2',
+          [u.credits, u.id],
+        )
+      }
+
+      // ---- Fix underwater skill credit costs ----
+      const skillUpdates = [
+        { name: 'search_companies', credits: 800 },     // Apollo ~$0.20/call → break-even 671, +16% Power
+        { name: 'search_properties', credits: 40 },     // Firecrawl ~$0.005-0.01 → break-even 34, +16% Power
+        { name: 'lead_enrichment', credits: 800 },      // Apollo ~$0.20 → break-even 671, +16% Power
+        { name: 'web_scrape', credits: 55 },             // Tavily ~$0.016 worst case → break-even 54, +2% Power (was 30)
+      ]
+      for (const s of skillUpdates) {
+        await db.run(
+          'UPDATE skill_credit_costs SET credits_per_use = $1 WHERE skill_name = $2',
+          [s.credits, s.name],
+        )
+      }
+
+      // ---- Add new affordable image generation models ----
+      const newModels = [
+        { id: 'flux-2-klein', credits: 50, type: 'image', si: 3, sp: 3, ss: 5, desc: 'Ultra-cheap image gen — great for prototyping and batch work', tag: 'Quick sketch artist', pros: '["Absurdly cheap","Fast","Apache 2.0 license"]', cons: '["Lower quality than premium options","4B parameters"]', date: '2025-06-01', pop: 50 },
+        { id: 'qwen-image-2.0', credits: 150, type: 'image', si: 4, sp: 4, ss: 4, desc: 'Affordable high-quality image gen + editing in one model', tag: 'Versatile designer', pros: '["Generation + editing in one model","Good quality","Affordable"]', cons: '["Newer model, less battle-tested"]', date: '2025-12-01', pop: 65 },
+        { id: 'seedream-4.5', credits: 175, type: 'image', si: 4, sp: 4, ss: 4, desc: 'ByteDance mid-tier image gen — solid quality at a fair price', tag: 'Reliable illustrator', pros: '["Solid quality","Fair price","ByteDance ecosystem"]', cons: '["Not quite premium tier"]', date: '2025-10-01', pop: 60 },
+      ]
+      for (const m of newModels) {
+        await db.run(
+          `INSERT INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT (model_id) DO NOTHING`,
+          [m.id, m.credits, m.type, m.si, m.sp, m.ss, m.desc, m.tag, m.pros, m.cons, m.date, m.pop],
+        )
+      }
+    },
+  },
+  {
+    version: 27,
+    name: 'add_nemotron_3_super',
+    async up(db: Db) {
+      await db.run(
+        `INSERT INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (model_id) DO NOTHING`,
+        [
+          'nemotron-3-super',
+          10,
+          'chat',
+          4,   // intelligence: strong benchmarks, slightly behind DeepSeek V3.2
+          5,   // power: 1M context, 120B params, agentic training
+          5,   // speed: 450 tok/s on DeepInfra, 12-40x faster than DeepSeek
+          'NVIDIA agentic powerhouse — hybrid Mamba-Transformer MoE with 120B total / 12B active params, 1M context window, built for multi-step tool calling with 5x throughput',
+          'Speed demon agent brain',
+          '["12-40x faster than DeepSeek V3.2","1M token context window","Built for agentic tool calling","2x cheaper than DeepSeek","#1 on PinchBench (open models)","Open weights"]',
+          '["5-10% behind DeepSeek V3.2 on raw benchmarks","Brand new (March 2026)","Smaller 12B active params"]',
+          '2026-03-11',
+          80,
+        ],
+      )
+    },
+  },
+  {
+    version: 28,
+    name: 'reprice_nemotron_3_super_to_5_credits',
+    async up(db: Db) {
+      await db.run(
+        `UPDATE model_credit_costs SET credits_per_use = 5 WHERE model_id = 'nemotron-3-super'`,
+      )
+    },
+  },
 ]
 
 /**

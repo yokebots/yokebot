@@ -3,11 +3,14 @@ import { Link } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { EngineAgent, ModelCreditCost } from '@/lib/engine'
 import { CreateAgentModal } from '@/components/CreateAgentModal'
+import { useAgentProgress } from '@/hooks/useAgentProgress'
+import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 
 export function AgentsPage() {
   const [agents, setAgents] = useState<EngineAgent[]>([])
   const [modelCatalog, setModelCatalog] = useState<ModelCreditCost[]>([])
   const [showCreate, setShowCreate] = useState(false)
+  const { progressMap } = useAgentProgress()
 
   const loadData = async () => {
     try {
@@ -55,11 +58,16 @@ export function AgentsPage() {
           if (a.name === 'AdvisorBot') return -1
           if (b.name === 'AdvisorBot') return 1
           return 0
-        }).map((agent) => (
+        }).map((agent) => {
+          const steps = progressMap.get(agent.id)
+          const isWorking = steps && steps.length > 0
+          return (
           <Link
             key={agent.id}
             to={`/agents/${agent.id}`}
-            className="group flex flex-col rounded-xl border border-border-subtle bg-white p-5 shadow-card transition-all hover:shadow-lg hover:border-forest-green/30"
+            className={`group flex flex-col rounded-xl border bg-white p-5 shadow-card transition-all hover:shadow-lg hover:border-forest-green/30 ${
+              isWorking ? 'border-accent-green/40 shadow-accent-green/10' : 'border-border-subtle'
+            }`}
           >
             {/* Icon + name + status */}
             <div className="flex items-start gap-3">
@@ -105,8 +113,16 @@ export function AgentsPage() {
                 )
               })()}
             </div>
+
+            {/* Live progress panel */}
+            {isWorking && (
+              <div className="mt-3 border-t border-border-subtle pt-3" onClick={e => e.preventDefault()}>
+                <AgentProgressPanel steps={steps} />
+              </div>
+            )}
           </Link>
-        ))}
+          )
+        })}
 
         {/* Deploy New Agent Card */}
         <button

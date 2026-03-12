@@ -219,9 +219,9 @@ export const health = () => request<{ status: string; version: string }>('/healt
 
 // ===== Agents =====
 
-export const listAgents = () => request<EngineAgent[]>('/api/agents')
+export const listAgents = () => cached('agents:list', () => request<EngineAgent[]>('/api/agents'))
 
-export const getAgent = (id: string) => request<EngineAgent>(`/api/agents/${id}`)
+export const getAgent = (id: string) => cached(`agents:${id}`, () => request<EngineAgent>(`/api/agents/${id}`))
 
 export const createAgent = (data: {
   name: string
@@ -233,18 +233,23 @@ export const createAgent = (data: {
   proactive?: boolean
   heartbeatSeconds?: number
 }) => request<EngineAgent>('/api/agents', { method: 'POST', body: JSON.stringify(data) })
+  .then(a => { invalidateCache('agents'); return a })
 
 export const updateAgent = (id: string, data: Record<string, unknown>) =>
   request<EngineAgent>(`/api/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+    .then(a => { invalidateCache('agents'); return a })
 
 export const deleteAgent = (id: string) =>
   request<void>(`/api/agents/${id}`, { method: 'DELETE' })
+    .then(r => { invalidateCache('agents'); return r })
 
 export const startAgent = (id: string) =>
   request<EngineAgent>(`/api/agents/${id}/start`, { method: 'POST' })
+    .then(a => { invalidateCache('agents'); return a })
 
 export const stopAgent = (id: string) =>
   request<EngineAgent>(`/api/agents/${id}/stop`, { method: 'POST' })
+    .then(a => { invalidateCache('agents'); return a })
 
 export const chatWithAgent = (id: string, message: string) =>
   request<{ response: string; iterations: number; toolCalls: string[] }>(
@@ -1469,6 +1474,8 @@ export type SseEventType =
   | 'task_created'
   | 'task_updated'
   | 'task_completed'
+  | 'agent_typing'
+  | 'agent_progress'
 
 type SseListener = (data: unknown) => void
 

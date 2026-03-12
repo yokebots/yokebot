@@ -29,6 +29,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
   const [agentColorMap, setAgentColorMap] = useState<Map<string, { color: string; icon: string; name: string }>>(new Map())
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [uploadingFile, setUploadingFile] = useState(false)
+  const [agentStatuses, setAgentStatuses] = useState<Map<string, { agentName: string; status: 'typing' | 'working' | 'idle' }>>(new Map())
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
   const chatFileInputRef = useRef<HTMLInputElement>(null)
@@ -88,6 +89,20 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
     }).catch(() => {})
   })
 
+  // Real-time agent typing/working indicators
+  useRealtimeEvent<{ channelId: string; agentId: string; agentName: string; status: 'typing' | 'working' | 'idle' }>('agent_typing', (data) => {
+    if (data.channelId !== teamChannelId) return
+    setAgentStatuses(prev => {
+      const next = new Map(prev)
+      if (data.status === 'idle') {
+        next.delete(data.agentId)
+      } else {
+        next.set(data.agentId, { agentName: data.agentName, status: data.status })
+      }
+      return next
+    })
+  })
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (autoScrollRef.current && scrollRef.current) {
@@ -141,6 +156,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
     if (!teamChannelId || uploadingFile) return
     setUploadingFile(true)
     try {
+      const snippets: string[] = []
       for (const file of Array.from(files)) {
         if (file.size > 10 * 1024 * 1024) {
           alert(`"${file.name}" exceeds the 10MB limit`)
@@ -148,13 +164,12 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
         }
         // Upload to workspace under chat-uploads/ folder
         const result = await engine.uploadWorkspaceFile(file, 'chat-uploads')
-        // Send a message referencing the uploaded file
-        const msg = await engine.sendMessage(teamChannelId, {
-          senderType: 'human',
-          senderId: 'user',
-          content: `Shared a file: **${file.name}** (${formatFileSize(file.size)})\n📎 \`${result.path}\``,
-        })
-        setMessages(prev => [...prev, msg])
+        snippets.push(`📎 **${file.name}** (${formatFileSize(file.size)}) \`${result.path}\``)
+      }
+      if (snippets.length > 0) {
+        // Append file references to the compose box so user can add @mentions before sending
+        const fileText = snippets.join('\n')
+        setMessageText(prev => prev ? `${prev}\n${fileText}` : fileText)
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Upload failed')
@@ -235,6 +250,18 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
           onClose={() => setThreadParent(null)}
           agentColorMap={agentColorMap}
         />
+      )}
+
+      {/* Agent typing/working indicators */}
+      {agentStatuses.size > 0 && (
+        <div className="px-4 py-1.5 text-xs text-text-muted flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-subtle shrink-0">
+          {Array.from(agentStatuses.values()).map(({ agentName, status }) => (
+            <span key={agentName} className="flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 rounded-full ${status === 'typing' ? 'bg-accent-green' : 'bg-accent-gold'}`} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
+              <span>{agentName} {status === 'typing' ? 'is typing' : 'is working'}...</span>
+            </span>
+          ))}
+        </div>
       )}
 
       {/* Message input */}

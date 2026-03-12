@@ -14,10 +14,10 @@ import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
-import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage } from './chat.ts'
+import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage, broadcastAgentStatus } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
-import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget } from './billing.ts'
+import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget, deductCredits } from './billing.ts'
 import { listTasks, getSubtasks, isBlocked as isTaskBlocked, type Task } from './tasks.ts'
 import { getTaskThread, getChannelMessages } from './chat.ts'
 
@@ -277,9 +277,10 @@ export async function respondToMention(
   db: Db, agentId: string, teamId: string, channelId: string,
   triggerMessage: { senderId: string; content: string },
 ): Promise<void> {
+  const startMs = Date.now()
   const { getAgent } = await import('./agent.ts')
   const { getChannelMessages } = await import('./chat.ts')
-  const { listDocuments } = await import('./knowledge-base.ts')
+  const { chatCompletion } = await import('./model.ts')
   const agent = await getAgent(db, agentId)
   if (!agent || agent.status !== 'running') return
   if (agent.teamId !== teamId) return
@@ -294,8 +295,6 @@ export async function respondToMention(
     }
   }
 
-  if (!state.workspaceConfig) return
-
   let modelConfig
   try {
     modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
@@ -303,59 +302,108 @@ export async function respondToMention(
     console.error(`[scheduler] Cannot resolve model for "${agent.name}":`, (err as Error).message)
     return
   }
-  const teamTz = await getTeamTimezoneCached(db, teamId)
-  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz)
 
-  // Get recent channel messages for context
-  const recentMessages = await getChannelMessages(db, channelId, 15)
+  if (!state.workspaceConfig) return
+
+  // ---- Phase 1: Quick acknowledgment (single LLM call, no tools) ----
+  const recentMessages = await getChannelMessages(db, channelId, 10)
   const context = recentMessages
     .map((m) => `[${m.senderType === 'human' ? 'User' : m.senderId === agentId ? agent.name : 'Other'}]: ${m.content}`)
     .join('\n')
 
-  // Get KB documents so agent can reference them with @mentions
-  let kbContext = ''
-  try {
-    const docs = await listDocuments(db, teamId)
-    if (docs.length > 0) {
-      kbContext = `\n\nKnowledge base documents available (you can reference them using @[title](file:id) syntax):\n` +
-        docs.map((d) => `- @[${d.title}](file:${d.id}) (${d.fileType})`).join('\n')
-    }
-  } catch { /* no docs */ }
+  const teamTz = await getTeamTimezoneCached(db, teamId) || 'America/New_York'
+  const now = new Date()
+  const today = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: teamTz })
 
-  const mentionPrompt = [
-    `You were @mentioned in a group channel. Here is the recent conversation:`,
-    context,
-    ``,
-    `The user said: "${triggerMessage.content}"`,
-    ``,
-    `Respond naturally to the conversation. Be helpful, concise, and on-topic.`,
-    `If asked a question, answer it. If given a task, acknowledge it and take action.`,
-    ...(kbContext ? [`When referencing knowledge base documents, use the @[title](file:id) mention syntax.`] : []),
-    `Keep your response under 500 characters unless a detailed answer is needed.`,
-    `IMPORTANT: Never invent or fabricate file references. Only reference documents that are explicitly listed below.`,
-    kbContext,
-  ].join('\n')
+  const ackMessages: Array<{ role: 'system' | 'user'; content: string }> = [
+    {
+      role: 'system',
+      content: [
+        `You are ${agent.name}. ${agent.systemPrompt}`,
+        `Today is ${today}.`,
+        `You were @mentioned. Reply immediately — be concise (under 500 characters).`,
+        `If the request needs real work (creating files, generating images, searching the web, etc.), acknowledge it and say you're on it. You'll follow up when done.`,
+        `If it's just a question or conversation, answer it directly.`,
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        `Recent conversation in the channel:`,
+        context,
+        ``,
+        `The user said: "${triggerMessage.content}"`,
+      ].join('\n'),
+    },
+  ]
+
+  let needsWork = false
+
+  // Broadcast typing immediately so user sees the indicator
+  broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'typing')
 
   try {
-    const runtimeConfig = { maxIterations: 10 }
-    const result = await runReactLoop(
-      db, agent.id, teamId, mentionPrompt, modelConfig, systemPrompt,
-      state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined,
-    )
-    const cleanMentionResponse = result.response ? stripToolSyntax(result.response) : null
-    const mentionIsUseful = cleanMentionResponse
-      && !cleanMentionResponse.includes('[no-op]')
-      && cleanMentionResponse.trim() !== 'no-op'
-      && !cleanMentionResponse.includes('unable to complete the task within the iteration limit')
-      && cleanMentionResponse.trim().length > 0
-    if (mentionIsUseful) {
-      // Reply in the SAME channel where the mention happened
-      await sendMessage(db, channelId, 'agent', agent.id, cleanMentionResponse, undefined, teamId)
-      await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${cleanMentionResponse.slice(0, 150)}`, undefined, teamId)
-      console.log(`[scheduler] "${agent.name}" replied to @mention in channel ${channelId}`)
+    const result = await chatCompletion(modelConfig, ackMessages)
+    const reply = result.content?.trim()
+    if (reply && reply.length > 0) {
+      // Stop typing, post the ack message
+      broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
+      await sendMessage(db, channelId, 'agent', agent.id, reply, undefined, teamId)
+      await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${reply.slice(0, 150)}`, undefined, teamId)
+
+      if (HOSTED_MODE && agent.modelId) {
+        const cost = await getModelCreditCost(db, agent.modelId)
+        if (cost > 0) await deductCredits(db, teamId, cost, 'heartbeat_debit', `LLM: ${agent.modelId} (mention ack)`)
+      }
+
+      const elapsed = Date.now() - startMs
+      console.log(`[scheduler] "${agent.name}" ack'd @mention in ${elapsed}ms`)
+
+      // Heuristic: if the reply mentions working on it / getting on it, kick off phase 2
+      const lower = reply.toLowerCase()
+      needsWork = /\b(i'll|i will|let me|working on|getting on|on it|right away|get started|look into)\b/.test(lower)
+    } else {
+      broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
     }
   } catch (err) {
-    console.error(`[scheduler] Mention response error for "${agent.name}":`, err)
+    broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
+    console.error(`[scheduler] Mention ack error for "${agent.name}":`, err)
+    return
+  }
+
+  // ---- Phase 2: Background work via react loop (fire-and-forget) ----
+  if (needsWork) {
+    // Show "working" indicator while doing the heavy lifting
+    broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'working')
+
+    const mentionBalance = HOSTED_MODE ? await getCreditBalance(db, teamId) : null
+    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz, mentionBalance)
+    const mentionWorkPrompt = [
+      `A user @mentioned you in the team chat and asked:`,
+      `"${triggerMessage.content}"`,
+      ``,
+      `You already acknowledged the request. Now do the actual work.`,
+      `When you're done, use the "respond" tool to post a follow-up message with your results.`,
+    ].join('\n')
+
+    // Fire and forget — don't block the mention response
+    const runtimeConfig = { maxIterations: 5 }
+    runReactLoop(
+      db, agent.id, teamId, mentionWorkPrompt, modelConfig, systemPrompt,
+      state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined, channelId,
+    ).then(async (result) => {
+      const cleanResponse = result.response ? stripToolSyntax(result.response) : null
+      if (cleanResponse && cleanResponse.trim().length > 0
+        && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op') {
+        await sendMessage(db, channelId, 'agent', agent.id, cleanResponse, undefined, teamId)
+        await logActivity(db, 'mention_followup', agent.id, `Follow-up: ${cleanResponse.slice(0, 150)}`, undefined, teamId)
+        console.log(`[scheduler] "${agent.name}" posted mention follow-up`)
+      }
+    }).catch((err) => {
+      console.error(`[scheduler] Mention work error for "${agent.name}":`, err)
+    }).finally(() => {
+      broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
+    })
   }
 }
 
@@ -516,7 +564,8 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
   const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
   const teamTz = await getTeamTimezoneCached(db, agent.teamId)
-  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz)
+  const heartbeatBalance = HOSTED_MODE ? await getCreditBalance(db, agent.teamId) : null
+  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz, heartbeatBalance)
   const isAdvisor = agent.templateId === 'advisor-bot'
 
   // ---- Task-focused sprint mode ----
@@ -541,9 +590,11 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
             currentTaskId: task.id,
           }
 
+          const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
           const result = await runReactLoop(
             db, agent.id, agent.teamId, taskPrompt, modelConfig, systemPrompt,
             state.workspaceConfig!, state.skillsDir, runtimeConfig, agent.modelId || undefined,
+            taskDmChannel?.id,
           )
           iterationsUsed += result.iterations
 
@@ -658,11 +709,13 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
   try {
     const runtimeConfig = { maxIterations: isAdvisor ? 5 : 10 }
-    const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined)
+    const proactiveDmChannel = await getDmChannel(db, agent.teamId, agent.id)
+    const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined, proactiveDmChannel?.id)
     // Skip no-ops, iteration-limit messages, and thinking dumps — don't spam channels
     const cleanedResponse = result.response ? stripToolSyntax(result.response) : null
     const isNoOp = cleanedResponse?.includes('[no-op]') || cleanedResponse?.trim() === 'no-op' || (cleanedResponse?.trim().length ?? 0) === 0
     const isIterationLimit = cleanedResponse?.includes('unable to complete the task within the iteration limit')
+      || cleanedResponse?.includes('need a bit more time')
     const isThinkingDump = cleanedResponse
       && (cleanedResponse.includes('### ASSESS') || cleanedResponse.includes('### PRIORITIZE') || cleanedResponse.includes('### PLAN'))
     if (cleanedResponse && !isNoOp && !isIterationLimit && !isThinkingDump) {

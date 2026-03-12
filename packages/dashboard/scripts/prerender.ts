@@ -2,8 +2,17 @@
  * Post-build prerender script.
  * Spins up a static server for dist/, visits each public route with Playwright,
  * and writes the fully-rendered HTML back to dist/ so crawlers get real content.
+ * Skips gracefully if Playwright browsers aren't installed (e.g. on Vercel).
  */
-import { chromium } from '@playwright/test'
+let chromium: typeof import('@playwright/test')['chromium']
+try {
+  chromium = (await import('@playwright/test')).chromium
+  // Quick check that the browser binary exists
+  await chromium.launch({ headless: true }).then(b => b.close())
+} catch {
+  console.log('Prerender skipped: Playwright browsers not available (CI/Vercel). SEO pages will use client-side rendering.')
+  process.exit(0)
+}
 import { createServer } from 'http'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join, dirname } from 'path'
