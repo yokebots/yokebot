@@ -6,6 +6,7 @@
  */
 
 import 'dotenv/config'
+import crypto from 'node:crypto'
 import express, { type Request, type Response, type NextFunction } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -38,6 +39,15 @@ import { createWorkflow, getWorkflow, listWorkflows, updateWorkflow, deleteWorkf
 import { advanceWorkflow, onTaskCompleted, approveWorkflowStep } from './workflow-executor.ts'
 import { uploadDocument, listDocuments, getDocument, deleteDocument, getDocumentChunks, searchKb } from './knowledge-base.ts'
 import { listCredentials, setCredential, deleteCredential } from './credentials.ts'
+import {
+  createVaultSession, listVaultSessions, revokeVaultSession, deleteVaultSession,
+  getVaultLogs, logVaultEvent,
+} from './session-vault.ts'
+import {
+  startRecording, sendInteraction, captureScreenshot, finishRecording,
+  cancelRecording, hasActiveRecording, getRecordingSession,
+  type InteractionAction,
+} from './vault-browser.ts'
 import { listServices } from './services.ts'
 import { listTemplates, getTemplate } from './templates.ts'
 import { listMcpServers, addMcpServer, removeMcpServer, connectMcpServer } from './mcp-client.ts'
@@ -1764,6 +1774,137 @@ async function main() {
     if (!deleted) return res.status(404).json({ error: 'Credential not found' })
     await logActivity(db, 'credential_deleted', null, `Credential removed for service "${req.params.serviceId}"`, undefined, teamId)
     res.status(204).end()
+  })
+
+  // ===== Session Vault =====
+  // SECURITY: Admin-only for write operations. Encrypted state never returned to client.
+
+  app.get('/api/vault/sessions', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const sessions = await listVaultSessions(db, teamId)
+    res.json(sessions)
+  })
+
+  app.post('/api/vault/sessions/:id/revoke', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    const revoked = await revokeVaultSession(db, req.params.id, teamId)
+    if (!revoked) return res.status(404).json({ error: 'Session not found' })
+    await logVaultEvent(db, req.params.id, teamId, 'revoked', undefined, req.user!.id)
+    await logActivity(db, 'vault_session_revoked', null, `Vault session revoked`, undefined, teamId)
+    res.json({ success: true })
+  })
+
+  app.delete('/api/vault/sessions/:id', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    const deleted = await deleteVaultSession(db, req.params.id, teamId)
+    if (!deleted) return res.status(404).json({ error: 'Session not found' })
+    await logActivity(db, 'vault_session_deleted', null, `Vault session deleted`, undefined, teamId)
+    res.status(204).end()
+  })
+
+  app.get('/api/vault/sessions/:id/logs', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const logs = await getVaultLogs(db, req.params.id, teamId)
+    res.json(logs)
+  })
+
+  // ---- Recording flow ----
+
+  app.post('/api/vault/record/start', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    const { targetUrl, label } = req.body as { targetUrl: string; label: string }
+    if (!targetUrl || !label) return res.status(400).json({ error: 'targetUrl and label are required' })
+
+    if (hasActiveRecording(teamId)) {
+      return res.status(409).json({ error: 'A recording is already in progress for this team' })
+    }
+
+    try {
+      const recordingId = crypto.randomUUID()
+      const result = await startRecording(recordingId, teamId, req.user!.id!, targetUrl)
+      res.json({ recordingId, screenshot: result.screenshot, url: result.url })
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/vault/record/:id/interact', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const session = getRecordingSession(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Recording session not found' })
+    if (session.teamId !== req.user!.activeTeamId!) return res.status(403).json({ error: 'Forbidden' })
+
+    try {
+      const action = req.body as InteractionAction
+      const result = await sendInteraction(req.params.id, action)
+      res.json(result)
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/vault/record/:id/stream', async (req, res) => {
+    const session = getRecordingSession(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Recording session not found' })
+    if (session.teamId !== req.user!.activeTeamId!) return res.status(403).json({ error: 'Forbidden' })
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    })
+
+    let closed = false
+    req.on('close', () => { closed = true })
+
+    // Stream screenshots at ~2fps
+    const sendScreenshot = async () => {
+      while (!closed) {
+        try {
+          const active = getRecordingSession(req.params.id)
+          if (!active) { res.write('event: closed\ndata: {}\n\n'); break }
+          const result = await captureScreenshot(req.params.id)
+          res.write(`data: ${JSON.stringify(result)}\n\n`)
+        } catch {
+          break
+        }
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      if (!closed) res.end()
+    }
+    sendScreenshot()
+  })
+
+  app.post('/api/vault/record/:id/finish', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const session = getRecordingSession(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Recording session not found' })
+    if (session.teamId !== req.user!.activeTeamId!) return res.status(403).json({ error: 'Forbidden' })
+
+    try {
+      const { label } = req.body as { label?: string }
+      const result = await finishRecording(req.params.id)
+      const vaultSession = await createVaultSession(
+        db, session.teamId, label || result.domain, result.domain, result.storageState, session.userId,
+      )
+      await logVaultEvent(db, vaultSession.id, session.teamId, 'recorded', undefined, session.userId)
+      await logActivity(db, 'vault_session_recorded', null, `Vault session recorded for ${result.domain}`, undefined, session.teamId)
+      res.json({ session: vaultSession })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/vault/record/:id/cancel', async (req, res) => {
+    const session = getRecordingSession(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Recording session not found' })
+    if (session.teamId !== req.user!.activeTeamId!) return res.status(403).json({ error: 'Forbidden' })
+
+    await cancelRecording(req.params.id)
+    res.json({ success: true })
   })
 
   // ===== Services (available integrations) =====

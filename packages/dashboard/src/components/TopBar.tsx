@@ -59,11 +59,17 @@ export function TopBar() {
           {/* Credits */}
           <button
             onClick={() => navigate('/settings/billing')}
-            className="flex items-center gap-1.5 md:gap-2 rounded-full border border-border-subtle bg-white px-2.5 md:px-3 py-1.5 shadow-sm hover:border-forest-green transition-colors"
+            className={`flex items-center gap-1.5 md:gap-2 rounded-full border px-2.5 md:px-3 py-1.5 shadow-sm transition-colors ${
+              credits !== null && credits <= 0
+                ? 'border-red-300 bg-red-50 hover:border-red-400'
+                : 'border-border-subtle bg-white hover:border-forest-green'
+            }`}
           >
-            <span className="material-symbols-outlined text-accent-gold text-[18px]">bolt</span>
+            <span className={`material-symbols-outlined text-[18px] ${credits !== null && credits <= 0 ? 'text-red-500' : 'text-accent-gold'}`}>
+              {credits !== null && credits <= 0 ? 'warning' : 'bolt'}
+            </span>
             <span className="font-mono text-sm font-bold text-text-main">{credits !== null ? credits.toLocaleString() : '--'}</span>
-            <span className="hidden sm:inline text-xs text-text-muted">credits</span>
+            <span className="hidden sm:inline text-xs text-text-muted">{credits !== null && credits <= 0 ? 'Add credits' : 'credits'}</span>
           </button>
 
           <div className="hidden sm:block h-6 w-px bg-border-subtle" />

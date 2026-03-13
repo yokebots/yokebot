@@ -249,6 +249,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
           channelId={teamChannelId}
           onClose={() => setThreadParent(null)}
           agentColorMap={agentColorMap}
+          completions={completions}
         />
       )}
 

@@ -110,8 +110,8 @@ export const MODEL_CATALOG: LogicalModel[] = [
     category: 'frontier',
     contextWindow: 1000000,
     backends: [
-      { providerId: 'openrouter', providerModelId: 'nvidia/nemotron-3-super-120b-a12b:free', priority: 1 },
-      { providerId: 'deepinfra', providerModelId: 'nvidia/NVIDIA-Nemotron-3-Super-120B-A12B', priority: 2 },
+      { providerId: 'deepinfra', providerModelId: 'nvidia/NVIDIA-Nemotron-3-Super-120B-A12B', priority: 1 },
+      { providerId: 'openrouter', providerModelId: 'nvidia/nemotron-3-super-120b-a12b', priority: 2 },
     ],
   },
   {

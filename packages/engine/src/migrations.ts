@@ -1283,6 +1283,79 @@ const migrations: Migration[] = [
       )
     },
   },
+
+  // --- Migration 29: Session Vault ---
+  {
+    version: 29,
+    name: 'add_session_vault',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS session_vault (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            service_label TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            encrypted_state TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            recorded_by TEXT NOT NULL,
+            recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_used_at TIMESTAMPTZ,
+            last_verified_at TIMESTAMPTZ,
+            use_count INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          CREATE INDEX IF NOT EXISTS idx_session_vault_team ON session_vault(team_id);
+          ALTER TABLE session_vault ENABLE ROW LEVEL SECURITY;
+
+          CREATE TABLE IF NOT EXISTS session_vault_log (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES session_vault(id) ON DELETE CASCADE,
+            team_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            agent_id TEXT,
+            user_id TEXT,
+            details TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          CREATE INDEX IF NOT EXISTS idx_vault_log_session ON session_vault_log(session_id);
+          ALTER TABLE session_vault_log ENABLE ROW LEVEL SECURITY;
+        `)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS session_vault (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            service_label TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            encrypted_state TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            recorded_by TEXT NOT NULL,
+            recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used_at TEXT,
+            last_verified_at TEXT,
+            use_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_session_vault_team ON session_vault(team_id);
+
+          CREATE TABLE IF NOT EXISTS session_vault_log (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES session_vault(id) ON DELETE CASCADE,
+            team_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            agent_id TEXT,
+            user_id TEXT,
+            details TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_vault_log_session ON session_vault_log(session_id);
+        `)
+      }
+    },
+  },
 ]
 
 /**

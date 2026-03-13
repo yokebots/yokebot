@@ -1680,3 +1680,75 @@ export async function regenerateApiKey(id: string): Promise<ApiKeyInfo> {
 export async function deleteApiKey(id: string): Promise<{ ok: boolean }> {
   return request(`/api/api-keys/${id}`, { method: 'DELETE' })
 }
+
+// ===== Session Vault =====
+
+export interface VaultSessionInfo {
+  id: string
+  teamId: string
+  serviceLabel: string
+  domain: string
+  status: string
+  recordedBy: string
+  recordedAt: string
+  lastUsedAt: string | null
+  lastVerifiedAt: string | null
+  useCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VaultLogEntry {
+  id: string
+  sessionId: string
+  teamId: string
+  eventType: string
+  agentId: string | null
+  userId: string | null
+  details: string | null
+  createdAt: string
+}
+
+export async function listVaultSessions(): Promise<VaultSessionInfo[]> {
+  return request('/api/vault/sessions')
+}
+
+export async function revokeVaultSession(id: string): Promise<{ success: boolean }> {
+  return request(`/api/vault/sessions/${id}/revoke`, { method: 'POST' })
+}
+
+export async function deleteVaultSession(id: string): Promise<void> {
+  return request(`/api/vault/sessions/${id}`, { method: 'DELETE' })
+}
+
+export async function getVaultSessionLogs(id: string): Promise<VaultLogEntry[]> {
+  return request(`/api/vault/sessions/${id}/logs`)
+}
+
+export async function startVaultRecording(targetUrl: string, label: string): Promise<{ recordingId: string; screenshot: string; url: string }> {
+  return request('/api/vault/record/start', {
+    method: 'POST',
+    body: JSON.stringify({ targetUrl, label }),
+  })
+}
+
+export async function sendVaultInteraction(
+  recordingId: string,
+  action: { type: string; x?: number; y?: number; text?: string; key?: string; deltaX?: number; deltaY?: number },
+): Promise<{ screenshot: string; url: string }> {
+  return request(`/api/vault/record/${recordingId}/interact`, {
+    method: 'POST',
+    body: JSON.stringify(action),
+  })
+}
+
+export async function finishVaultRecording(recordingId: string, label?: string): Promise<{ session: VaultSessionInfo }> {
+  return request(`/api/vault/record/${recordingId}/finish`, {
+    method: 'POST',
+    body: JSON.stringify({ label }),
+  })
+}
+
+export async function cancelVaultRecording(recordingId: string): Promise<{ success: boolean }> {
+  return request(`/api/vault/record/${recordingId}/cancel`, { method: 'POST' })
+}

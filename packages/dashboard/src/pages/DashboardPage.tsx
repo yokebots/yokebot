@@ -167,8 +167,25 @@ export function DashboardPage() {
         </div>
       )}
 
+      {/* Out of credits banner */}
+      {creditBalance !== null && creditBalance <= 0 && (
+        <div className="mb-8">
+          <Link
+            to="/settings/billing"
+            className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4 hover:bg-red-100 transition-colors"
+          >
+            <span className="material-symbols-outlined text-red-500">bolt</span>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-red-800">You've run out of credits!</p>
+              <p className="text-xs text-red-600">Your agents are paused until you add more.</p>
+            </div>
+            <span className="material-symbols-outlined text-red-500">arrow_forward</span>
+          </Link>
+        </div>
+      )}
+
       {/* Canceled subscription banner */}
-      {(subscriptionStatus === 'canceled' || subscriptionStatus === 'inactive') && creditBalance <= 0 && (
+      {(subscriptionStatus === 'canceled' || subscriptionStatus === 'inactive') && (
         <div className="mb-8">
           <Link
             to="/settings/billing"

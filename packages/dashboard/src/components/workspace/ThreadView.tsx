@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { renderMentionContent } from '@/components/MentionInput'
+import { renderMentionContent, MentionInput } from '@/components/MentionInput'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 import * as engine from '@/lib/engine'
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀', '💯', '🙌']
@@ -9,12 +10,14 @@ interface ThreadViewProps {
   channelId: string
   onClose: () => void
   agentColorMap: Map<string, { color: string; icon: string; name: string }>
+  completions: engine.MentionCompletionData | null
 }
 
-export function ThreadView({ parentMessage, channelId, onClose, agentColorMap }: ThreadViewProps) {
+export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, completions }: ThreadViewProps) {
   const [replies, setReplies] = useState<engine.ChatMessage[]>([])
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -25,10 +28,20 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap }:
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [replies.length])
 
+  // Real-time: listen for new messages and append thread replies
+  useRealtimeEvent<{ channelId: string; messageId: number }>('new_message', (data) => {
+    if (data.channelId !== channelId) return
+    // Refetch thread replies to pick up agent responses
+    engine.getThreadReplies(parentMessage.id).then((fresh) => {
+      setReplies(fresh)
+    }).catch(() => {})
+  })
+
   const sendReply = async () => {
     const text = replyText.trim()
     if (!text || sending) return
     setSending(true)
+    setError(null)
     try {
       const msg = await engine.sendMessage(channelId, {
         senderType: 'human',
@@ -38,7 +51,10 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap }:
       })
       setReplies(prev => [...prev, msg])
       setReplyText('')
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('[ThreadView] Failed to send reply:', err)
+      setError('Failed to send reply. Please try again.')
+    }
     setSending(false)
   }
 
@@ -66,25 +82,23 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap }:
         ))}
       </div>
 
-      {/* Reply input */}
-      <div className="px-3 py-2 border-t border-border-subtle shrink-0">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
-            placeholder="Reply..."
-            className="flex-1 rounded-lg border border-border-subtle px-2.5 py-1.5 text-xs focus:border-forest-green focus:outline-none"
-          />
-          <button
-            onClick={sendReply}
-            disabled={!replyText.trim() || sending}
-            className="rounded-lg bg-forest-green px-3 py-1.5 text-xs text-white hover:bg-forest-green/90 disabled:opacity-50"
-          >
-            Send
-          </button>
+      {/* Error message */}
+      {error && (
+        <div className="px-3 py-1 shrink-0">
+          <p className="text-xs text-red-600">{error}</p>
         </div>
+      )}
+
+      {/* Reply input — MentionInput with @mention support */}
+      <div className="px-3 py-2 border-t border-border-subtle shrink-0">
+        <MentionInput
+          value={replyText}
+          onChange={setReplyText}
+          onSubmit={sendReply}
+          placeholder="Reply..."
+          completions={completions}
+          disabled={sending}
+        />
       </div>
     </div>
   )

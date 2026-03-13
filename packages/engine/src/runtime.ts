@@ -8,6 +8,7 @@
  * to do, optionally calls tools, observes the results, and responds.
  */
 
+import crypto from 'node:crypto'
 import type { Db } from './db/types.ts'
 import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCall, type ModelConfig } from './model.ts'
 import { getMessages, addMessage, getAgent } from './agent.ts'
@@ -116,6 +117,8 @@ const TOOL_LABELS: Record<string, string> = {
   respond: 'Composing response',
   web_search: 'Searching the web',
   install_skill: 'Installing skill',
+  use_saved_login: 'Loading saved login',
+  vault_report_session_expired: 'Reporting expired session',
   list_available_skills: 'Checking available skills',
   generate_image: 'Generating image',
   generate_video: 'Generating video',
@@ -335,6 +338,16 @@ function getBuiltinTools(): ToolDef[] {
     toolDef('install_skill', 'Install a skill to gain its tools and capabilities. The skill\'s tools become available on your next action cycle.', {
       skillName: { type: 'string', description: 'The name of the skill to install (from list_available_skills)' },
     }, ['skillName']),
+
+    // Session Vault — authenticated browser sessions
+    toolDef('use_saved_login', 'Load an authenticated browser session from the team\'s Session Vault. This lets you browse websites the team has logged into without needing credentials.', {
+      domain: { type: 'string', description: 'Domain to load session for, e.g. "app.hubspot.com"' },
+    }, ['domain']),
+
+    toolDef('vault_report_session_expired', 'Report that a saved login session has expired (e.g. redirected to a login page). This notifies the team to re-record the session.', {
+      domain: { type: 'string', description: 'Domain whose session has expired' },
+      reason: { type: 'string', description: 'Why the session appears expired (e.g. "redirected to login page")' },
+    }, ['domain', 'reason']),
 
   ]
 }
@@ -874,6 +887,50 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const members = await getTeamMembers(ctx.db, ctx.teamId)
       if (members.length === 0) return 'No team members found.'
       return members.map(m => `- ${m.email} (userId: ${m.userId}, role: ${m.role})`).join('\n')
+    }
+
+    case 'use_saved_login': {
+      const domain = args.domain as string
+      const { findVaultSessionByDomain, updateSessionUsage, logVaultEvent: logVault } = await import('./session-vault.ts')
+      const { restartWithStorageState } = await import('./browser.ts')
+      const { writeFileSync, unlinkSync } = await import('node:fs')
+      const { join } = await import('node:path')
+      const { tmpdir } = await import('node:os')
+
+      const session = await findVaultSessionByDomain(ctx.db, ctx.teamId, domain)
+      if (!session) return `No active saved login found for "${domain}". The team needs to record a login session for this domain in Settings → Session Vault.`
+      if (session.info.status !== 'active') return `The saved login for "${domain}" is ${session.info.status}. The team needs to re-record it.`
+
+      // Write storageState to temp file, restart browser, then delete
+      const tmpPath = join(tmpdir(), `vault-${crypto.randomUUID()}.json`)
+      writeFileSync(tmpPath, session.storageState)
+      try {
+        await restartWithStorageState(ctx.agentId, tmpPath)
+      } finally {
+        try { unlinkSync(tmpPath) } catch { /* best effort */ }
+      }
+
+      await updateSessionUsage(ctx.db, session.info.id)
+      await logVault(ctx.db, session.info.id, ctx.teamId, 'used', ctx.agentId)
+      return `Authenticated session loaded for ${domain}. You can now browse as the logged-in user. Use browser_navigate to go to https://${domain}.`
+    }
+
+    case 'vault_report_session_expired': {
+      const domain = args.domain as string
+      const reason = args.reason as string
+      const { findVaultSessionByDomain, expireVaultSession, logVaultEvent: logVault } = await import('./session-vault.ts')
+      const { notifyTeam: notifyVault } = await import('./notifications.ts')
+
+      const session = await findVaultSessionByDomain(ctx.db, ctx.teamId, domain)
+      if (session) {
+        await expireVaultSession(ctx.db, session.info.id, ctx.teamId)
+        await logVault(ctx.db, session.info.id, ctx.teamId, 'expired', ctx.agentId, undefined, reason)
+        await notifyVault(ctx.db, ctx.teamId, 'system',
+          `Session Expired: ${session.info.serviceLabel}`,
+          `The saved login for ${domain} has expired. Please re-record it in Settings → Session Vault. Reason: ${reason}`,
+        )
+      }
+      return `Session expiry reported for ${domain}. The team has been notified to re-record the login.`
     }
 
     default: {

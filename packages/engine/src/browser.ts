@@ -87,14 +87,21 @@ function resetIdleTimer(agentId: string, session: BrowserSession) {
 
 /**
  * Start a browser session for an agent by spawning the Playwright MCP server.
+ * If storageStatePath is provided, the browser will load that session state
+ * (cookies, localStorage) from the given JSON file.
  */
-async function startBrowserSession(agentId: string): Promise<BrowserSession> {
+async function startBrowserSession(agentId: string, storageStatePath?: string): Promise<BrowserSession> {
   // Kill any existing session
   if (sessions.has(agentId)) {
     await closeBrowserSession(agentId)
   }
 
-  const child = spawn('npx', ['@playwright/mcp@latest', '--headless'], {
+  const mcpArgs = ['@playwright/mcp@latest', '--headless']
+  if (storageStatePath) {
+    mcpArgs.push('--storage-state', storageStatePath)
+  }
+
+  const child = spawn('npx', mcpArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       HOME: process.env.HOME,
@@ -208,6 +215,15 @@ async function getSession(agentId: string): Promise<BrowserSession> {
   }
   resetIdleTimer(agentId, session)
   return session
+}
+
+/**
+ * Restart an agent's browser session with a storageState file,
+ * giving the agent authenticated access to a site.
+ */
+export async function restartWithStorageState(agentId: string, storageStatePath: string): Promise<void> {
+  await closeBrowserSession(agentId)
+  await startBrowserSession(agentId, storageStatePath)
 }
 
 /**

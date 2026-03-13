@@ -275,7 +275,7 @@ export async function triggerAgentNow(db: Db, agentId: string, teamId: string): 
  */
 export async function respondToMention(
   db: Db, agentId: string, teamId: string, channelId: string,
-  triggerMessage: { senderId: string; content: string },
+  triggerMessage: { senderId: string; content: string; parentMessageId?: number | null },
 ): Promise<void> {
   const startMs = Date.now()
   const { getAgent } = await import('./agent.ts')
@@ -285,12 +285,11 @@ export async function respondToMention(
   if (!agent || agent.status !== 'running') return
   if (agent.teamId !== teamId) return
 
-  // Check credits in hosted mode
-  if (HOSTED_MODE && agent.modelId) {
+  // Hard stop: no credits = no response
+  if (HOSTED_MODE) {
     const balance = await getCreditBalance(db, teamId)
-    const cost = await getModelCreditCost(db, agent.modelId)
-    if (cost > 0 && balance < cost) {
-      console.log(`[scheduler] Skipping mention response for "${agent.name}" — insufficient credits`)
+    if (balance <= 0) {
+      console.log(`[scheduler] Skipping mention response for "${agent.name}" — zero credits (${balance})`)
       return
     }
   }
@@ -346,9 +345,10 @@ export async function respondToMention(
     const result = await chatCompletion(modelConfig, ackMessages)
     const reply = result.content?.trim()
     if (reply && reply.length > 0) {
-      // Stop typing, post the ack message
+      // Stop typing, post the ack message (in the same thread if the trigger was a thread reply)
       broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
-      await sendMessage(db, channelId, 'agent', agent.id, reply, undefined, teamId)
+      const replyParentId = triggerMessage.parentMessageId ?? undefined
+      await sendMessage(db, channelId, 'agent', agent.id, reply, undefined, teamId, undefined, undefined, undefined, replyParentId)
       await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${reply.slice(0, 150)}`, undefined, teamId)
 
       if (HOSTED_MODE && agent.modelId) {
@@ -369,6 +369,17 @@ export async function respondToMention(
     broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
     console.error(`[scheduler] Mention ack error for "${agent.name}":`, err)
     return
+  }
+
+  // Reset sprint counts and unblock tasks on @mention — human signal means "retry"
+  try {
+    await db.run(
+      `UPDATE tasks SET sprint_count = 0, status = 'todo' WHERE assigned_agent_id = $1 AND team_id = $2 AND status = 'blocked'`,
+      [agentId, teamId],
+    )
+    console.log(`[scheduler] @mention reset: unblocked tasks for "${agent.name}"`)
+  } catch (err) {
+    console.error(`[scheduler] Failed to reset blocked tasks on @mention:`, err)
   }
 
   // ---- Phase 2: Background work via react loop (fire-and-forget) ----
@@ -395,7 +406,8 @@ export async function respondToMention(
       const cleanResponse = result.response ? stripToolSyntax(result.response) : null
       if (cleanResponse && cleanResponse.trim().length > 0
         && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op') {
-        await sendMessage(db, channelId, 'agent', agent.id, cleanResponse, undefined, teamId)
+        const followupParentId = triggerMessage.parentMessageId ?? undefined
+        await sendMessage(db, channelId, 'agent', agent.id, cleanResponse, undefined, teamId, undefined, undefined, undefined, followupParentId)
         await logActivity(db, 'mention_followup', agent.id, `Follow-up: ${cleanResponse.slice(0, 150)}`, undefined, teamId)
         console.log(`[scheduler] "${agent.name}" posted mention follow-up`)
       }
@@ -419,9 +431,27 @@ export function unscheduleAgent(agentId: string): void {
   }
 }
 
+// ---- Cheap-poll: check for new messages before running generic check-in ----
+
+async function hasNewMessages(db: Db, teamId: string, agentId: string, sinceSec: number): Promise<boolean> {
+  const since = db.driver === 'postgres'
+    ? `NOW() - INTERVAL '${sinceSec} seconds'`
+    : `datetime('now', '-${sinceSec} seconds')`
+  const row = await db.queryOne<{ cnt: number }>(
+    `SELECT COUNT(*) as cnt FROM chat_messages
+     WHERE channel_id IN (
+       SELECT id FROM chat_channels WHERE team_id = $1 AND (type = 'team' OR type = 'group' OR name = 'dm:' || $2)
+     )
+     AND sender_id != $2
+     AND created_at > ${since}`,
+    [teamId, agentId],
+  )
+  return (row?.cnt ?? 0) > 0
+}
+
 // ---- Task-focused sprint helpers ----
 
-const MAX_SPRINT_ATTEMPTS = 3 // Stop retrying a task after this many sprints with no progress
+const MAX_SPRINT_ATTEMPTS = 3 // Stop retrying a task after this many failed sprints
 
 /** Get actionable tasks assigned to this agent, sorted by priority. */
 async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): Promise<Task[]> {
@@ -430,11 +460,25 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
   for (const task of tasks) {
     if (task.status !== 'todo' && task.status !== 'in_progress') continue
     if (await isTaskBlocked(db, task.id)) continue
-    // Skip tasks that have been sprinted on too many times without progress
-    const row = await db.queryOne<{ sprint_count: number }>(`SELECT sprint_count FROM tasks WHERE id = $1`, [task.id])
+    // Auto-block tasks that have been sprinted on too many times without progress
+    const row = await db.queryOne<{ sprint_count: number; last_sprint_at: string | null }>(
+      `SELECT sprint_count, last_sprint_at FROM tasks WHERE id = $1`, [task.id],
+    )
     if ((row?.sprint_count ?? 0) >= MAX_SPRINT_ATTEMPTS) {
-      console.log(`[scheduler] Skipping task "${task.title}" — ${row?.sprint_count} sprints with no progress (max ${MAX_SPRINT_ATTEMPTS})`)
+      await db.run(`UPDATE tasks SET status = 'blocked' WHERE id = $1`, [task.id])
+      console.log(`[scheduler] Auto-blocked task "${task.title}" — ${row?.sprint_count} failed sprints`)
       continue
+    }
+    // Exponential backoff: skip task if last sprint was too recent
+    // Delay: 30s * 2^(sprint_count - 1) → 30s, 60s, 120s
+    if ((row?.sprint_count ?? 0) > 0 && row?.last_sprint_at) {
+      const delaySec = 30 * Math.pow(2, (row.sprint_count - 1))
+      const lastSprint = new Date(row.last_sprint_at).getTime()
+      const elapsed = (Date.now() - lastSprint) / 1000
+      if (elapsed < delaySec) {
+        console.log(`[scheduler] Task "${task.title}" backing off — ${Math.round(delaySec - elapsed)}s remaining`)
+        continue
+      }
     }
     actionable.push(task)
   }
@@ -545,15 +589,11 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   if (HOSTED_MODE) {
     if (!await isTeamActiveCached(db, agent.teamId)) return
 
-    // Check credit balance before running heartbeat — require enough for at least 3 iterations
-    if (agent.modelId) {
-      const balance = await getCreditBalance(db, agent.teamId)
-      const cost = await getModelCreditCost(db, agent.modelId)
-      const minRequired = cost * 3
-      if (cost > 0 && balance < minRequired) {
-        console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — insufficient credits (${balance} < ${minRequired} needed)`)
-        return
-      }
+    // Hard stop: no credits = no heartbeat. Period.
+    const balance = await getCreditBalance(db, agent.teamId)
+    if (balance <= 0) {
+      console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — zero credits (${balance})`)
+      return
     }
   }
 
@@ -573,6 +613,16 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   if (!isAdvisor) {
     try {
       const assignedTasks = await getAgentAssignedTasks(db, agent.id, agent.teamId)
+      if (assignedTasks.length === 0) {
+        // Check if agent has ANY tasks (including blocked) — if so, all are blocked, skip LLM call
+        const allTasks = await listTasks(db, { agentId: agent.id, teamId: agent.teamId })
+        const nonDone = allTasks.filter(t => t.status !== 'done')
+        if (nonDone.length > 0) {
+          console.log(`[scheduler] "${agent.name}" has ${nonDone.length} task(s) but all blocked/max-sprinted — skipping heartbeat (no LLM call)`)
+          return
+        }
+      }
+
       if (assignedTasks.length > 0) {
         const sprintBudget = HOSTED_MODE
           ? await getSprintBudget(db, agent.teamId)
@@ -656,8 +706,8 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           if (result.taskCompleted) continue
           // If blocked, skip to next task
           if (result.taskBlocked) continue
-          // Otherwise (budget used but task not done) — break, resume next heartbeat
-          break
+          // Task not done yet — continue to next task with remaining budget
+          continue
         }
 
         return // task sprint handled this heartbeat
@@ -665,6 +715,15 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     } catch (err) {
       console.error(`[scheduler] Task sprint error for "${agent.name}":`, err)
       // Fall through to generic check-in
+    }
+  }
+
+  // ---- Cheap-poll: skip generic check-in if no new messages (non-advisor only) ----
+  if (!isAdvisor) {
+    const hasMessages = await hasNewMessages(db, agent.teamId, agent.id, agent.heartbeatSeconds)
+    if (!hasMessages) {
+      console.log(`[scheduler] "${agent.name}" — no new messages, skipping generic check-in (no LLM call)`)
+      return
     }
   }
 

@@ -381,27 +381,28 @@ function ListView({
           <button
             key={task.id}
             onClick={() => onTaskClick(task.id)}
-            className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-light-surface-alt"
+            className="group flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-light-surface-alt"
           >
             {/* Status dot */}
-            <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOTS[task.status] ?? 'bg-gray-400'}`} />
+            <span className={`h-2 w-2 shrink-0 rounded-full self-start mt-1 ${STATUS_DOTS[task.status] ?? 'bg-gray-400'}`} />
             {/* Unread indicator */}
-            {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />}
-            {/* Title */}
-            <span className={`flex-1 truncate ${isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>
-              {task.title}
-            </span>
-            {/* Tag pills */}
-            {task.tags?.length > 0 && (
-              <div className="flex items-center gap-0.5 shrink-0">
-                {task.tags.slice(0, 3).map((tag) => (
-                  <span key={tag.id} className="rounded-full px-1.5 py-0 text-[8px] font-medium text-white" style={{ backgroundColor: tag.color }}>
-                    {tag.name}
-                  </span>
-                ))}
-                {task.tags.length > 3 && <span className="text-[8px] text-text-muted">+{task.tags.length - 3}</span>}
-              </div>
-            )}
+            {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500 self-start mt-1.5" />}
+            {/* Title + Tags stacked */}
+            <div className="flex-1 min-w-0">
+              <span className={`block truncate ${isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>
+                {task.title}
+              </span>
+              {task.tags?.length > 0 && (
+                <div className="flex flex-wrap items-center gap-0.5 mt-0.5">
+                  {task.tags.slice(0, 3).map((tag) => (
+                    <span key={tag.id} className="rounded-full px-1.5 py-0 text-[8px] font-medium text-white" style={{ backgroundColor: tag.color }}>
+                      {tag.name}
+                    </span>
+                  ))}
+                  {task.tags.length > 3 && <span className="text-[8px] text-text-muted">+{task.tags.length - 3}</span>}
+                </div>
+              )}
+            </div>
             {/* Deadline column */}
             {visibleColumns.includes('deadline') && (
               <span className={`shrink-0 text-[10px] tabular-nums ${task.deadline && new Date(task.deadline) < new Date() ? 'text-red-600 font-semibold' : 'text-text-muted'}`}>
