@@ -1418,6 +1418,20 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 32,
+    name: 'add_blocked_reason_text',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocked_reason_text TEXT`)
+      } else {
+        const cols = await db.query<{ name: string }>(`PRAGMA table_info(tasks)`)
+        if (!cols.some(c => c.name === 'blocked_reason_text')) {
+          await db.run(`ALTER TABLE tasks ADD COLUMN blocked_reason_text TEXT`)
+        }
+      }
+    },
+  },
 ]
 
 /**

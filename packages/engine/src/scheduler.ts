@@ -395,7 +395,7 @@ export async function respondToMention(
     mentionResetCooldowns.set(mentionResetKey, resetNow)
     try {
       await db.run(
-        `UPDATE tasks SET sprint_count = 0, status = 'todo', blocked_reason = NULL, blocked_approval_id = NULL WHERE assigned_agent_id = $1 AND team_id = $2 AND status = 'blocked'`,
+        `UPDATE tasks SET sprint_count = 0, status = 'todo', blocked_reason = NULL, blocked_approval_id = NULL, blocked_reason_text = NULL WHERE assigned_agent_id = $1 AND team_id = $2 AND status = 'blocked'`,
         [agentId, teamId],
       )
       console.log(`[scheduler] @mention reset: unblocked tasks for "${agent.name}"`)
@@ -526,10 +526,20 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
       `SELECT sprint_count, last_sprint_at FROM tasks WHERE id = $1`, [task.id],
     )
     if ((row?.sprint_count ?? 0) >= MAX_SPRINT_ATTEMPTS) {
-      await blockTask(db, task.id, 'max_retries')
+      // Capture the agent's last response from the task thread as the explanation
+      let reasonText: string | null = null
+      try {
+        const thread = await getTaskThread(db, task.id, task.teamId)
+        const msgs = await getChannelMessages(db, thread.id, 5)
+        const agentMsg = msgs.find(m => m.senderType === 'agent')
+        if (agentMsg) reasonText = agentMsg.content.slice(0, 2000)
+      } catch { /* no thread — skip */ }
+
+      await blockTask(db, task.id, 'max_retries', undefined, reasonText ?? undefined)
+      const snippet = reasonText ? `\n\n"${reasonText.slice(0, 200)}${reasonText.length > 200 ? '...' : ''}"` : ''
       void notifyTeam(db, teamId, 'system',
         `Task blocked: ${task.title}`,
-        `Agent failed after ${MAX_SPRINT_ATTEMPTS} attempts. Tap to retry or reassign.`,
+        `Agent failed after ${MAX_SPRINT_ATTEMPTS} attempts.${snippet}`,
         `/tasks/${task.id}`)
       console.log(`[scheduler] Auto-blocked task "${task.title}" — ${row?.sprint_count} failed sprints`)
       continue

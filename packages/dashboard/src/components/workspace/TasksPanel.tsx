@@ -421,6 +421,11 @@ function ListView({
               <span className={`block truncate ${isDone ? 'line-through text-text-muted' : isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>
                 {task.title}
               </span>
+              {task.status === 'blocked' && task.blockedReasonText && (
+                <span className="block text-[10px] text-amber-700 truncate mt-0.5">
+                  {task.blockedReasonText.slice(0, 100)}{task.blockedReasonText.length > 100 ? '...' : ''}
+                </span>
+              )}
               {task.tags?.length > 0 && (
                 <div className="flex flex-wrap items-center gap-0.5 mt-0.5">
                   {task.tags.slice(0, 3).map((tag) => (

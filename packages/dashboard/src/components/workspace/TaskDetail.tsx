@@ -172,6 +172,11 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
                 {task.blockedReason === 'manual' && 'Manually blocked'}
                 {!task.blockedReason && 'Task is blocked'}
               </p>
+              {task.blockedReasonText && (
+                <p className="text-[11px] text-text-secondary mt-1 whitespace-pre-wrap line-clamp-4">
+                  {task.blockedReasonText}
+                </p>
+              )}
             </div>
             <div className="flex gap-1.5 shrink-0">
               {task.blockedReason === 'max_retries' && (

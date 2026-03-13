@@ -147,6 +147,7 @@ export interface EngineTask {
   tags: TaskTag[]
   blockedReason: 'max_retries' | 'approval_pending' | 'dependency' | 'manual' | null
   blockedApprovalId: string | null
+  blockedReasonText: string | null
   sprintCount: number
   createdAt: string
   updatedAt: string

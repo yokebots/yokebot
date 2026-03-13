@@ -41,6 +41,9 @@ export function createBillingMiddleware(db: Db) {
     // Self-hosted: skip all billing
     if (!HOSTED_MODE) { next(); return }
 
+    // Read-only requests always pass — users must be able to view their data
+    if (req.method === 'GET') { next(); return }
+
     // Exempt paths
     if (BILLING_EXEMPT_PATHS.some((p) => req.path === p || req.path.startsWith(p + '/'))) {
       next()

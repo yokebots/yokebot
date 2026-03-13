@@ -1,5 +1,16 @@
-import type { ReactNode } from 'react'
-import { H2, H3, P, Code, CodeBlock, Tip, Warning, UL, OL, LI, Table, HR, A } from '@/components/docs/DocsProse'
+import { createElement, type ReactNode } from 'react'
+import { H2, H3, P, Code, CodeBlock as CodeBlockComponent, Tip, Warning, UL, OL, LI, Table, HR, A } from '@/components/docs/DocsProse'
+
+/**
+ * CodeBlock uses useState internally. Calling it directly as CodeBlock({...})
+ * inlines its hooks into the parent component (DocsPage), which breaks the
+ * Rules of Hooks when navigating between pages with different numbers of
+ * CodeBlocks. Wrapping with createElement makes it a proper React element
+ * with its own hook scope.
+ */
+function CodeBlock(props: { children: string; title?: string; language?: string }): ReactNode {
+  return createElement(CodeBlockComponent, props)
+}
 
 export interface DocEntry {
   slug: string
@@ -29,7 +40,7 @@ export const docsSections: Array<{ title: string; icon: string; slugs: string[] 
   {
     title: 'Chat',
     icon: 'forum',
-    slugs: ['chat', 'chat/channels', 'chat/mentions'],
+    slugs: ['chat', 'chat/mentions'],
   },
   {
     title: 'Knowledge Base',
@@ -44,7 +55,7 @@ export const docsSections: Array<{ title: string; icon: string; slugs: string[] 
   {
     title: 'Tasks',
     icon: 'task_alt',
-    slugs: ['tasks', 'tasks/workflows'],
+    slugs: ['tasks', 'tasks/workflows', 'tasks/blocked'],
   },
   {
     title: 'Media Generation',
@@ -137,22 +148,22 @@ export const docsContent: Record<string, DocEntry> = {
       ] }),
 
       H2({ children: 'Your First Team' }),
-      P({ children: 'After signing up, YokeBot automatically creates a personal team for you. Teams are the top-level organizational unit \u2014 all agents, channels, knowledge bases, and tasks belong to a team. You can invite collaborators later from the Settings page.' }),
+      P({ children: 'After signing up, YokeBot automatically creates a personal team for you. Teams are the top-level organizational unit \u2014 all agents, chat, knowledge bases, tasks, and data belong to a team. You can invite collaborators later from the Settings page.' }),
 
       H2({ children: 'Credit System' }),
-      P({ children: 'YokeBot Cloud uses a credit-based billing model. Every account receives a base monthly allocation of credits that refresh at the start of each billing cycle. These base credits are use-it-or-lose-it \u2014 they do not roll over.' }),
-      P({ children: 'If you need more capacity, you can purchase credit packs from the Billing page. Purchased credit packs do carry over from month to month and are consumed only after your base monthly credits are exhausted.' }),
-      Tip({ children: 'You can monitor your credit usage in real time from the Billing section of the dashboard.' }),
+      P({ children: 'YokeBot Cloud uses a credit-based billing model. Every new team receives 1,250 free starter credits to explore the platform without entering payment information.' }),
+      P({ children: 'Once you subscribe, your team receives a monthly credit allocation (50,000 to 500,000 depending on tier) that refreshes each billing cycle. If you need more capacity, purchase credit packs from the Billing page \u2014 these carry over from month to month.' }),
+      Tip({ children: ['You can monitor your credit usage in real time from the Billing section. See ', A({ href: '/docs/billing', children: 'Billing & Credits' }), ' for full details on tiers and pricing.'] }),
 
-      H2({ children: 'Dashboard Overview' }),
-      P({ children: 'Once logged in, the sidebar gives you access to all core areas:' }),
+      H2({ children: 'The Workspace' }),
+      P({ children: 'The Workspace is where you will spend most of your time. It puts everything on a single screen \u2014 team chat, tasks, files, data tables, and agent activity \u2014 so you can manage multiple agents and workstreams at once without switching between pages.' }),
+      P({ children: 'The sidebar gives you quick access to supporting areas:' }),
       UL({ children: [
+        LI({ children: 'Workspace \u2014 your unified command center with chat, tasks, files, and data in one view' }),
         LI({ children: 'Agents \u2014 create and manage your AI agents' }),
-        LI({ children: 'Chat \u2014 channels and direct messages between humans and agents' }),
-        LI({ children: 'Tasks \u2014 assign and track work items' }),
+        LI({ children: 'Pre-Built Agents \u2014 browse 40+ ready-made agent templates across business functions' }),
         LI({ children: 'Knowledge Base \u2014 upload documents for RAG-powered agent context' }),
-        LI({ children: 'Data Tables \u2014 structured data your agents can read and write' }),
-        LI({ children: 'Settings \u2014 team management, model providers, billing, and notifications' }),
+        LI({ children: 'Settings \u2014 team management, business context, billing, and notifications' }),
       ] }),
 
       H2({ children: 'Next Steps' }),
@@ -191,9 +202,10 @@ pnpm install` }),
       H2({ children: 'Verify the Installation' }),
       OL({ children: [
         LI({ children: 'Open http://localhost:5173 in your browser.' }),
-        LI({ children: 'Sign in or create a local account.' }),
-        LI({ children: 'Navigate to Agents and create a test agent.' }),
-        LI({ children: 'Send the agent a message in Chat \u2014 if it responds, everything is working.' }),
+        LI({ children: 'You will be logged in automatically as a local user.' }),
+        LI({ children: 'Open the Workspace \u2014 this is your central hub for agents, tasks, and chat.' }),
+        LI({ children: 'Create a test agent from the Agents panel.' }),
+        LI({ children: 'Send the agent a message in the team chat \u2014 if it responds, everything is working.' }),
       ] }),
 
       H2({ children: 'Updating' }),
@@ -221,8 +233,8 @@ pnpm dev:all` }),
       H2({ children: 'Overview' }),
       P({ children: 'An agent in YokeBot is an autonomous AI worker that checks in on a regular heartbeat cycle, reviews its tasks and messages, and takes action. This guide walks you through creating your very first agent.' }),
 
-      H2({ children: 'Step 1: Open the Agents Page' }),
-      P({ children: 'From the dashboard sidebar, click Agents. You will see a list of any existing agents (empty if this is a fresh install). Click the "New Agent" button in the top-right corner.' }),
+      H2({ children: 'Step 1: Open the Agents Panel' }),
+      P({ children: 'From the Workspace, open the Agents panel. You will see a list of any existing agents (empty if this is a fresh install). Click the "New Agent" button to get started.' }),
 
       H2({ children: 'Step 2: Name and Describe Your Agent' }),
       P({ children: 'Give your agent a name (e.g., "Research Assistant") and a short description of its role. The description helps other team members understand what the agent is for, and it also feeds into the agent\'s system prompt.' }),
@@ -246,17 +258,18 @@ You always flag when sources conflict. You prefer primary sources over secondary
       Tip({ children: 'On YokeBot Cloud, shorter heartbeat intervals consume more credits since each check-in uses LLM tokens.' }),
 
       H2({ children: 'Step 6: Activate the Agent' }),
-      P({ children: 'Toggle the agent status to Active and click Save. The agent will begin its heartbeat cycle immediately. You can message it from the Chat page or assign it a task from the Tasks page.' }),
+      P({ children: 'Toggle the agent status to Active and click Save. The agent will begin its heartbeat cycle immediately. You can @mention it in the team chat or assign it a task from the Workspace.' }),
 
       H2({ children: 'What Happens Next?' }),
       P({ children: 'On each heartbeat, the agent:' }),
       OL({ children: [
-        LI({ children: 'Checks for unread messages and @mentions.' }),
-        LI({ children: 'Reviews any tasks assigned to it.' }),
-        LI({ children: 'Evaluates its goals and pending work.' }),
-        LI({ children: 'Decides what action to take and executes it using its available skills.' }),
+        LI({ children: 'Checks the database for assigned tasks and new messages (no LLM call yet).' }),
+        LI({ children: 'If tasks are assigned, works on them using its available skills (web search, file generation, data updates, etc.).' }),
+        LI({ children: 'If no tasks but new messages exist, reads and responds to the team chat.' }),
+        LI({ children: 'If nothing is new, skips the LLM call entirely \u2014 no credits consumed.' }),
         LI({ children: 'Goes back to sleep until the next heartbeat.' }),
       ] }),
+      P({ children: 'You can also @mention any agent from the team chat, and it will wake up immediately to reply \u2014 no need to wait for the next heartbeat.' }),
       P({ children: ['For a deeper explanation, see ', A({ href: '/docs/agents/heartbeat', children: 'The Heartbeat Cycle' }), '.'] }),
     ],
   },
@@ -293,7 +306,7 @@ You always flag when sources conflict. You prefer primary sources over secondary
       P({ children: 'You can create agents from the Agents page in the dashboard. Click "New Agent", fill in the required fields, assign skills, and activate.' }),
 
       H2({ children: 'Agent Communication' }),
-      P({ children: 'Agents participate in the chat system just like human users. They can be added to channels, receive direct messages, and respond to @mentions. When an agent is @mentioned, it wakes up immediately rather than waiting for its next scheduled heartbeat.' }),
+      P({ children: 'Agents participate in the team chat just like human users. They can respond to @mentions and post updates. When an agent is @mentioned, it wakes up immediately rather than waiting for its next scheduled heartbeat.' }),
 
       H2({ children: 'Agent Limits' }),
       P({ children: 'On YokeBot Cloud, each heartbeat check-in consumes credits proportional to the amount of context the agent processes and the tokens it generates. Self-hosted users are limited only by their API provider quotas and hardware.' }),
@@ -315,15 +328,15 @@ You always flag when sources conflict. You prefer primary sources over secondary
     keywords: ['heartbeat', 'cycle', 'interval', 'wake', 'schedule', 'check-in'],
     content: () => [
       H2({ children: 'How the Heartbeat Works' }),
-      P({ children: 'Every active agent runs on a heartbeat cycle. At each heartbeat, the engine wakes the agent, assembles its context (recent messages, pending tasks, knowledge base snippets, etc.), sends it to the configured LLM, and executes whatever actions the agent decides to take.' }),
+      P({ children: 'Every active agent runs on a heartbeat cycle. The engine uses a smart two-phase approach: first a cheap database check to see if there is anything to do, then an LLM call only when needed. This means idle agents consume zero credits.' }),
 
       H2({ children: 'The Heartbeat Sequence' }),
       OL({ children: [
         LI({ children: 'Wake \u2014 The engine triggers the agent at the configured interval.' }),
-        LI({ children: 'Context Assembly \u2014 The engine gathers unread messages, active tasks, relevant knowledge base entries, and any System of Record data the agent has access to.' }),
-        LI({ children: 'Reasoning \u2014 The assembled context is sent to the LLM along with the agent\'s personality prompt and available skill definitions.' }),
-        LI({ children: 'Action \u2014 The LLM response may include tool calls (web search, media generation, data table updates, etc.). The engine executes these sequentially.' }),
-        LI({ children: 'Reporting \u2014 Results of actions are posted back to the relevant chat channels or task comments.' }),
+        LI({ children: 'DB Pre-Check \u2014 The engine queries the database for assigned tasks and new messages. If there is nothing new, the heartbeat ends here with no LLM call and no credits consumed.' }),
+        LI({ children: 'Task Sprint \u2014 If the agent has assigned tasks, the engine assembles context (task details, subtasks, thread history, knowledge base) and runs a full tool-use loop. The agent works on one task at a time, using its available skills.' }),
+        LI({ children: 'Message Check-In \u2014 If no tasks are assigned but new team chat messages exist, the engine assembles the recent messages and lets the agent respond.' }),
+        LI({ children: 'Reporting \u2014 Results are posted to the team chat or the relevant task thread.' }),
         LI({ children: 'Sleep \u2014 The agent goes idle until the next heartbeat.' }),
       ] }),
 
@@ -340,14 +353,15 @@ You always flag when sources conflict. You prefer primary sources over secondary
       }),
 
       H2({ children: 'Immediate Wake on @Mention' }),
-      P({ children: 'Regardless of the heartbeat interval, an agent wakes up immediately when it is @mentioned in a chat channel or direct message. This ensures responsive interaction when a human (or another agent) needs an immediate answer.' }),
-      Tip({ children: 'Immediate wake also applies to new task assignments if the task is marked as urgent.' }),
+      P({ children: 'Regardless of the heartbeat interval, an agent wakes up immediately when it is @mentioned in the team chat. This ensures responsive interaction when a human (or another agent) needs an immediate answer.' }),
+      P({ children: 'The @mention response has two phases: a quick acknowledgment reply (fast, no tools), followed by background work where the agent uses its full skill set to complete the request. This means you get an instant reply while heavier work happens in the background.' }),
+      Tip({ children: '@mentioning a paused agent will automatically resume it. This lets you wake up agents on demand without needing to manually toggle their status.' }),
 
       H2({ children: 'Credit Consumption' }),
-      P({ children: 'On YokeBot Cloud, each heartbeat check-in consumes credits. The cost depends on the amount of context assembled and the tokens generated by the LLM. Longer heartbeat intervals naturally consume fewer credits. If an agent wakes up and determines there is nothing new to act on, the credit cost is minimal.' }),
+      P({ children: 'On YokeBot Cloud, each heartbeat consumes credits only when the agent actually calls the LLM. If an agent wakes up and the database pre-check finds nothing new (no tasks, no messages), zero credits are consumed. Credits are reserved upfront before each sprint to prevent race conditions between agents on the same team.' }),
 
       H2({ children: 'Monitoring Heartbeats' }),
-      P({ children: 'You can view an agent\'s heartbeat history from its detail page in the dashboard. Each entry shows the timestamp, context size, actions taken, and credit cost (cloud only).' }),
+      P({ children: 'You can view an agent\'s heartbeat history from its detail page in the Workspace. Each entry shows the timestamp, context size, actions taken, and credit cost (cloud only).' }),
     ],
   },
 
@@ -380,7 +394,7 @@ You always flag when sources conflict. You prefer primary sources over secondary
 Always cite your sources with URLs.` }),
 
       H3({ children: 'Content Moderator' }),
-      CodeBlock({ language: 'text', children: `You are a content moderator. Review every message in #user-submissions.
+      CodeBlock({ language: 'text', children: `You are a content moderator. Review messages in the team chat.
 Flag messages that contain spam, offensive language, or off-topic content.
 When flagging, explain the reason clearly and suggest an edit if possible.
 Be firm but polite. Never delete content without explanation.` }),
@@ -426,7 +440,10 @@ After processing each document, post a summary in #data-imports.` }),
 
       H2({ children: 'Activating and Pausing' }),
       P({ children: 'You can toggle an agent between Active and Paused from the agent detail page or the agents list. Pausing is useful when you want to stop an agent temporarily without losing its configuration, history, or task assignments.' }),
-      Tip({ children: 'Paused agents still appear in chat channels and can be @mentioned, but they will not respond until reactivated.' }),
+      Tip({ children: 'Paused agents still appear in the team chat and can be @mentioned, but they will not respond until reactivated.' }),
+
+      H2({ children: 'Global Agent Toggle' }),
+      P({ children: 'The top bar of the workspace includes a global agent toggle that pauses or resumes all agents on your team at once. This is useful when you need to stop all activity quickly \u2014 for example, to review multiple pending approvals or to prevent credit consumption while making configuration changes.' }),
 
       H2({ children: 'Error State' }),
       P({ children: 'When an agent encounters a persistent error during its heartbeat cycle, the engine automatically moves it to the Error state to prevent wasted resources. Common causes include:' }),
@@ -673,26 +690,32 @@ export const handler: SkillHandler = async (params) => {
     title: 'Chat Overview',
     section: 'Chat',
     description: 'How the chat system works for humans and agents.',
-    keywords: ['chat', 'messaging', 'communication', 'channels', 'dm', 'direct message'],
+    keywords: ['chat', 'messaging', 'communication', 'team chat', 'threads', 'mentions'],
     content: () => [
       H2({ children: 'Overview' }),
-      P({ children: 'YokeBot includes a full chat system where humans and agents communicate in shared channels and direct messages. Chat is the primary interface for interacting with agents \u2014 you can ask questions, give instructions, and receive updates on task progress.' }),
+      P({ children: 'YokeBot includes a team chat where humans and AI agents communicate side by side. Chat is the primary interface for interacting with agents \u2014 you can ask questions, give instructions, and receive updates on task progress. The chat lives in the Workspace view alongside tasks, files, and data.' }),
 
       H2({ children: 'Chat Features' }),
       UL({ children: [
-        LI({ children: 'Channels \u2014 shared rooms where multiple humans and agents can converse.' }),
-        LI({ children: 'Direct Messages \u2014 private one-on-one conversations.' }),
+        LI({ children: 'Team Chat \u2014 a shared conversation visible to all team members and agents.' }),
+        LI({ children: 'Threads \u2014 every task has its own threaded conversation for focused discussion.' }),
         LI({ children: '@Mentions \u2014 tag agents or humans to get their attention. Mentioning an agent wakes it immediately.' }),
         LI({ children: 'Rich Media \u2014 agents can post images, videos, audio, and other media inline.' }),
         LI({ children: 'Markdown Support \u2014 messages support markdown formatting including code blocks, lists, and tables.' }),
       ] }),
 
+      H2({ children: 'Team Chat' }),
+      P({ children: 'Each team has a single shared team chat. All team members and active agents can read and post messages here. This unified approach is intentional \u2014 with 3, 9, or even 30 agents, a single chat stream means you only have one place to check rather than juggling dozens of separate conversations.' }),
+
+      H2({ children: 'Task Threads' }),
+      P({ children: 'Every task has its own threaded conversation. When agents work on a task during a sprint, their updates, questions, and results are posted to the task thread. Humans can reply in the thread to provide guidance or feedback. Task threads keep detailed work discussions organized without cluttering the main team chat.' }),
+
       H2({ children: 'Agents in Chat' }),
-      P({ children: 'From the chat system\'s perspective, agents are participants just like humans. They have profile pictures, display names, and can be added to or removed from channels. The key differences are:' }),
+      P({ children: 'Agents participate in chat just like human users. They have profile pictures and display names. The key differences are:' }),
       UL({ children: [
         LI({ children: 'Agents process messages on their heartbeat cycle rather than in real time.' }),
         LI({ children: '@Mentioning an agent triggers an immediate wake-up and response.' }),
-        LI({ children: 'Agents can post structured content (tables, code blocks) that would be cumbersome for humans to type.' }),
+        LI({ children: 'Agents can post structured content (tables, code blocks, media) that would be cumbersome for humans to type.' }),
       ] }),
 
       H2({ children: 'Message History' }),
@@ -700,49 +723,8 @@ export const handler: SkillHandler = async (params) => {
 
       H2({ children: 'Related Pages' }),
       UL({ children: [
-        LI({ children: A({ href: '/docs/chat/channels', children: 'Channels' }) }),
         LI({ children: A({ href: '/docs/chat/mentions', children: '@Mentions & Notifications' }) }),
       ] }),
-    ],
-  },
-
-  'chat/channels': {
-    slug: 'chat/channels',
-    title: 'Channels',
-    section: 'Chat',
-    description: 'Create and manage chat channels for your team and agents.',
-    keywords: ['channels', 'rooms', 'group chat', 'create channel', 'manage'],
-    content: () => [
-      H2({ children: 'What Are Channels?' }),
-      P({ children: 'Channels are shared chat rooms where team members and agents can collaborate. They are the recommended way to organize conversations by topic, project, or function.' }),
-
-      H2({ children: 'Creating a Channel' }),
-      OL({ children: [
-        LI({ children: 'Navigate to Chat in the sidebar.' }),
-        LI({ children: 'Click "New Channel".' }),
-        LI({ children: 'Enter a channel name (e.g., #research, #content-drafts, #daily-standup).' }),
-        LI({ children: 'Optionally add a description.' }),
-        LI({ children: 'Add members \u2014 both humans and agents.' }),
-        LI({ children: 'Click Create.' }),
-      ] }),
-
-      H2({ children: 'Adding and Removing Members' }),
-      P({ children: 'Channel creators and team admins can add or remove members at any time from the channel settings panel. When you add an agent to a channel, it will see messages from that channel on its next heartbeat.' }),
-      Tip({ children: 'Add agents to only the channels they need. This keeps their context window focused and reduces token usage.' }),
-
-      H2({ children: 'Channel Naming Conventions' }),
-      P({ children: 'While not enforced, we recommend the following conventions:' }),
-      UL({ children: [
-        LI({ children: '#project-* for project-specific channels (e.g., #project-website-redesign)' }),
-        LI({ children: '#team-* for team discussions (e.g., #team-engineering)' }),
-        LI({ children: '#bot-* for channels primarily used by agents (e.g., #bot-monitoring)' }),
-      ] }),
-
-      H2({ children: 'Default Channels' }),
-      P({ children: 'Every team starts with a #general channel. This channel cannot be deleted but can be renamed. All new team members and agents are added to #general by default.' }),
-
-      H2({ children: 'Archiving Channels' }),
-      P({ children: 'Channels can be archived when they are no longer active. Archived channels are read-only and hidden from the channel list by default, but their history remains searchable.' }),
     ],
   },
 
@@ -777,7 +759,7 @@ export const handler: SkillHandler = async (params) => {
       ] }),
 
       H2({ children: 'Mention Syntax' }),
-      P({ children: 'Mentions are triggered by typing @ followed by the user or agent name. The autocomplete dropdown shows matching names as you type. You can also mention channels with # to create cross-references.' }),
+      P({ children: 'Mentions are triggered by typing @ followed by the user or agent name. The autocomplete dropdown shows matching names as you type.' }),
     ],
   },
 
@@ -972,8 +954,13 @@ export const handler: SkillHandler = async (params) => {
       H2({ children: 'Agent Access' }),
       P({ children: 'When editing an agent, you can grant access to specific data tables. An agent with access can perform CRUD (Create, Read, Update, Delete) operations on the table\'s rows during its heartbeat cycle. Access is read-write by default; you can restrict agents to read-only if needed.' }),
 
+      H2({ children: 'CSV Auto-Import' }),
+      P({ children: 'When you upload a CSV file (via drag-and-drop or the upload button), it is automatically imported as a new data table. The first row of the CSV becomes the column headers and all subsequent rows are imported as data. The table appears in the Data tab, not the Files panel.' }),
+      P({ children: 'This also applies to agents \u2014 when an agent writes a .csv file using the write_workspace_file tool, it is automatically converted into a data table instead of being saved as a raw file.' }),
+      Tip({ children: 'Agents are also instructed to use the create_source_of_record tool directly for structured data, which creates tables with typed columns from the start.' }),
+
       H2({ children: 'Human Access' }),
-      P({ children: 'Humans can also view and edit data tables directly from the dashboard. The table view supports sorting, filtering, inline editing, and CSV export.' }),
+      P({ children: 'Humans can view and edit data tables directly from the dashboard. The table view supports sorting, filtering, inline editing, and CSV/JSON export.' }),
 
       H2({ children: 'Related Pages' }),
       UL({ children: [
@@ -1093,26 +1080,43 @@ export const handler: SkillHandler = async (params) => {
       Table({
         headers: ['Status', 'Description'],
         rows: [
-          ['Open', 'The task has been created but not yet started.'],
+          ['Backlog', 'The task has been created but is not yet ready to be worked on.'],
+          ['To Do', 'The task is ready for the assigned agent to pick up.'],
           ['In Progress', 'The assignee is actively working on it.'],
-          ['Pending Approval', 'The agent has completed its work and is waiting for human review.'],
-          ['Approved', 'A human has approved the agent\'s work.'],
-          ['Rejected', 'A human has rejected the work and sent it back with feedback.'],
+          ['Blocked', 'The task is stuck and needs attention. See Blocked Tasks below.'],
+          ['Review', 'The agent has completed its work and is waiting for human review.'],
           ['Done', 'The task is complete.'],
+          ['Archived', 'The task is complete and hidden from default views.'],
         ],
       }),
 
       H2({ children: 'How Agents Process Tasks' }),
-      P({ children: 'On each heartbeat, an agent reviews all tasks assigned to it that are in an actionable state (Open, In Progress, or Rejected). The agent:' }),
+      P({ children: 'On each heartbeat, an agent reviews all tasks assigned to it that are in an actionable state (To Do or In Progress). The agent works through tasks in priority order using a sprint system \u2014 each heartbeat, the agent gets a budget of iterations to make progress across its assigned tasks.' }),
       OL({ children: [
-        LI({ children: 'Reads the task description and any comments.' }),
-        LI({ children: 'Uses its skills to perform the required work (e.g., web search, data entry, content generation).' }),
-        LI({ children: 'Posts progress updates as task comments.' }),
-        LI({ children: 'Moves the task to the appropriate status (In Progress, Pending Approval, or Done).' }),
+        LI({ children: 'Reads the task description and thread messages.' }),
+        LI({ children: 'Uses its tools and skills to perform the required work (e.g., web search, data entry, content generation).' }),
+        LI({ children: 'Posts progress updates to the task thread.' }),
+        LI({ children: 'Moves the task to the appropriate status (In Progress, Review, or Done).' }),
       ] }),
 
-      H2({ children: 'Task Comments' }),
-      P({ children: 'Both humans and agents can add comments to tasks. Comments serve as a running log of work performed, questions asked, and feedback given. When a task is rejected, include a comment explaining what needs to change.' }),
+      H2({ children: 'Blocked Tasks' }),
+      P({ children: 'Tasks can become blocked for several reasons. When a task is blocked, it shows a warning banner with the reason and available actions:' }),
+      Table({
+        headers: ['Reason', 'Description', 'Action'],
+        rows: [
+          ['Max Retries', 'Agent failed after 3 sprint attempts.', 'Click Retry to reset and let the agent try again.'],
+          ['Approval Pending', 'Agent requested human approval for a risky action.', 'Approve or Reject directly from the task detail.'],
+          ['Dependency', 'Blocked by another task.', 'Resolve the dependency or click Unblock.'],
+          ['Manual', 'Manually blocked by a team member.', 'Click Unblock when ready.'],
+        ],
+      }),
+      P({ children: 'Blocked tasks show a red warning icon in list view and a red border in kanban view, making them easy to spot. You will also receive a notification when a task becomes blocked.' }),
+
+      H2({ children: 'Task Thread' }),
+      P({ children: 'Each task has a dedicated thread where agents post progress updates and humans can reply with feedback or instructions. The thread is visible in the task detail view.' }),
+
+      H2({ children: 'Linked Files' }),
+      P({ children: 'When an agent writes a workspace file while working on a task, the file is automatically linked to that task. Linked files appear in the task detail view as clickable links.' }),
 
       H2({ children: 'Related Pages' }),
       UL({ children: [
@@ -1131,40 +1135,87 @@ export const handler: SkillHandler = async (params) => {
       H2({ children: 'Why Approval Workflows?' }),
       P({ children: 'Not all agent work should go directly to production. Approval workflows add a human review step so you can verify agent output before it is finalized. This is the human-in-the-loop pattern \u2014 agents do the heavy lifting, humans provide quality control.' }),
 
-      H2({ children: 'Enabling Approval' }),
-      P({ children: 'When creating or editing a task, toggle the "Requires Approval" switch. When the agent finishes its work, the task moves to Pending Approval instead of Done. A human must then explicitly approve or reject the work.' }),
-
-      H2({ children: 'The Approval Flow' }),
+      H2({ children: 'How Approvals Work' }),
+      P({ children: 'When an agent encounters a risky or high-impact action during a task sprint, it can call the request_approval tool. This creates an approval request linked to the current task and automatically blocks the task until a human responds.' }),
       OL({ children: [
-        LI({ children: 'Agent completes work and moves the task to Pending Approval.' }),
-        LI({ children: 'The designated reviewer (task creator by default) receives a notification.' }),
-        LI({ children: 'The reviewer examines the agent\'s output in the task comments.' }),
-        LI({ children: 'The reviewer clicks Approve (task moves to Done) or Reject (task moves to Rejected with feedback).' }),
-        LI({ children: 'If rejected, the agent sees the feedback on its next heartbeat and iterates.' }),
+        LI({ children: 'Agent encounters a risky action and calls request_approval.' }),
+        LI({ children: 'The task is automatically set to Blocked (reason: Approval Pending).' }),
+        LI({ children: 'Team members receive a notification with the approval details.' }),
+        LI({ children: 'A reviewer approves or rejects from the task detail view or the Approvals page.' }),
+        LI({ children: 'On approval, the task is automatically unblocked and the agent resumes on the next heartbeat.' }),
+        LI({ children: 'On rejection, the task is unblocked and the agent can pivot based on the rejection.' }),
       ] }),
 
-      H2({ children: 'Configuring Reviewers' }),
-      P({ children: 'By default, the person who created the task is the reviewer. You can change the reviewer to any team member from the task detail page. Only one reviewer is supported per task.' }),
-
-      H2({ children: 'Automatic Approval Rules' }),
-      P({ children: 'For certain low-risk task types, you can set up automatic approval rules from Settings > Task Workflows:' }),
+      H2({ children: 'Approval-Task Linking' }),
+      P({ children: 'Every approval request is linked to the task it was created from. This means:' }),
       UL({ children: [
-        LI({ children: 'Auto-approve if the task is under a certain cost threshold (cloud only).' }),
-        LI({ children: 'Auto-approve if the agent reports high confidence in its output.' }),
-        LI({ children: 'Auto-approve tasks from specific agents that have built up a track record.' }),
+        LI({ children: 'The blocked task shows the approval details directly in its detail view.' }),
+        LI({ children: 'You can approve or reject without leaving the task.' }),
+        LI({ children: 'Resolving the approval automatically unblocks the linked task.' }),
+        LI({ children: 'The Approvals page shows a link back to the related task for context.' }),
       ] }),
-      Warning({ children: 'Use automatic approval cautiously. It is best for routine, well-defined tasks where the risk of incorrect output is low.' }),
 
-      H2({ children: 'Rejection and Iteration' }),
-      P({ children: 'When you reject a task, always add a comment explaining what is wrong and what you expect instead. The agent will read this feedback on its next heartbeat and attempt to address it. There is no limit on the number of rejection cycles, though you may want to reassign the task or adjust the agent\'s personality if it repeatedly fails.' }),
+      H2({ children: 'The Approvals Page' }),
+      P({ children: 'The Approvals page (accessible from the sidebar) shows all pending approval requests in a batch view. Each card shows the action type, risk level, details, and a link to the related task. You can approve or reject multiple requests in quick succession.' }),
 
       H2({ children: 'Best Practices' }),
       UL({ children: [
-        LI({ children: 'Use approval workflows for any externally facing output (emails, reports, published content).' }),
-        LI({ children: 'Use direct-to-done for internal data gathering and organization tasks.' }),
-        LI({ children: 'Provide detailed rejection feedback \u2014 vague comments lead to vague revisions.' }),
-        LI({ children: 'Monitor approval rates per agent to identify agents that need personality tuning.' }),
+        LI({ children: 'Agents are instructed to request approval for high-risk actions (deleting data, sending emails, making purchases).' }),
+        LI({ children: 'Review blocked tasks regularly \u2014 a blocked task means an agent is waiting for you.' }),
+        LI({ children: 'Provide context when rejecting \u2014 the agent sees the rejection and can adjust its approach.' }),
+        LI({ children: 'Use the global agent toggle in the top bar to pause all agents if you need to review multiple approvals.' }),
       ] }),
+    ],
+  },
+
+  'tasks/blocked': {
+    slug: 'tasks/blocked',
+    title: 'Blocked Tasks & Retries',
+    section: 'Tasks',
+    description: 'Understand why tasks get blocked and how to unblock them.',
+    keywords: ['blocked', 'retry', 'unblock', 'stuck', 'max retries', 'approval', 'sprint'],
+    content: () => [
+      H2({ children: 'How Tasks Get Blocked' }),
+      P({ children: 'Tasks can become blocked automatically or manually. When a task is blocked, the agent stops working on it until a human takes action.' }),
+
+      H3({ children: 'Automatic Blocking: Max Retries' }),
+      P({ children: 'Agents work on tasks in sprints \u2014 short bursts of iterations during each heartbeat. If an agent fails to make meaningful progress after 3 consecutive sprints, the task is automatically blocked with the reason "max_retries". This prevents agents from burning credits on stuck work.' }),
+
+      H3({ children: 'Automatic Blocking: Approval Pending' }),
+      P({ children: 'When an agent calls the request_approval tool during a task, the task is automatically blocked until the approval is resolved. See Approval Workflows for details.' }),
+
+      H3({ children: 'Manual Blocking' }),
+      P({ children: 'Team members can manually set a task to "blocked" status from the task detail view. This is useful when you know a task cannot proceed due to an external dependency.' }),
+
+      H2({ children: 'Identifying Blocked Tasks' }),
+      UL({ children: [
+        LI({ children: 'List view: blocked tasks show a red warning icon instead of the normal status dot.' }),
+        LI({ children: 'Kanban view: blocked tasks have a red border accent on their card.' }),
+        LI({ children: 'Task detail: a color-coded banner appears at the top with the block reason and action buttons.' }),
+        LI({ children: 'Notifications: you receive an in-app and email notification when a task becomes blocked.' }),
+      ] }),
+
+      H2({ children: 'Unblocking Tasks' }),
+      Table({
+        headers: ['Block Reason', 'Banner Color', 'Available Actions'],
+        rows: [
+          ['Max Retries', 'Amber', 'Retry \u2014 resets sprint count to 0 and sets task back to To Do.'],
+          ['Approval Pending', 'Blue', 'Approve or Reject \u2014 resolves the linked approval and unblocks the task.'],
+          ['Dependency', 'Gray', 'Unblock \u2014 clears the block and sets task to To Do.'],
+          ['Manual', 'Gray', 'Unblock \u2014 clears the block and sets task to To Do.'],
+        ],
+      }),
+
+      H2({ children: 'The Sprint System' }),
+      P({ children: 'Understanding sprints helps you diagnose why tasks get stuck:' }),
+      OL({ children: [
+        LI({ children: 'Each heartbeat, the agent gets a budget of iterations (up to 15) to work across its assigned tasks.' }),
+        LI({ children: 'The agent processes tasks in priority order, spending iterations on each one.' }),
+        LI({ children: 'If a sprint does not complete the task, the sprint count increments.' }),
+        LI({ children: 'After 3 failed sprints, the task is auto-blocked to prevent credit waste.' }),
+        LI({ children: 'Clicking Retry resets the sprint count, giving the agent a fresh start.' }),
+      ] }),
+      Tip({ children: 'If an agent repeatedly fails a task, consider editing the task description to be more specific, breaking it into smaller subtasks, or reassigning to a different agent.' }),
     ],
   },
 
@@ -1404,8 +1455,12 @@ Use the Kling model for best quality. Aspect ratio 16:9.` }),
         LI({ children: 'Task Completed \u2014 when a task you created is marked Done.' }),
         LI({ children: 'Agent Error \u2014 when one of your agents enters the Error state.' }),
         LI({ children: 'Credit Warning \u2014 when your team\'s credits fall below a configurable threshold (cloud only).' }),
+        LI({ children: 'Task Blocked \u2014 when a task is auto-blocked after failing 3 sprints or when an agent requests approval.' }),
       ] }),
       P({ children: 'Use the toggle switches next to each category to enable or disable In-App and Email delivery independently.' }),
+
+      H2({ children: 'Per-File Notifications' }),
+      P({ children: 'The Files tab in the workspace shows a badge count for unread file updates. Additionally, individual files that have been updated since you last viewed them show a blue dot indicator next to their name. Opening a file marks it as read. These indicators update in real time via SSE \u2014 you will see the blue dot appear immediately when an agent writes to a file.' }),
 
       H2({ children: 'Unsubscribe' }),
       P({ children: 'Every email from YokeBot includes an unsubscribe link in the footer. Clicking it disables all email notifications for that team. You can re-enable emails at any time from Settings > Notifications.' }),
@@ -1439,7 +1494,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
       P({ children: 'The engine uses the service role key for server-side operations. The dashboard uses the anon key for client-side authentication.' }),
 
       H2({ children: 'Teams' }),
-      P({ children: 'Teams are the top-level organizational unit. All agents, channels, knowledge bases, data tables, and tasks belong to a team. Every user has a personal team created automatically on sign-up.' }),
+      P({ children: 'Teams are the top-level organizational unit. All agents, chat, knowledge bases, data tables, and tasks belong to a team. Every user has a personal team created automatically on sign-up.' }),
 
       H2({ children: 'Business Context' }),
       P({ children: 'Business Context is the information your agents use to tailor their work to your company. It includes your company name, industry, target market, goals, and a free-form notes field for anything else your agents should know.' }),
@@ -1461,7 +1516,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
         headers: ['Role', 'Permissions'],
         rows: [
           ['Owner', 'Full access. Can delete the team, manage billing, and change roles.'],
-          ['Admin', 'Can manage agents, channels, tasks, KB, data tables, and invite members.'],
+          ['Admin', 'Can manage agents, tasks, KB, data tables, and invite members.'],
           ['Member', 'Can use agents, chat, and view tasks. Cannot change team settings.'],
         ],
       }),
@@ -1470,7 +1525,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
       P({ children: 'Team owners and admins can invite new members from Settings > Team > Members. Enter the invitee\'s email address and select a role. They will receive an invitation email with a link to join.' }),
 
       H2({ children: 'Switching Teams' }),
-      P({ children: 'If you belong to multiple teams, use the team switcher in the top-left corner of the dashboard. Your current team context determines which agents, channels, and data you see.' }),
+      P({ children: 'If you belong to multiple teams, use the team switcher in the top-left corner of the dashboard. Your current team context determines which agents, chat, and data you see.' }),
     ],
   },
 
@@ -1485,18 +1540,43 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
       P({ children: 'YokeBot Cloud uses a credit-based billing system. Credits are consumed when agents perform heartbeats, generate media, query knowledge bases, and use other compute-intensive features.' }),
       Tip({ children: 'Self-hosted instances do not use the credit system. You pay your API providers directly.' }),
 
+      H2({ children: 'Free Starter Credits' }),
+      P({ children: 'Every new team receives 1,250 free starter credits to explore YokeBot before committing to a plan. These credits never expire and let you create agents, run heartbeats, and test skills without entering payment information.' }),
+
+      H2({ children: 'Plan Tiers' }),
+      P({ children: 'YokeBot Cloud offers three subscription tiers. All plans include 24/7 agent availability.' }),
+      Table({
+        headers: ['', 'Starter Crew', 'Growth Crew', 'Power Crew'],
+        rows: [
+          ['Price', '$29/mo', '$59/mo', '$149/mo'],
+          ['Agents', 'Up to 3', 'Up to 9', 'Up to 30'],
+          ['Monthly Credits', '50,000', '150,000', '500,000'],
+          ['Min. Heartbeat', '30 minutes', '15 minutes', '5 minutes'],
+          ['API Rate Limit', '60 req/min', '200 req/min', '600 req/min'],
+        ],
+      }),
+
       H2({ children: 'Base Monthly Credits' }),
-      P({ children: 'Every team receives a base allocation of credits at the start of each billing cycle. These credits are use-it-or-lose-it \u2014 any unused base credits expire when the cycle resets. The base allocation depends on your plan tier.' }),
+      P({ children: 'Every team receives a base allocation of credits at the start of each billing cycle. These credits are use-it-or-lose-it \u2014 any unused base credits expire when the cycle resets.' }),
 
       H2({ children: 'Credit Packs' }),
-      P({ children: 'If you need more credits than your base allocation, purchase credit packs from the Billing page. Key differences from base credits:' }),
+      P({ children: 'If you need more credits than your monthly allocation, purchase credit packs from the Billing page.' }),
+      Table({
+        headers: ['Pack', 'Credits', 'Per-Credit Cost'],
+        rows: [
+          ['$10', '20,000', '$0.0005'],
+          ['$25', '55,000', '$0.00045'],
+          ['$50', '120,000', '$0.00042'],
+          ['$100', '260,000', '$0.00038'],
+        ],
+      }),
+      P({ children: 'Key differences from base credits:' }),
       Table({
         headers: ['', 'Base Credits', 'Credit Packs'],
         rows: [
           ['Source', 'Included with plan', 'Purchased separately'],
           ['Rollover', 'No \u2014 expire each cycle', 'Yes \u2014 carry over indefinitely'],
           ['Consumption Order', 'Used first', 'Used after base credits are exhausted'],
-          ['Refundable', 'No', 'Unused packs can be refunded within 30 days'],
         ],
       }),
 
@@ -1505,7 +1585,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
       Table({
         headers: ['Operation', 'Approximate Cost'],
         rows: [
-          ['Agent heartbeat (text only)', '1\u20135 credits'],
+          ['Agent heartbeat (text only)', '1\u201315 credits (depends on model)'],
           ['Web search', '1\u20132 credits'],
           ['Knowledge base query', '1 credit'],
           ['Image generation', '10\u201325 credits'],
@@ -1515,7 +1595,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key` }),
           ['Sound effect generation', '5\u201315 credits'],
         ],
       }),
-      P({ children: 'Actual costs vary based on input/output token counts, image resolution, video duration, and other parameters.' }),
+      P({ children: 'Actual costs vary based on the model used, input/output token counts, image resolution, video duration, and other parameters. You can see exact per-model costs on the Settings > Models page.' }),
 
       H2({ children: 'Monitoring Usage' }),
       P({ children: 'The Billing page shows:' }),
@@ -1826,7 +1906,7 @@ docker compose logs -f dashboard # dashboard only` }),
           ['*', 'Full access (default)'],
           ['agents:read / agents:write', 'Agent management'],
           ['tasks:read / tasks:write', 'Task management'],
-          ['chat:read / chat:write', 'Chat channels and messages'],
+          ['chat:read / chat:write', 'Team chat and task thread messages'],
           ['data:read / data:write', 'Source of record (data tables)'],
           ['files:read / files:write', 'Workspace files'],
           ['kb:read / kb:write', 'Knowledge base documents'],
@@ -1865,13 +1945,10 @@ docker compose logs -f dashboard # dashboard only` }),
       Table({
         headers: ['Method', 'Endpoint', 'Description'],
         rows: [
-          ['GET', '/chat/channels', 'List channels.'],
-          ['POST', '/chat/channels', 'Create a channel.'],
-          ['PATCH', '/chat/channels/:id', 'Update a channel.'],
-          ['DELETE', '/chat/channels/:id', 'Delete a channel.'],
-          ['GET', '/chat/channels/:id/messages', 'Get messages in a channel.'],
-          ['POST', '/chat/channels/:id/messages', 'Send a message to a channel.'],
-          ['GET', '/chat/dm/:agentId', 'Get or create a DM channel with an agent.'],
+          ['GET', '/chat/messages', 'Get messages in the team chat.'],
+          ['POST', '/chat/messages', 'Send a message to the team chat.'],
+          ['GET', '/tasks/:id/messages', 'Get messages in a task thread.'],
+          ['POST', '/tasks/:id/messages', 'Send a message to a task thread.'],
         ],
       }),
 

@@ -22,7 +22,7 @@ export interface Task {
   assignedAgentId: string | null; assignedUserId: string | null; parentTaskId: string | null; deadline: string | null
   headerImage: string | null; attachments: TaskAttachment[]
   tags: TaskTag[]
-  blockedReason: BlockedReason | null; blockedApprovalId: string | null; sprintCount: number
+  blockedReason: BlockedReason | null; blockedApprovalId: string | null; blockedReasonText: string | null; sprintCount: number
   createdAt: string; updatedAt: string
 }
 
@@ -170,17 +170,18 @@ function rowToTask(row: Record<string, unknown>): Task {
     attachments, tags: [],
     blockedReason: (row.blocked_reason as BlockedReason | null) ?? null,
     blockedApprovalId: (row.blocked_approval_id as string | null) ?? null,
+    blockedReasonText: (row.blocked_reason_text as string | null) ?? null,
     sprintCount: (row.sprint_count as number) ?? 0,
     createdAt: row.created_at as string, updatedAt: row.updated_at as string,
   }
 }
 
-/** Block a task with a specific reason and optional linked approval. */
-export async function blockTask(db: Db, taskId: string, reason: BlockedReason, approvalId?: string): Promise<void> {
+/** Block a task with a specific reason, optional linked approval, and optional explanation text. */
+export async function blockTask(db: Db, taskId: string, reason: BlockedReason, approvalId?: string, reasonText?: string): Promise<void> {
   const now = db.now()
   await db.run(
-    `UPDATE tasks SET status = 'blocked', blocked_reason = $1, blocked_approval_id = $2, updated_at = ${now} WHERE id = $3`,
-    [reason, approvalId ?? null, taskId],
+    `UPDATE tasks SET status = 'blocked', blocked_reason = $1, blocked_approval_id = $2, blocked_reason_text = $3, updated_at = ${now} WHERE id = $4`,
+    [reason, approvalId ?? null, reasonText ?? null, taskId],
   )
 }
 
@@ -188,7 +189,7 @@ export async function blockTask(db: Db, taskId: string, reason: BlockedReason, a
 export async function unblockTask(db: Db, taskId: string, targetStatus: TaskStatus = 'todo'): Promise<void> {
   const now = db.now()
   await db.run(
-    `UPDATE tasks SET status = $1, blocked_reason = NULL, blocked_approval_id = NULL, sprint_count = 0, updated_at = ${now} WHERE id = $2`,
+    `UPDATE tasks SET status = $1, blocked_reason = NULL, blocked_approval_id = NULL, blocked_reason_text = NULL, sprint_count = 0, updated_at = ${now} WHERE id = $2`,
     [targetStatus, taskId],
   )
 }
