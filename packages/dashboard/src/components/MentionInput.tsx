@@ -50,6 +50,27 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
   const gifPickerRef = useRef<HTMLDivElement>(null)
   const gifSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Map from display label → { type, id } for resolving mentions back to markdown
+  const mentionsMapRef = useRef<Map<string, { type: string; id: string }>>(new Map())
+
+  // Derive display text from the resolved markdown value (strip mention syntax for the textarea)
+  const displayText = value.replace(/@\[([^\]]+)\]\((\w+):([^)]+)\)/g, (_match, label, type, id) => {
+    mentionsMapRef.current.set(label, { type, id })
+    return `@${label}`
+  })
+
+  // Convert display text back to resolved markdown
+  const resolveText = useCallback((display: string) => {
+    let resolved = display
+    // Sort by label length descending to avoid partial-match collisions
+    const entries = [...mentionsMapRef.current.entries()].sort((a, b) => b[0].length - a[0].length)
+    for (const [label, { type, id }] of entries) {
+      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      resolved = resolved.replace(new RegExp(`@${escaped}(?!\\w)`, 'g'), `@[${label}](${type}:${id})`)
+    }
+    return resolved
+  }, [])
+
   // Build flat list of all mention options — @Everyone first
   const allOptions: MentionOption[] = completions ? [
     { type: 'everyone' as const, id: 'all', label: 'Everyone', icon: 'groups', iconColor: '#6366f1' },
@@ -98,26 +119,37 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
   }, [value])
 
   const insertMention = useCallback((option: MentionOption) => {
-    const before = value.slice(0, mentionStart)
-    const after = value.slice(inputRef.current?.selectionStart ?? value.length)
-    const mention = `@[${option.label}](${option.type}:${option.id}) `
-    const newValue = before + mention + after
-    const pos = before.length + mention.length
+    const before = displayText.slice(0, mentionStart)
+    const after = displayText.slice(inputRef.current?.selectionStart ?? displayText.length)
+    const mentionDisplay = `@${option.label} `
+    const newDisplayValue = before + mentionDisplay + after
+
+    // Record the mention mapping so resolveText can reconstruct markdown
+    mentionsMapRef.current.set(option.label, { type: option.type, id: option.id })
+
+    const pos = before.length + mentionDisplay.length
     pendingCursorRef.current = pos
-    onChange(newValue)
+    onChange(resolveText(newDisplayValue))
     setShowDropdown(false)
     setMentionQuery('')
     setMentionStart(-1)
-  }, [value, mentionStart, onChange])
+  }, [displayText, mentionStart, onChange, resolveText])
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newValue = e.target.value
+    const newDisplayValue = e.target.value
     const cursorPos = e.target.selectionStart
 
-    onChange(newValue)
+    // Clean up mentions map for any mentions the user deleted
+    mentionsMapRef.current.forEach((_val, label) => {
+      if (!newDisplayValue.includes(`@${label}`)) {
+        mentionsMapRef.current.delete(label)
+      }
+    })
+
+    onChange(resolveText(newDisplayValue))
 
     // Detect if we're in a mention context
-    const textBeforeCursor = newValue.slice(0, cursorPos)
+    const textBeforeCursor = newDisplayValue.slice(0, cursorPos)
     const atIndex = textBeforeCursor.lastIndexOf('@')
 
     if (atIndex >= 0) {
@@ -231,9 +263,9 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
   }
 
   const handleEmojiSelect = (emoji: { native: string }) => {
-    const cursorPos = inputRef.current?.selectionStart ?? value.length
-    const newValue = value.slice(0, cursorPos) + emoji.native + value.slice(cursorPos)
-    onChange(newValue)
+    const cursorPos = inputRef.current?.selectionStart ?? displayText.length
+    const newDisplayValue = displayText.slice(0, cursorPos) + emoji.native + displayText.slice(cursorPos)
+    onChange(resolveText(newDisplayValue))
     setShowEmojiPicker(false)
     requestAnimationFrame(() => {
       if (inputRef.current) {
@@ -255,34 +287,21 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
     }
   }
 
-  const hasMentions = /@\[[^\]]+\]\([^)]+\)/.test(value)
-
   // Group filtered options by type for section headers
   let lastType = ''
 
   return (
     <div className="relative w-full">
       <div className="relative">
-        {/* Styled preview overlay — always visible when mentions exist, pointer-events-none so textarea stays interactive */}
-        {hasMentions && value.trim() && (
-          <div
-            className="absolute inset-0 z-[2] flex items-start rounded-xl border border-transparent px-4 py-2.5 pr-28 text-sm overflow-hidden whitespace-pre-wrap pointer-events-none"
-            style={{ minHeight: '40px', maxHeight: '120px' }}
-          >
-            <span className="break-words">
-              {renderMentionContent(value)}
-            </span>
-          </div>
-        )}
         <textarea
           ref={inputRef}
-          value={value}
+          value={displayText}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className={`w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-28 text-sm focus:border-forest-green focus:ring-1 focus:ring-forest-green/30 focus:outline-none disabled:opacity-50 ${hasMentions ? 'text-transparent caret-black' : 'text-text-main'}`}
+          className="w-full resize-none rounded-xl border border-border-subtle px-4 py-2.5 pr-28 text-sm text-text-main focus:border-forest-green focus:ring-1 focus:ring-forest-green/30 focus:outline-none disabled:opacity-50"
           style={{ minHeight: '40px', maxHeight: '120px' }}
           onInput={(e) => {
             // Auto-resize textarea
