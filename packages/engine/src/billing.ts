@@ -335,6 +335,72 @@ function rowToTransaction(row: Record<string, unknown>): CreditTransaction {
   }
 }
 
+// ---- Credit Reservation (prevents race conditions between concurrent agents) ----
+
+/**
+ * Atomically reserve credits for a sprint. Returns the number of iterations
+ * the reservation can fund (0 if insufficient credits for even 1 iteration).
+ * The reserved amount is deducted from balance immediately.
+ */
+export async function reserveCredits(
+  db: Db, teamId: string, maxIterations: number, costPerIteration: number,
+): Promise<{ reserved: number; iterations: number }> {
+  if (costPerIteration <= 0) return { reserved: 0, iterations: maxIterations }
+
+  const balance = await getCreditBalance(db, teamId)
+  const affordable = Math.floor(balance / costPerIteration)
+  const iterations = Math.min(affordable, maxIterations)
+  if (iterations <= 0) return { reserved: 0, iterations: 0 }
+
+  const amount = iterations * costPerIteration
+
+  // Atomic deduct with race-safe WHERE clause
+  await db.run(
+    `UPDATE team_credits SET balance = balance - $1, updated_at = ${db.now()} WHERE team_id = $2 AND balance >= $1`,
+    [amount, teamId],
+  )
+
+  // Verify deduction applied
+  const newBalance = await getCreditBalance(db, teamId)
+  if (newBalance > balance - amount + costPerIteration) {
+    // Race lost — another agent grabbed credits first. Re-check what we can actually afford.
+    const actualAffordable = Math.floor((balance - (balance - amount - newBalance + amount)) / costPerIteration)
+    if (actualAffordable <= 0) return { reserved: 0, iterations: 0 }
+  }
+
+  // Record single transaction for the reservation
+  await db.run(
+    'INSERT INTO credit_transactions (id, team_id, amount, balance_after, type, description) VALUES ($1, $2, $3, $4, $5, $6)',
+    [randomUUID(), teamId, -amount, newBalance, 'heartbeat_debit', `Sprint reservation: ${iterations} iterations × ${costPerIteration} credits`],
+  )
+
+  if (creditBroadcast) creditBroadcast(teamId, newBalance)
+  return { reserved: amount, iterations }
+}
+
+/**
+ * Release unused reserved credits back to the team balance.
+ */
+export async function releaseCredits(
+  db: Db, teamId: string, amount: number, description: string,
+): Promise<void> {
+  if (amount <= 0) return
+
+  await db.run(
+    `UPDATE team_credits SET balance = balance + $1, updated_at = ${db.now()} WHERE team_id = $2`,
+    [amount, teamId],
+  )
+
+  const newBalance = await getCreditBalance(db, teamId)
+
+  await db.run(
+    'INSERT INTO credit_transactions (id, team_id, amount, balance_after, type, description) VALUES ($1, $2, $3, $4, $5, $6)',
+    [randomUUID(), teamId, amount, newBalance, 'adjustment', description],
+  )
+
+  if (creditBroadcast) creditBroadcast(teamId, newBalance)
+}
+
 // ---- Model & Skill Credit Costs ----
 
 export async function getModelCreditCost(db: Db, modelId: string): Promise<number> {

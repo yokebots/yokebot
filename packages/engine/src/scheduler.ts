@@ -17,7 +17,7 @@ import { resolveModelConfig } from './model.ts'
 import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage, broadcastAgentStatus, broadcastFileWritten } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
-import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget, deductCredits } from './billing.ts'
+import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget, deductCredits, reserveCredits, releaseCredits } from './billing.ts'
 import { listTasks, getSubtasks, isBlocked as isTaskBlocked, blockTask, type Task } from './tasks.ts'
 import { notifyTeam } from './notifications.ts'
 import { getTaskThread, getChannelMessages, getMessage } from './chat.ts'
@@ -419,12 +419,34 @@ export async function respondToMention(
       `When you're done, use the "respond" tool to post a follow-up message with your results.`,
     ].join('\n')
 
+    // Reserve credits for mention work
+    const mentionModelId = agent.modelId || undefined
+    const mentionCost = HOSTED_MODE && mentionModelId ? await getModelCreditCost(db, mentionModelId) : 0
+    let mentionReserved = 0
+    let mentionIterations = 5
+
+    if (HOSTED_MODE && mentionCost > 0) {
+      const reservation = await reserveCredits(db, agent.teamId, 5, mentionCost)
+      mentionReserved = reservation.reserved
+      mentionIterations = reservation.iterations
+      if (mentionIterations < 1) {
+        console.log(`[scheduler] "${agent.name}" — insufficient credits for mention work`)
+        broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
+        return
+      }
+    }
+
     // Fire and forget — don't block the mention response
-    const runtimeConfig = { maxIterations: 5, onFileWritten: broadcastFileWritten }
+    const runtimeConfig = { maxIterations: mentionIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && mentionCost > 0 }
     runReactLoop(
       db, agent.id, teamId, mentionWorkPrompt, modelConfig, systemPrompt,
-      state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined, channelId,
+      state.workspaceConfig, state.skillsDir, runtimeConfig, mentionModelId, channelId,
     ).then(async (result) => {
+      // Release unused reserved credits
+      if (HOSTED_MODE && mentionReserved > 0) {
+        const refund = (mentionIterations - result.iterations) * mentionCost
+        if (refund > 0) await releaseCredits(db, agent.teamId, refund, `Mention refund: ${mentionIterations - result.iterations} unused iterations`)
+      }
       const cleanResponse = result.response ? stripToolSyntax(result.response) : null
       if (cleanResponse && cleanResponse.trim().length > 0
         && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op') {
@@ -653,6 +675,12 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
   // ---- Task-focused sprint mode ----
   // AdvisorBot is always generic (free check-in), all other agents try task sprints first
+  // Credit reservation variables — scoped here so catch block can access them
+  let reservedIterations = 0
+  let reservedAmount = 0
+  let costPerIteration = 0
+  let iterationsUsed = 0
+
   if (!isAdvisor) {
     try {
       const assignedTasks = await getAgentAssignedTasks(db, agent.id, agent.teamId)
@@ -670,10 +698,26 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
         const sprintBudget = HOSTED_MODE
           ? await getSprintBudget(db, agent.teamId)
           : 15 // self-hosted default
-        let iterationsUsed = 0
+
+        // Reserve credits upfront to prevent race conditions between concurrent agents
+        reservedIterations = sprintBudget
+        const logicalModelId = agent.modelId || undefined
+        costPerIteration = HOSTED_MODE && logicalModelId ? await getModelCreditCost(db, logicalModelId) : 0
+
+        if (HOSTED_MODE && costPerIteration > 0) {
+          const reservation = await reserveCredits(db, agent.teamId, sprintBudget, costPerIteration)
+          reservedIterations = reservation.iterations
+          reservedAmount = reservation.reserved
+          if (reservedIterations < 2) {
+            console.log(`[scheduler] "${agent.name}" — insufficient credits for sprint (need ${costPerIteration * 2}, reserved ${reservedAmount})`)
+            if (reservedAmount > 0) await releaseCredits(db, agent.teamId, reservedAmount, `Sprint cancelled — insufficient for 2 iterations`)
+            return
+          }
+          console.log(`[scheduler] "${agent.name}" — reserved ${reservedAmount} credits for ${reservedIterations} iterations`)
+        }
 
         for (const task of assignedTasks) {
-          const remainingBudget = sprintBudget - iterationsUsed
+          const remainingBudget = reservedIterations - iterationsUsed
           if (remainingBudget < 2) break // need at least 2 iterations for meaningful work
 
           const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId)
@@ -682,12 +726,13 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
             taskFocused: true,
             currentTaskId: task.id,
             onFileWritten: broadcastFileWritten,
+            skipCredits: HOSTED_MODE && costPerIteration > 0, // credits already reserved
           }
 
           const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
           const result = await runReactLoop(
             db, agent.id, agent.teamId, taskPrompt, modelConfig, systemPrompt,
-            state.workspaceConfig!, state.skillsDir, runtimeConfig, agent.modelId || undefined,
+            state.workspaceConfig!, state.skillsDir, runtimeConfig, logicalModelId,
             taskDmChannel?.id,
           )
           iterationsUsed += result.iterations
@@ -759,9 +804,25 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           continue
         }
 
+        // Release unused reserved credits
+        if (HOSTED_MODE && reservedAmount > 0) {
+          const unusedIterations = reservedIterations - iterationsUsed
+          const refund = unusedIterations * costPerIteration
+          if (refund > 0) {
+            await releaseCredits(db, agent.teamId, refund, `Sprint refund: ${unusedIterations} unused iterations × ${costPerIteration} credits`)
+            console.log(`[scheduler] "${agent.name}" — refunded ${refund} credits (${unusedIterations} unused iterations)`)
+          }
+        }
+
         return // task sprint handled this heartbeat
       }
     } catch (err) {
+      // Release reserved credits on error
+      if (HOSTED_MODE && reservedAmount > 0) {
+        const unusedIterations = reservedIterations - iterationsUsed
+        const refund = unusedIterations * costPerIteration
+        if (refund > 0) await releaseCredits(db, agent.teamId, refund, `Sprint error refund`).catch(() => {})
+      }
       console.error(`[scheduler] Task sprint error for "${agent.name}":`, err)
       // Fall through to generic check-in
     }
@@ -816,9 +877,31 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   const proactivePrompt = isAdvisor ? advisorPrompt : genericPrompt
 
   try {
-    const runtimeConfig = { maxIterations: isAdvisor ? 5 : 10, onFileWritten: broadcastFileWritten }
+    const proactiveMax = isAdvisor ? 5 : 10
+    const proactiveModelId = agent.modelId || undefined
+    const proactiveCost = HOSTED_MODE && proactiveModelId ? await getModelCreditCost(db, proactiveModelId) : 0
+    let proactiveReserved = 0
+    let proactiveIterations = proactiveMax
+
+    if (HOSTED_MODE && proactiveCost > 0) {
+      const reservation = await reserveCredits(db, agent.teamId, proactiveMax, proactiveCost)
+      proactiveReserved = reservation.reserved
+      proactiveIterations = reservation.iterations
+      if (proactiveIterations < 1) {
+        console.log(`[scheduler] "${agent.name}" — insufficient credits for proactive check-in`)
+        return
+      }
+    }
+
+    const runtimeConfig = { maxIterations: proactiveIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && proactiveCost > 0 }
     const proactiveDmChannel = await getDmChannel(db, agent.teamId, agent.id)
-    const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined, proactiveDmChannel?.id)
+    const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, proactiveModelId, proactiveDmChannel?.id)
+
+    // Release unused reserved credits
+    if (HOSTED_MODE && proactiveReserved > 0) {
+      const refund = (proactiveIterations - result.iterations) * proactiveCost
+      if (refund > 0) await releaseCredits(db, agent.teamId, refund, `Proactive refund: ${proactiveIterations - result.iterations} unused iterations`)
+    }
     // Skip no-ops, iteration-limit messages, and thinking dumps — don't spam channels
     const cleanedResponse = result.response ? stripToolSyntax(result.response) : null
     const isNoOp = cleanedResponse?.includes('[no-op]') || cleanedResponse?.trim() === 'no-op' || (cleanedResponse?.trim().length ?? 0) === 0
