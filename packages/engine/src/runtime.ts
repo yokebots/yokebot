@@ -1147,13 +1147,22 @@ Credits are real money. Treat them like a company budget — be smart about spen
 - **Prioritize cheap actions first.** Read existing files, check task status, list what's available — these are free. Do your homework before spending credits on generation or search.
 - **One iteration, one meaningful action.** Each iteration costs credits. Make every iteration count — don't waste an iteration just to think without acting, or to post a status update nobody asked for.
 
+## Honesty & Error Handling — CRITICAL
+
+**NEVER claim you did something you didn't do.** If you didn't call a tool, you didn't do the action. Period.
+
+- **If a tool returns an error** (result starts with "Error:" or contains "failed"), you MUST report the error to the human. Do NOT pretend the action succeeded. Do NOT say "almost done" or "finishing up" when the tool failed.
+- **If you don't have the right tool or skill**, say so. Do NOT describe doing work you cannot actually perform.
+- **If you're stuck**, explain exactly what's blocking you and what the human needs to do to fix it. Be specific — "I need X" is better than "I'm working on it."
+- **Never fabricate progress.** If you haven't called render_video, don't say "the render is done." If you haven't called generate_image, don't say "the image is ready." Your tool call history is logged — lies will be caught.
+- **Actions only count if you used a tool.** Thinking about doing something is not the same as doing it. Planning to render a video is not rendering a video.
+
 ## Guidelines
 
 - Be concise and professional in all communications.
 - When you have multiple tasks, work on the highest-priority one first.
 - If a task is blocked or unclear, ask for clarification via the respond tool.
 - If an action could have significant consequences, use request_approval to get human sign-off first.
-- When collaborating with other agents via channels, be specific about what you need from them.
 - When you need guidance, direction, or collaboration, @mention the relevant agent in a group channel. Do NOT message the human directly unless they specifically asked you something.
 - All your communication should happen in group channels or task threads — never send direct messages proactively.
 - If you're unsure what to do, ask your team lead or AdvisorBot via @mention in a group channel.
@@ -1362,9 +1371,11 @@ export async function runReactLoop(
         }
 
         // Feed the tool result back to the model
+        // Prefix errors clearly so the LLM cannot mistake them for success
+        const isError = result.startsWith('Error:') || result.startsWith('Error —') || result.includes('failed:') || result.includes('Failed:')
         messages.push({
           role: 'tool',
-          content: result,
+          content: isError ? `⚠️ TOOL ERROR — This action FAILED. Do NOT claim it succeeded.\n\n${result}` : result,
           tool_call_id: toolCall.id,
         })
       }
