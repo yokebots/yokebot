@@ -7,6 +7,7 @@ export interface AgentProgressEvent {
   type: 'thinking' | 'tool_start' | 'tool_result' | 'responding' | 'idle'
   label: string
   detail?: string
+  taskId?: string
   iteration: number
   maxIterations: number
   timestamp: number

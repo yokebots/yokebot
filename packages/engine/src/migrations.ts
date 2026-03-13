@@ -1432,6 +1432,20 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 33,
+    name: 'add_task_scratchpad',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS scratchpad TEXT`)
+      } else {
+        const cols = await db.query<{ name: string }>(`PRAGMA table_info(tasks)`)
+        if (!cols.some(c => c.name === 'scratchpad')) {
+          await db.run(`ALTER TABLE tasks ADD COLUMN scratchpad TEXT`)
+        }
+      }
+    },
+  },
 ]
 
 /**

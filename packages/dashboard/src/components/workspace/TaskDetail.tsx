@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { PanelHeader } from './PanelHeader'
 import { MessageBubble } from './ThreadView'
+import { AgentProgressPanel } from '@/components/AgentProgressPanel'
+import { useAgentProgress } from '@/hooks/useAgentProgress'
 import TagManager from '@/components/TagManager'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
@@ -25,6 +27,9 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
   const [actionLoading, setActionLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Live tool streaming: show agent progress for this task
+  const { progressMap } = useAgentProgress()
 
   // Build agent color map
   const agentColorMap = new Map(
@@ -107,6 +112,11 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
   }
 
   const assignedAgent = task.assignedAgentId ? agents.find(a => a.id === task.assignedAgentId) : null
+
+  // Filter progress steps to only those for this task's assigned agent, scoped to this task
+  const agentSteps = task.assignedAgentId
+    ? (progressMap.get(task.assignedAgentId) ?? []).filter(s => !s.taskId || s.taskId === taskId)
+    : []
 
   const handleRetry = async () => {
     setActionLoading(true)
@@ -229,6 +239,13 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
         </div>
       )}
 
+      {/* Live agent progress (tool streaming) */}
+      {agentSteps.length > 0 && (
+        <div className="px-3 py-2 border-b border-border-subtle shrink-0">
+          <AgentProgressPanel steps={agentSteps} defaultExpanded={true} />
+        </div>
+      )}
+
       {/* Task details + thread (scrollable) */}
       <div className="flex-1 overflow-y-auto">
         {/* Status + Priority + Agent */}
@@ -283,6 +300,16 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
           {/* Description */}
           {task.description && (
             <p className="text-xs text-text-secondary leading-relaxed">{task.description}</p>
+          )}
+          {/* Agent Notes (scratchpad) */}
+          {task.scratchpad && (
+            <div className="mt-3 rounded-lg bg-surface-secondary p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="material-symbols-outlined text-[14px] text-text-secondary">note_alt</span>
+                <span className="text-[11px] font-medium text-text-secondary">Agent Notes</span>
+              </div>
+              <p className="text-[11px] text-text-secondary whitespace-pre-wrap">{task.scratchpad}</p>
+            </div>
           )}
         </div>
 

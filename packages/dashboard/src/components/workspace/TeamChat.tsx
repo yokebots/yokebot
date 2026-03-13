@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { PanelHeader } from './PanelHeader'
 import { MessageBubble } from './ThreadView'
 import { ThreadView } from './ThreadView'
+import { useAgentProgress } from '@/hooks/useAgentProgress'
+import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 import { MentionInput } from '@/components/MentionInput'
 import { useRealtimeEvent } from '@/lib/use-realtime'
 import { useAuth } from '@/lib/auth'
@@ -30,6 +32,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [uploadingFile, setUploadingFile] = useState(false)
   const [agentStatuses, setAgentStatuses] = useState<Map<string, { agentName: string; status: 'typing' | 'working' | 'idle' }>>(new Map())
+  const { progressMap } = useAgentProgress()
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
   const chatFileInputRef = useRef<HTMLInputElement>(null)
@@ -253,15 +256,30 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
         />
       )}
 
-      {/* Agent typing/working indicators */}
+      {/* Agent live progress panels — Gemini-style expandable reasoning */}
       {agentStatuses.size > 0 && (
-        <div className="px-4 py-1.5 text-xs text-text-muted flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-subtle shrink-0">
-          {Array.from(agentStatuses.values()).map(({ agentName, status }) => (
-            <span key={agentName} className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 rounded-full ${status === 'typing' ? 'bg-accent-green' : 'bg-accent-gold'}`} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
-              <span>{agentName} {status === 'typing' ? 'is typing' : 'is working'}...</span>
-            </span>
-          ))}
+        <div className="px-3 py-2 border-t border-border-subtle shrink-0 space-y-2">
+          {Array.from(agentStatuses.entries()).map(([agentId, { agentName, status }]) => {
+            const steps = progressMap.get(agentId)
+            if (steps && steps.length > 0) {
+              return (
+                <div key={agentId}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === 'typing' ? 'bg-accent-green' : 'bg-accent-gold'}`} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
+                    <span className="text-xs font-medium text-text-main">{agentName}</span>
+                  </div>
+                  <AgentProgressPanel steps={steps} defaultExpanded={true} />
+                </div>
+              )
+            }
+            // Fallback: no progress data yet, show simple indicator
+            return (
+              <div key={agentId} className="flex items-center gap-1.5 text-xs text-text-muted">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === 'typing' ? 'bg-accent-green' : 'bg-accent-gold'}`} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
+                <span>{agentName} {status === 'typing' ? 'is typing' : 'is working'}...</span>
+              </div>
+            )
+          })}
         </div>
       )}
 

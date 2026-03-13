@@ -588,7 +588,7 @@ export async function getAvailableModels(db: Db): Promise<LogicalModel[]> {
 
 // ---- Chat completion ----
 
-const LLM_TIMEOUT_MS = 30_000  // 30s — if it's not back by then, it's dead
+const LLM_TIMEOUT_MS = 120_000  // 120s — large context + many tools can take a while
 const LLM_MAX_RETRIES = 1     // 1 retry on timeout/5xx
 const LLM_RETRY_DELAY_MS = 2_000
 

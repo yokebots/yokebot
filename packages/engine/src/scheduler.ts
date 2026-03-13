@@ -374,9 +374,9 @@ export async function respondToMention(
       const elapsed = Date.now() - startMs
       console.log(`[scheduler] "${agent.name}" ack'd @mention in ${elapsed}ms`)
 
-      // Heuristic: if the reply mentions working on it / getting on it, kick off phase 2
-      const lower = reply.toLowerCase()
-      needsWork = /\b(i'll|i will|let me|working on|getting on|on it|right away|get started|look into)\b/.test(lower)
+      // Always run Phase 2 after a mention — let the agent decide if there's work to do.
+      // Unused iterations are refunded via the credit reservation system.
+      needsWork = true
     } else {
       broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
     }
@@ -423,10 +423,10 @@ export async function respondToMention(
     const mentionModelId = agent.modelId || undefined
     const mentionCost = HOSTED_MODE && mentionModelId ? await getModelCreditCost(db, mentionModelId) : 0
     let mentionReserved = 0
-    let mentionIterations = 5
+    let mentionIterations = 40
 
     if (HOSTED_MODE && mentionCost > 0) {
-      const reservation = await reserveCredits(db, agent.teamId, 5, mentionCost)
+      const reservation = await reserveCredits(db, agent.teamId, mentionIterations, mentionCost)
       mentionReserved = reservation.reserved
       mentionIterations = reservation.iterations
       if (mentionIterations < 1) {
@@ -580,6 +580,10 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string): Promi
 
   const deadlineStr = task.deadline ? `\nDeadline: ${task.deadline}` : ''
 
+  const scratchpadSection = task.scratchpad
+    ? `\n## Your Notes From Previous Sprints\n${task.scratchpad}\n`
+    : ''
+
   return [
     `You are sprinting on a task. Focus ALL your effort on making progress.`,
     ``,
@@ -589,7 +593,7 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string): Promi
     `Status: ${task.status}`,
     `Priority: ${task.priority}${deadlineStr}`,
     task.description ? `\nDescription:\n${task.description}` : '',
-    ``,
+    scratchpadSection,
     `## Subtasks`,
     subtaskLines,
     threadContext,
@@ -600,6 +604,7 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string): Promi
     `3. When done, mark the task "done" (or "review" if it needs human review).`,
     `4. If you're blocked and need human input, use request_approval and explain why.`,
     `5. Post a brief progress update summarizing what you accomplished.`,
+    `6. Before finishing your work, use update_scratchpad to save notes about what you tried, what worked/failed, and what to do next time.`,
   ].join('\n')
 }
 
@@ -707,7 +712,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
       if (assignedTasks.length > 0) {
         const sprintBudget = HOSTED_MODE
           ? await getSprintBudget(db, agent.teamId)
-          : 15 // self-hosted default
+          : 40 // self-hosted default
 
         // Reserve credits upfront to prevent race conditions between concurrent agents
         reservedIterations = sprintBudget
@@ -749,7 +754,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
           // Track sprint attempts — reset on completion, increment otherwise
           if (result.taskCompleted) {
-            await db.run(`UPDATE tasks SET sprint_count = 0 WHERE id = $1`, [task.id])
+            await db.run(`UPDATE tasks SET sprint_count = 0, scratchpad = NULL WHERE id = $1`, [task.id])
           } else {
             const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
             await db.run(`UPDATE tasks SET sprint_count = sprint_count + 1, last_sprint_at = ${now} WHERE id = $1`, [task.id])

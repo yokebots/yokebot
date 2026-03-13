@@ -10,7 +10,7 @@
 
 import crypto from 'node:crypto'
 import type { Db } from './db/types.ts'
-import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCall, type ModelConfig } from './model.ts'
+import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCall, type ModelConfig, type CompletionResponse } from './model.ts'
 import { getMessages, addMessage, getAgent } from './agent.ts'
 import { listFiles, readFile, writeFile, renameFile, deleteFile } from './workspace.ts'
 import { createTask, listTasks, updateTask } from './tasks.ts'
@@ -251,6 +251,10 @@ function getBuiltinTools(): ToolDef[] {
       agentId: { type: 'string', description: 'Filter by assigned agent ID' },
     }, []),
 
+    toolDef('update_scratchpad', 'Save notes about your current task for your next sprint. Use this to record: what you tried, what worked/failed, what to do next, key findings. This persists between sprints so you don\'t lose context. Max 8000 characters.', {
+      notes: { type: 'string', description: 'Your scratchpad notes — what you learned, what failed, next steps' },
+    }, ['notes']),
+
     // Chat
     toolDef('send_chat_message', 'Post a message to a chat channel.', {
       channelId: { type: 'string', description: 'The channel ID to send to. Use "dm" for your own DM channel.' },
@@ -301,10 +305,19 @@ function getBuiltinTools(): ToolDef[] {
       modelId: { type: 'string', description: 'Image model to use. Options (cheapest first): "flux-2-klein" (50 credits, fast/cheap), "qwen-image-2.0" (150 credits, good quality), "seedream-4.5" (175 credits, solid mid-tier), "flux-2-dev" (50 credits, LoRA support), "seedream-5.0-lite" (150 credits, web search), "nano-banana-pro" (600 credits, premium 4K). NO DEFAULT — you must choose or ask the human.' },
     }, ['prompt', 'modelId']),
 
-    toolDef('generate_video', 'Generate a video using AI. Returns the URL of the generated video. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
+    toolDef('generate_video', 'Generate a SHORT AI video clip from a text prompt using AI models (Wan, Kling). For programmatic/animated videos with code, use render_video instead. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
       prompt: { type: 'string', description: 'Text description of the video to generate' },
       modelId: { type: 'string', description: 'Video model to use. Options: "wan-2.6" (3000 credits, budget), "kling-2.6-pro" (3000 credits, long-form), "kling-3.0" (3000 credits, high-fidelity), "kling-o3" (3000 credits, omni/editing). NO DEFAULT — you must choose or ask the human.' },
     }, ['prompt', 'modelId']),
+
+    toolDef('render_video', 'Render a programmatic animated video using Remotion (React-based). YOU write the composition code (React components with useCurrentFrame, interpolate, Sequence, AbsoluteFill) and this tool renders it to MP4. 50 credits. Use this for: promo videos, explainers, motion graphics, branded content, data visualizations. This is MUCH CHEAPER than generate_video and gives you full creative control.', {
+      compositionCode: { type: 'string', description: 'React/Remotion component code as a string. Must export a default component using Remotion APIs (useCurrentFrame, interpolate, Sequence, AbsoluteFill, spring, etc.)' },
+      durationInFrames: { type: 'number', description: 'Video duration in frames (default: 150 = 5 seconds at 30fps)' },
+      fps: { type: 'number', description: 'Frames per second (default: 30)' },
+      width: { type: 'number', description: 'Video width in pixels (default: 1920)' },
+      height: { type: 'number', description: 'Video height in pixels (default: 1080)' },
+      inputProps: { type: 'object', description: 'Props to pass to the composition (title, colors, data, etc.)' },
+    }, ['compositionCode']),
 
     toolDef('generate_3d', 'Generate a 3D model from an image. Returns the URL of the .glb file. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
       imageUrl: { type: 'string', description: 'URL of the input image to convert to 3D' },
@@ -609,6 +622,13 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         lines.push(`- [${t.status}] ${t.title} (${t.priority}, id: ${t.id}${agentLabel}${deadlineLabel}${updatedLabel})`)
       }
       return lines.join('\n')
+    }
+
+    case 'update_scratchpad': {
+      const notes = (args.notes as string).slice(0, 8000)
+      if (!ctx.currentTaskId) return 'Error: Not currently working on a task.'
+      await updateTask(ctx.db, ctx.currentTaskId, { scratchpad: notes })
+      return `Scratchpad updated (${notes.length} chars saved).`
     }
 
     // ---- Chat ----
@@ -1157,6 +1177,13 @@ Credits are real money. Treat them like a company budget — be smart about spen
 - **Never fabricate progress.** If you haven't called render_video, don't say "the render is done." If you haven't called generate_image, don't say "the image is ready." Your tool call history is logged — lies will be caught.
 - **Actions only count if you used a tool.** Thinking about doing something is not the same as doing it. Planning to render a video is not rendering a video.
 
+## Using Skills & Tools Effectively
+
+- **Check your installed skills FIRST.** You may have specialized tools from installed skills (like render_video for Remotion). Use list_available_skills to see what you have.
+- **Skill tools are different from built-in tools.** For example: \`generate_video\` (built-in) creates AI video clips from prompts. \`render_video\` (skill) renders programmatic Remotion compositions. They are NOT the same — choose the right one for the job.
+- **When a task mentions a specific technology** (Remotion, Puppeteer, etc.), use the skill tool designed for that technology, not a generic built-in tool.
+- **If you have the right skill installed, USE IT.** Don't talk about using it — call the tool. Don't plan to use it — call the tool. Don't say you need more credits for a different tool — check if the skill tool is cheaper and use that instead.
+
 ## Guidelines
 
 - Be concise and professional in all communications.
@@ -1268,6 +1295,7 @@ export async function runReactLoop(
       type,
       label,
       detail: detail?.slice(0, 500),
+      taskId: config.currentTaskId,
       iteration,
       maxIterations: config.maxIterations,
       timestamp: Date.now(),
@@ -1317,8 +1345,17 @@ export async function runReactLoop(
     // Re-trim before each LLM call (tool results accumulate mid-loop)
     trimmedMessages = trimMessagesToFit(messages, maxInputTokens, toolsTokens)
 
-    emitProgress('thinking', `Thinking... (step ${i + 1} of ${config.maxIterations})`, i + 1)
-    const completion = await chatCompletionWithFallback(modelConfig, trimmedMessages, tools)
+    emitProgress('thinking', `Reasoning...`, i + 1)
+    let completion: CompletionResponse
+    try {
+      completion = await chatCompletionWithFallback(modelConfig, trimmedMessages, tools)
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown LLM error'
+      console.error(`[runtime] LLM call failed on iteration ${i + 1}: ${errMsg}`)
+      // Graceful exit — return whatever progress we've made so far
+      if (!response) response = "I ran into a temporary issue communicating with my AI model. I'll pick this back up on my next check-in."
+      break
+    }
 
     // If the model returned tool calls, execute them
     if (completion.tool_calls.length > 0) {
@@ -1329,14 +1366,26 @@ export async function runReactLoop(
         tool_calls: completion.tool_calls,
       })
 
+      // Broadcast the assistant's reasoning text (if any) before tool calls
+      if (completion.content && completion.content.trim()) {
+        emitProgress('thinking', `Reasoning`, i + 1, completion.content.slice(0, 500))
+      }
+
       for (const toolCall of completion.tool_calls) {
-        // Broadcast tool_start progress (include arg preview for context)
+        // Broadcast tool_start progress with rich argument context
         const toolLabel = getToolLabel(toolCall.function.name)
         let argPreview: string | undefined
         try {
           const parsed = JSON.parse(toolCall.function.arguments)
-          // Pick the most useful arg for display
-          argPreview = parsed.query ?? parsed.skillName ?? parsed.path ?? parsed.message?.slice(0, 100) ?? parsed.url ?? undefined
+          if (toolCall.function.name === 'think') {
+            // For think tool, show the full thought as the detail
+            argPreview = (parsed.thought as string)?.slice(0, 500)
+          } else if (toolCall.function.name === 'respond') {
+            argPreview = (parsed.message as string)?.slice(0, 300)
+          } else {
+            // Pick the most useful arg for display
+            argPreview = parsed.query ?? parsed.skillName ?? parsed.path ?? parsed.message?.slice(0, 200) ?? parsed.prompt?.slice(0, 200) ?? parsed.content?.slice(0, 200) ?? parsed.notes?.slice(0, 200) ?? parsed.url ?? parsed.tableName ?? undefined
+          }
         } catch { /* ignore parse errors */ }
         emitProgress('tool_start', toolLabel, i + 1, argPreview)
 

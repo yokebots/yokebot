@@ -78,12 +78,27 @@ export function loadSkillsFromDir(skillsDir: string): Skill[] {
 }
 
 export function loadSkill(skillsDir: string, skillName: string): Skill | null {
+  // Try direct directory match first (e.g. "render-video" → skills/render-video/)
   const skillMdPath = join(skillsDir, skillName, 'SKILL.md')
   const resolved = resolve(skillMdPath)
-  if (!resolved.startsWith(resolve(skillsDir) + sep)) return null
-  if (!existsSync(skillMdPath)) return null
-  const content = readFileSync(skillMdPath, 'utf-8')
-  return parseSkillFile(content, skillMdPath)
+  if (resolved.startsWith(resolve(skillsDir) + sep) && existsSync(skillMdPath)) {
+    const content = readFileSync(skillMdPath, 'utf-8')
+    return parseSkillFile(content, skillMdPath)
+  }
+
+  // Fallback: scan all directories for a matching display name
+  // (handles cases like "Render Video" stored in DB but directory is "render-video")
+  if (!existsSync(skillsDir)) return null
+  const entries = readdirSync(skillsDir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const candidatePath = join(skillsDir, entry.name, 'SKILL.md')
+    if (!existsSync(candidatePath)) continue
+    const content = readFileSync(candidatePath, 'utf-8')
+    const skill = parseSkillFile(content, candidatePath)
+    if (skill && skill.metadata.name === skillName) return skill
+  }
+  return null
 }
 
 // Built-in tool names that skills cannot shadow
@@ -94,7 +109,7 @@ const RESERVED_TOOL_NAMES = new Set([
   'send_chat_message',
   'request_approval',
   'query_source_of_record', 'update_source_of_record',
-  'generate_image', 'generate_video', 'generate_3d',
+  'generate_image', 'generate_video', 'render_video', 'generate_3d',
   'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type',
   'browser_select_option', 'browser_press_key', 'browser_close',
 ])

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { PanelHeader } from './PanelHeader'
 import { TaskDetail } from './TaskDetail'
 import TagFilterBar from '@/components/TagFilterBar'
+import { useAgentProgress } from '@/hooks/useAgentProgress'
+import type { AgentProgressEvent } from '@/hooks/useAgentProgress'
 import type { WorkspaceState } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 
@@ -66,6 +68,7 @@ interface TasksPanelProps {
 
 export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps) {
   const [tasks, setTasks] = useState<engine.EngineTask[]>([])
+  const { currentAction } = useAgentProgress()
   const [archiving, setArchiving] = useState(false)
   const [view, setView] = useState<'list' | 'kanban'>(() => {
     return localStorage.getItem('workspace-tasks-view') as 'list' | 'kanban' ?? 'list'
@@ -362,6 +365,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
             unreadTaskIds={unreadTaskIds}
             agents={agents}
             visibleColumns={visibleColumns}
+            currentAction={currentAction}
           />
         ) : (
           <KanbanView
@@ -382,12 +386,14 @@ function ListView({
   unreadTaskIds,
   agents,
   visibleColumns,
+  currentAction,
 }: {
   tasks: engine.EngineTask[]
   onTaskClick: (id: string) => void
   unreadTaskIds?: Set<string>
   agents: engine.EngineAgent[]
   visibleColumns: ColumnKey[]
+  currentAction: (agentId: string) => AgentProgressEvent | undefined
 }) {
   const agentMap = new Map(agents.map(a => [a.id, a]))
 
@@ -436,6 +442,20 @@ function ListView({
                   {task.tags.length > 3 && <span className="text-[8px] text-text-muted">+{task.tags.length - 3}</span>}
                 </div>
               )}
+              {/* Live progress indicator for active agents */}
+              {task.assignedAgentId && (() => {
+                const action = currentAction(task.assignedAgentId!)
+                if (!action) return null
+                return (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="relative flex h-2.5 w-2.5 items-center justify-center shrink-0">
+                      <span className="absolute h-2 w-2 rounded-full bg-accent-green/30" style={{ animation: 'pulse 2s ease-in-out infinite' }} />
+                      <span className="relative h-1 w-1 rounded-full bg-accent-green" />
+                    </span>
+                    <span className="text-[10px] text-text-muted truncate">{action.label}</span>
+                  </div>
+                )
+              })()}
             </div>
             {/* Deadline column */}
             {visibleColumns.includes('deadline') && (

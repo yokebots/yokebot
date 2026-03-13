@@ -22,7 +22,7 @@ export interface Task {
   assignedAgentId: string | null; assignedUserId: string | null; parentTaskId: string | null; deadline: string | null
   headerImage: string | null; attachments: TaskAttachment[]
   tags: TaskTag[]
-  blockedReason: BlockedReason | null; blockedApprovalId: string | null; blockedReasonText: string | null; sprintCount: number
+  blockedReason: BlockedReason | null; blockedApprovalId: string | null; blockedReasonText: string | null; scratchpad: string | null; sprintCount: number
   createdAt: string; updatedAt: string
 }
 
@@ -99,7 +99,7 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   return tasks
 }
 
-export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'assignedUserId' | 'deadline' | 'headerImage' | 'blockedReason'>> & { attachments?: string }): Promise<Task | null> {
+export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'assignedUserId' | 'deadline' | 'headerImage' | 'blockedReason' | 'scratchpad'>> & { attachments?: string }): Promise<Task | null> {
   const fields: string[] = []
   const values: unknown[] = []
   let paramIdx = 1
@@ -114,6 +114,7 @@ export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task,
   if (updates.headerImage !== undefined) { fields.push(`header_image = $${paramIdx++}`); values.push(updates.headerImage) }
   if (updates.attachments !== undefined) { fields.push(`attachments = $${paramIdx++}`); values.push(updates.attachments) }
   if (updates.blockedReason !== undefined) { fields.push(`blocked_reason = $${paramIdx++}`); values.push(updates.blockedReason) }
+  if (updates.scratchpad !== undefined) { fields.push(`scratchpad = $${paramIdx++}`); values.push(updates.scratchpad) }
 
   if (fields.length === 0) return getTask(db, id)
 
@@ -171,6 +172,7 @@ function rowToTask(row: Record<string, unknown>): Task {
     blockedReason: (row.blocked_reason as BlockedReason | null) ?? null,
     blockedApprovalId: (row.blocked_approval_id as string | null) ?? null,
     blockedReasonText: (row.blocked_reason_text as string | null) ?? null,
+    scratchpad: (row.scratchpad as string | null) ?? null,
     sprintCount: (row.sprint_count as number) ?? 0,
     createdAt: row.created_at as string, updatedAt: row.updated_at as string,
   }
@@ -189,7 +191,7 @@ export async function blockTask(db: Db, taskId: string, reason: BlockedReason, a
 export async function unblockTask(db: Db, taskId: string, targetStatus: TaskStatus = 'todo'): Promise<void> {
   const now = db.now()
   await db.run(
-    `UPDATE tasks SET status = $1, blocked_reason = NULL, blocked_approval_id = NULL, blocked_reason_text = NULL, sprint_count = 0, updated_at = ${now} WHERE id = $2`,
+    `UPDATE tasks SET status = $1, blocked_reason = NULL, blocked_approval_id = NULL, blocked_reason_text = NULL, scratchpad = NULL, sprint_count = 0, updated_at = ${now} WHERE id = $2`,
     [targetStatus, taskId],
   )
 }
