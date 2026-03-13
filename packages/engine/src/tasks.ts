@@ -99,7 +99,7 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   return tasks
 }
 
-export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'assignedUserId' | 'deadline' | 'headerImage'>> & { attachments?: string }): Promise<Task | null> {
+export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'assignedUserId' | 'deadline' | 'headerImage' | 'blockedReason'>> & { attachments?: string }): Promise<Task | null> {
   const fields: string[] = []
   const values: unknown[] = []
   let paramIdx = 1
@@ -113,6 +113,7 @@ export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task,
   if (updates.deadline !== undefined) { fields.push(`deadline = $${paramIdx++}`); values.push(updates.deadline) }
   if (updates.headerImage !== undefined) { fields.push(`header_image = $${paramIdx++}`); values.push(updates.headerImage) }
   if (updates.attachments !== undefined) { fields.push(`attachments = $${paramIdx++}`); values.push(updates.attachments) }
+  if (updates.blockedReason !== undefined) { fields.push(`blocked_reason = $${paramIdx++}`); values.push(updates.blockedReason) }
 
   if (fields.length === 0) return getTask(db, id)
 
