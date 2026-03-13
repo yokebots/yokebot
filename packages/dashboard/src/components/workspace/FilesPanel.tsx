@@ -365,15 +365,22 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
   const handleUploadFiles = async (files: FileList | File[]) => {
     if (uploading) return
     setUploading(true)
+    let importedCsv = false
     try {
       for (const file of Array.from(files)) {
         if (file.size > 10 * 1024 * 1024) {
           alert(`"${file.name}" exceeds the 10MB limit`)
           continue
         }
-        await engine.uploadWorkspaceFile(file)
+        const result = await engine.uploadWorkspaceFile(file)
+        if (result.importedAsTable) importedCsv = true
       }
-      await loadFiles()
+      if (importedCsv) {
+        setActivePanel('data')
+        await loadTables()
+      } else {
+        await loadFiles()
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Upload failed')
     }

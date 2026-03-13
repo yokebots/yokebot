@@ -1296,7 +1296,7 @@ export async function uploadKbDocument(file: File, title?: string): Promise<KbDo
   })
 }
 
-export async function uploadWorkspaceFile(file: File, dirPath?: string): Promise<{ path: string; size: number }> {
+export async function uploadWorkspaceFile(file: File, dirPath?: string): Promise<{ path: string; size: number; importedAsTable?: boolean; tableId?: string }> {
   const base64 = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
@@ -1308,7 +1308,7 @@ export async function uploadWorkspaceFile(file: File, dirPath?: string): Promise
     reader.readAsDataURL(file)
   })
 
-  return request<{ path: string; size: number }>('/api/workspace/file/upload', {
+  return request<{ path: string; size: number; importedAsTable?: boolean; tableId?: string }>('/api/workspace/file/upload', {
     method: 'POST',
     body: JSON.stringify({
       path: dirPath,

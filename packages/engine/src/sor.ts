@@ -165,6 +165,66 @@ export async function checkSorPermission(db: Db, agentId: string, tableId: strin
   }
 }
 
+/**
+ * Import CSV content as a new SOR data table.
+ * Parses headers as columns and rows as data records.
+ * Returns the created table ID, or null if parsing fails.
+ */
+export async function importCsvAsTable(db: Db, teamId: string, tableName: string, csvContent: string): Promise<string | null> {
+  const lines = csvContent.split('\n').map(l => l.trim()).filter(Boolean)
+  if (lines.length < 1) return null
+
+  // Parse header row (handle quoted fields)
+  const headers = parseCsvLine(lines[0])
+  if (headers.length === 0) return null
+
+  // Create table
+  const table = await createSorTable(db, teamId, tableName)
+
+  // Create columns
+  for (const header of headers) {
+    await addSorColumn(db, table.id, header, 'text')
+  }
+
+  // Import rows
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCsvLine(lines[i])
+    const data: Record<string, unknown> = {}
+    for (let j = 0; j < headers.length; j++) {
+      data[headers[j]] = values[j] ?? ''
+    }
+    await addSorRow(db, table.id, data)
+  }
+
+  return table.id
+}
+
+/** Simple CSV line parser that handles quoted fields with commas */
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = []
+  let current = ''
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i++ // skip escaped quote
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  fields.push(current.trim())
+  return fields
+}
+
 function rowToSorRow(row: Record<string, unknown>): SorRow {
   const rawData = row.data
   const data = typeof rawData === 'string' ? JSON.parse(rawData) as Record<string, unknown> : rawData as Record<string, unknown>

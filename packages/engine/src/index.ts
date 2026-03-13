@@ -26,7 +26,7 @@ import { initWorkspace, listFiles, readFile, readBinaryFile, writeFile, writeBin
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
 import { logActivity, listActivity, countActivity } from './activity.ts'
 import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS, chatCompletion, type ChatMessage as LlmMessage } from './model.ts'
-import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable } from './sor.ts'
+import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable, importCsvAsTable } from './sor.ts'
 import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, getTeamAgentIds, findUserByEmail } from './teams.ts'
 import { authMiddleware, setApiKeyDb } from './auth-middleware.ts'
 import { createApiKey, listApiKeys, revokeApiKey, regenerateApiKey, deleteApiKey, hasScope } from './api-keys.ts'
@@ -403,7 +403,7 @@ async function main() {
   // This lets sendMessage() and createNotification() push real-time SSE events
   // without needing direct access to the SSE client map.
   {
-    const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast } = await import('./chat.ts')
+    const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast, setFileWrittenBroadcast } = await import('./chat.ts')
     setNewMessageBroadcast((teamId, channelId, messageId) => {
       broadcastToTeam(teamId, 'new_message', { channelId, messageId })
     })
@@ -412,6 +412,9 @@ async function main() {
     })
     setAgentProgressBroadcast((teamId, data) => {
       broadcastToTeam(teamId, 'agent_progress', data)
+    })
+    setFileWrittenBroadcast((teamId, path) => {
+      broadcastToTeam(teamId, 'file_written', { path })
     })
 
     const { setNotificationBroadcast } = await import('./notifications.ts')
@@ -632,9 +635,10 @@ async function main() {
     try {
       const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
       // AdvisorBot is always free — skip credit deduction
+      const fileWrittenCb = (tid: string, path: string) => broadcastToTeam(tid, 'file_written', { path })
       const runtimeConfig = agent.templateId === 'advisor-bot'
-        ? { maxIterations: 10, skipCredits: true }
-        : undefined
+        ? { maxIterations: 10, skipCredits: true, onFileWritten: fileWrittenCb }
+        : { maxIterations: 10, onFileWritten: fileWrittenCb }
       const result = await runReactLoop(
         db,
         agent.id,
@@ -676,7 +680,7 @@ async function main() {
   app.post('/api/approvals', async (req, res) => {
     const teamId = req.user!.activeTeamId!
     const body = validate(CreateApprovalSchema, req.body)
-    const approval = await createApproval(db, teamId, body.agentId, body.actionType, body.actionDetail, body.riskLevel)
+    const approval = await createApproval(db, teamId, body.agentId, body.actionType, body.actionDetail, body.riskLevel, body.taskId)
     // Notify team about new approval
     void notifyTeam(db, teamId, 'approval_needed', `Approval needed: ${body.actionType}`, body.actionDetail.slice(0, 200), '/approvals')
     // SSE: broadcast updated approval count to all team members
@@ -1378,8 +1382,16 @@ async function main() {
     if (!requireRole(req, res, 'admin')) return
     const teamId = req.user?.activeTeamId ?? ''
     const { path, content, agentId } = validate(WriteFileSchema, req.body)
+    // CSV files auto-import as SOR data tables instead of workspace files
+    if (path.toLowerCase().endsWith('.csv')) {
+      const tableName = path.split('/').pop()!.replace(/\.csv$/i, '')
+      const tableId = await importCsvAsTable(db, teamId, tableName, content)
+      if (!tableId) return res.status(400).json({ error: 'Failed to parse CSV — check that it has a header row' })
+      return res.json({ success: true, importedAsTable: true, tableId })
+    }
     const result = await writeFile(db, teamId, path, content, agentId)
     if (!result.success) return res.status(423).json({ error: result.error })
+    broadcastToTeam(teamId, 'file_written', { path })
     res.json({ success: true })
   })
 
@@ -1398,7 +1410,16 @@ async function main() {
       return res.status(413).json({ error: `File too large: ${(buffer.length / 1024 / 1024).toFixed(1)}MB exceeds 10MB limit` })
     }
     try {
+      // CSV uploads auto-import as SOR data tables
+      if (targetPath.toLowerCase().endsWith('.csv') || mimeType === 'text/csv') {
+        const csvContent = buffer.toString('utf-8')
+        const tableName = (fileName ?? targetPath).replace(/\.csv$/i, '').split('/').pop()!
+        const tableId = await importCsvAsTable(db, teamId, tableName, csvContent)
+        if (!tableId) return res.status(400).json({ error: 'Failed to parse CSV — check that it has a header row' })
+        return res.json({ success: true, path: targetPath, size: buffer.length, importedAsTable: true, tableId })
+      }
       await writeBinaryFile(db, teamId, targetPath, buffer, mimeType ?? 'application/octet-stream', req.user?.id ?? '')
+      broadcastToTeam(teamId, 'file_written', { path: targetPath })
       res.json({ success: true, path: targetPath, size: buffer.length })
     } catch (err) {
       res.status(400).json({ error: (err as Error).message })

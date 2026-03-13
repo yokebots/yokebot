@@ -17,7 +17,7 @@ import { createTask, listTasks, updateTask } from './tasks.ts'
 import { applyTagsByName } from './tags.ts'
 import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel, broadcastAgentProgress, type AgentProgressEvent } from './chat.ts'
 import { createApproval } from './approval.ts'
-import { listSorTables, listSorRows, addSorRow, updateSorRow, getSorTableByName, checkSorPermission, createSorTable, addSorColumn, setSorPermission } from './sor.ts'
+import { listSorTables, listSorRows, addSorRow, updateSorRow, getSorTableByName, checkSorPermission, createSorTable, addSorColumn, setSorPermission, importCsvAsTable } from './sor.ts'
 import { getAgentSkills, getSkillTools, loadSkillsFromDir, installSkill } from './skills.ts'
 import { executeSkillHandler } from './skill-handlers.ts'
 import { executeBrowserTool, isBrowserTool } from './browser.ts'
@@ -92,6 +92,7 @@ export interface RuntimeConfig {
   skipCredits?: boolean  // bypass credit deduction (e.g. AdvisorBot is free)
   taskFocused?: boolean  // enables task-loop exit conditions
   currentTaskId?: string // for logging
+  onFileWritten?: (teamId: string, path: string) => void // SSE broadcast callback
 }
 
 const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -109,6 +110,7 @@ export interface ToolContext {
   currentTaskId?: string
   /** Mutable tools array — install_skill pushes new tools into the live session */
   tools?: ToolDef[]
+  onFileWritten?: (teamId: string, path: string) => void
 }
 
 /** Human-readable labels for common tools */
@@ -418,10 +420,19 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'write_workspace_file': {
       const content = args.content as string
+      const filePath = args.path as string
       // Limit agent file writes to 100KB (API endpoint allows 1MB for human uploads)
       if (content.length > 100_000) return `Error: File content too large (${content.length} chars). Maximum is 100,000 characters for agent writes.`
-      const result = await writeFile(ctx.db, ctx.teamId, args.path as string, content, ctx.agentId, ctx.currentTaskId)
-      return result.success ? `File written: ${args.path as string}` : `Error: ${result.error}`
+      // CSV files auto-import as SOR data tables
+      if (filePath.toLowerCase().endsWith('.csv')) {
+        const tableName = filePath.split('/').pop()!.replace(/\.csv$/i, '')
+        const tableId = await importCsvAsTable(ctx.db, ctx.teamId, tableName, content)
+        if (!tableId) return `Error: Failed to parse CSV — check that it has a header row`
+        return `CSV imported as data table "${tableName}" (id: ${tableId})`
+      }
+      const result = await writeFile(ctx.db, ctx.teamId, filePath, content, ctx.agentId, ctx.currentTaskId)
+      if (result.success) ctx.onFileWritten?.(ctx.teamId, filePath)
+      return result.success ? `File written: ${filePath}` : `Error: ${result.error}`
     }
 
     case 'list_workspace_files': {
@@ -1254,7 +1265,7 @@ export async function runReactLoop(
     })
   }
 
-  const toolCtx: ToolContext = { db, agentId, teamId, channelId, skillsDir, skipCredits: config.skipCredits, currentTaskId: config.currentTaskId, tools }
+  const toolCtx: ToolContext = { db, agentId, teamId, channelId, skillsDir, skipCredits: config.skipCredits, currentTaskId: config.currentTaskId, tools, onFileWritten: config.onFileWritten }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
 

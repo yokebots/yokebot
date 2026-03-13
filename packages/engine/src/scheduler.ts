@@ -14,7 +14,7 @@ import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
-import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage, broadcastAgentStatus } from './chat.ts'
+import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage, broadcastAgentStatus, broadcastFileWritten } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
 import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget, deductCredits } from './billing.ts'
@@ -420,7 +420,7 @@ export async function respondToMention(
     ].join('\n')
 
     // Fire and forget — don't block the mention response
-    const runtimeConfig = { maxIterations: 5 }
+    const runtimeConfig = { maxIterations: 5, onFileWritten: broadcastFileWritten }
     runReactLoop(
       db, agent.id, teamId, mentionWorkPrompt, modelConfig, systemPrompt,
       state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined, channelId,
@@ -681,6 +681,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
             maxIterations: remainingBudget,
             taskFocused: true,
             currentTaskId: task.id,
+            onFileWritten: broadcastFileWritten,
           }
 
           const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
@@ -815,7 +816,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   const proactivePrompt = isAdvisor ? advisorPrompt : genericPrompt
 
   try {
-    const runtimeConfig = { maxIterations: isAdvisor ? 5 : 10 }
+    const runtimeConfig = { maxIterations: isAdvisor ? 5 : 10, onFileWritten: broadcastFileWritten }
     const proactiveDmChannel = await getDmChannel(db, agent.teamId, agent.id)
     const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, agent.modelId || undefined, proactiveDmChannel?.id)
     // Skip no-ops, iteration-limit messages, and thinking dumps — don't spam channels

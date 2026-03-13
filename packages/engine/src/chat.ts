@@ -26,6 +26,7 @@ const chatSseClients = new Map<string, Set<Response>>() // channelId → SSE cli
 let _onNewMessage: ((teamId: string, channelId: string, messageId: number) => void) | null = null
 let _onAgentTyping: ((teamId: string, data: { channelId: string; agentId: string; agentName: string; status: 'typing' | 'working' | 'idle' }) => void) | null = null
 let _onAgentProgress: ((teamId: string, data: AgentProgressEvent) => void) | null = null
+let _onFileWritten: ((teamId: string, path: string) => void) | null = null
 
 export interface AgentProgressEvent {
   agentId: string
@@ -48,6 +49,14 @@ export function setAgentTypingBroadcast(fn: typeof _onAgentTyping): void {
 
 export function setAgentProgressBroadcast(fn: typeof _onAgentProgress): void {
   _onAgentProgress = fn
+}
+
+export function setFileWrittenBroadcast(fn: (teamId: string, path: string) => void): void {
+  _onFileWritten = fn
+}
+
+export function broadcastFileWritten(teamId: string, path: string): void {
+  _onFileWritten?.(teamId, path)
 }
 
 export function broadcastAgentStatus(teamId: string, channelId: string, agentId: string, agentName: string, status: 'typing' | 'working' | 'idle'): void {

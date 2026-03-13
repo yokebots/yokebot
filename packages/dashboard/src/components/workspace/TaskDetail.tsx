@@ -22,6 +22,8 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
   const [linkedFiles, setLinkedFiles] = useState<Array<{ path: string; name: string; size: number }>>([])
+  const [actionLoading, setActionLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Build agent color map
@@ -32,12 +34,15 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
   // Load everything in a single API call
   const loadAll = useCallback(async () => {
     try {
+      setLoadError(false)
       const detail = await engine.getTaskDetail(taskId)
       setTask(detail.task)
       setThreadChannelId(detail.channelId)
       setThreadMessages(detail.messages)
       setLinkedFiles(detail.files)
-    } catch { /* offline */ }
+    } catch {
+      setLoadError(true)
+    }
   }, [taskId])
 
   useEffect(() => { loadAll() }, [loadAll])
@@ -89,14 +94,19 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
             <span className="material-symbols-outlined text-[16px]">arrow_back</span>
           </button>
         } />
-        <div className="flex-1 flex items-center justify-center text-sm text-text-muted">Loading...</div>
+        <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
+          {loadError ? (
+            <div className="text-center space-y-2">
+              <p>Failed to load task</p>
+              <button onClick={loadAll} className="text-xs text-forest-green hover:underline">Retry</button>
+            </div>
+          ) : 'Loading...'}
+        </div>
       </div>
     )
   }
 
   const assignedAgent = task.assignedAgentId ? agents.find(a => a.id === task.assignedAgentId) : null
-
-  const [actionLoading, setActionLoading] = useState(false)
 
   const handleRetry = async () => {
     setActionLoading(true)
