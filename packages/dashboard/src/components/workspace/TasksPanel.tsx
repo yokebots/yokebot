@@ -5,9 +5,9 @@ import TagFilterBar from '@/components/TagFilterBar'
 import type { WorkspaceState } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 
-const STATUS_ORDER = ['todo', 'in_progress', 'blocked', 'review', 'done', 'backlog']
+const STATUS_ORDER = ['todo', 'in_progress', 'blocked', 'review', 'done', 'backlog', 'archived']
 const STATUS_LABELS: Record<string, string> = {
-  backlog: 'Backlog', todo: 'To Do', in_progress: 'In Progress', blocked: 'Blocked', review: 'Review', done: 'Done',
+  backlog: 'Backlog', todo: 'To Do', in_progress: 'In Progress', blocked: 'Blocked', review: 'Review', done: 'Done', archived: 'Archived',
 }
 const STATUS_DOTS: Record<string, string> = {
   backlog: 'bg-gray-400', todo: 'bg-blue-500', in_progress: 'bg-amber-500', blocked: 'bg-red-500', review: 'bg-purple-500', done: 'bg-green-500',
@@ -66,6 +66,7 @@ interface TasksPanelProps {
 
 export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps) {
   const [tasks, setTasks] = useState<engine.EngineTask[]>([])
+  const [archiving, setArchiving] = useState(false)
   const [view, setView] = useState<'list' | 'kanban'>(() => {
     return localStorage.getItem('workspace-tasks-view') as 'list' | 'kanban' ?? 'list'
   })
@@ -138,6 +139,15 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
     workspace.setSelectedTaskId(taskId)
   }
 
+  const handleArchiveCompleted = async () => {
+    setArchiving(true)
+    try {
+      await engine.archiveCompletedTasks()
+      loadTasks()
+    } catch { /* ignore */ }
+    setArchiving(false)
+  }
+
   const toggleColumn = (col: ColumnKey) => {
     setVisibleColumns(prev =>
       prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
@@ -188,6 +198,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
   }
 
   const tasksByStatus = (status: string) => sortedTasks.filter(t => t.status === status)
+  const doneCount = tasks.filter(t => t.status === 'done').length
 
   return (
     <div className="flex flex-col h-full">
@@ -197,6 +208,17 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
         badge={unreadTaskIds?.size}
         actions={
           <div className="flex items-center gap-1">
+            {doneCount > 0 && (
+              <button
+                onClick={handleArchiveCompleted}
+                disabled={archiving}
+                className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-[10px] font-medium text-green-700 bg-green-50 hover:bg-green-100 transition-colors disabled:opacity-50"
+                title="Archive all completed tasks"
+              >
+                <span className="material-symbols-outlined text-[13px]">inventory_2</span>
+                Clear {doneCount} done
+              </button>
+            )}
             <button
               onClick={() => switchView('list')}
               className={`rounded p-1 transition-colors ${view === 'list' ? 'bg-forest-green/10 text-forest-green' : 'text-text-muted hover:bg-light-surface-alt'}`}
@@ -377,19 +399,26 @@ function ListView({
       {tasks.map(task => {
         const agent = task.assignedAgentId ? agentMap.get(task.assignedAgentId) : null
         const isUnread = unreadTaskIds?.has(task.id)
+        const isDone = task.status === 'done'
         return (
           <button
             key={task.id}
             onClick={() => onTaskClick(task.id)}
-            className="group flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-light-surface-alt"
+            className={`group flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-light-surface-alt ${isDone ? 'opacity-60' : ''}`}
           >
-            {/* Status dot */}
-            <span className={`h-2 w-2 shrink-0 rounded-full self-start mt-1 ${STATUS_DOTS[task.status] ?? 'bg-gray-400'}`} />
+            {/* Status indicator — checkmark for done, warning for blocked, dot for everything else */}
+            {isDone ? (
+              <span className="material-symbols-outlined text-[16px] shrink-0 self-start text-green-500">check_circle</span>
+            ) : task.status === 'blocked' ? (
+              <span className="material-symbols-outlined text-[16px] shrink-0 self-start text-red-500">error</span>
+            ) : (
+              <span className={`h-2 w-2 shrink-0 rounded-full self-start mt-1 ${STATUS_DOTS[task.status] ?? 'bg-gray-400'}`} />
+            )}
             {/* Unread indicator */}
             {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500 self-start mt-1.5" />}
             {/* Title + Tags stacked */}
             <div className="flex-1 min-w-0">
-              <span className={`block truncate ${isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>
+              <span className={`block truncate ${isDone ? 'line-through text-text-muted' : isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>
                 {task.title}
               </span>
               {task.tags?.length > 0 && (
@@ -475,14 +504,16 @@ function KanbanView({
             {tasksByStatus(status).map(task => {
               const agent = task.assignedAgentId ? agentMap.get(task.assignedAgentId) : null
               const isUnread = unreadTaskIds?.has(task.id)
+              const isDone = task.status === 'done'
               return (
                 <button
                   key={task.id}
                   onClick={() => onTaskClick(task.id)}
-                  className="w-full rounded-lg border border-border-subtle bg-white p-2 text-left hover:border-forest-green/30 hover:shadow-sm transition-all"
+                  className={`w-full rounded-lg border bg-white p-2 text-left hover:border-forest-green/30 hover:shadow-sm transition-all ${isDone ? 'opacity-60 border-border-subtle' : task.status === 'blocked' ? 'border-red-300' : 'border-border-subtle'}`}
                 >
-                  <p className={`text-xs leading-snug ${isUnread ? 'font-semibold' : ''} text-text-main line-clamp-2`}>
-                    {isUnread && <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 mr-1 align-middle" />}
+                  <p className={`text-xs leading-snug ${isDone ? 'line-through text-text-muted' : isUnread ? 'font-semibold text-text-main' : 'text-text-main'} line-clamp-2`}>
+                    {isDone && <span className="material-symbols-outlined text-[13px] text-green-500 mr-0.5 align-middle">check_circle</span>}
+                    {isUnread && !isDone && <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 mr-1 align-middle" />}
                     {task.title}
                   </p>
                   {task.tags?.length > 0 && (

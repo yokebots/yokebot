@@ -1356,6 +1356,68 @@ const migrations: Migration[] = [
       }
     },
   },
+
+  // --- Migration 30: RLS policies for Session Vault ---
+  {
+    version: 30,
+    name: 'add_session_vault_rls_policies',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE POLICY session_vault_team_isolation ON session_vault
+            USING (team_id = current_setting('app.team_id', true))
+            WITH CHECK (team_id = current_setting('app.team_id', true));
+
+          CREATE POLICY session_vault_log_team_isolation ON session_vault_log
+            USING (team_id = current_setting('app.team_id', true))
+            WITH CHECK (team_id = current_setting('app.team_id', true));
+
+          CREATE POLICY session_vault_service_role ON session_vault
+            FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+          CREATE POLICY session_vault_log_service_role ON session_vault_log
+            FOR ALL TO service_role USING (true) WITH CHECK (true);
+        `)
+      }
+      // SQLite doesn't support RLS — no-op
+    },
+  },
+  {
+    version: 31,
+    name: 'unify_blocked_approvals',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        // Add blocked_reason and blocked_approval_id to tasks
+        await db.run(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocked_reason TEXT`)
+        await db.run(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocked_approval_id TEXT`)
+
+        // Add task_id to approvals (links approval back to its task)
+        await db.run(`ALTER TABLE approvals ADD COLUMN IF NOT EXISTS task_id TEXT`)
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id)`)
+
+        // Backfill: existing blocked tasks get 'max_retries' as the reason
+        await db.run(`UPDATE tasks SET blocked_reason = 'max_retries' WHERE status = 'blocked' AND blocked_reason IS NULL`)
+      } else {
+        // SQLite
+        const taskCols = await db.query<{ name: string }>(`PRAGMA table_info(tasks)`)
+        if (!taskCols.some(c => c.name === 'blocked_reason')) {
+          await db.run(`ALTER TABLE tasks ADD COLUMN blocked_reason TEXT`)
+        }
+        if (!taskCols.some(c => c.name === 'blocked_approval_id')) {
+          await db.run(`ALTER TABLE tasks ADD COLUMN blocked_approval_id TEXT`)
+        }
+
+        const approvalCols = await db.query<{ name: string }>(`PRAGMA table_info(approvals)`)
+        if (!approvalCols.some(c => c.name === 'task_id')) {
+          await db.run(`ALTER TABLE approvals ADD COLUMN task_id TEXT`)
+        }
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id)`)
+
+        // Backfill
+        await db.run(`UPDATE tasks SET blocked_reason = 'max_retries' WHERE status = 'blocked' AND blocked_reason IS NULL`)
+      }
+    },
+  },
 ]
 
 /**

@@ -18,7 +18,7 @@ import { createAgent, listAgents, getAgent, updateAgent, deleteAgent, setAgentSt
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
 import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention, initSchedulerState } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
-import { createTask, listTasks, getTask, updateTask, deleteTask } from './tasks.ts'
+import { createTask, listTasks, getTask, updateTask, deleteTask, unblockTask } from './tasks.ts'
 import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
 import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getChannelMessages, getThreadReplies, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
 import { initWorkspace, listFiles, readFile, readBinaryFile, writeFile, writeBinaryFile, renameFile, deleteFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
@@ -439,6 +439,26 @@ async function main() {
     res.json(await listAgents(db, teamId))
   })
 
+  // Bulk pause/resume all agents for a team
+  app.post('/api/agents/bulk-status', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const { status } = req.body as { status: string }
+    if (status !== 'running' && status !== 'paused') return res.status(400).json({ error: 'status must be "running" or "paused"' })
+    const agents = await listAgents(db, teamId)
+    const targetAgents = agents.filter(a => status === 'running' ? a.status === 'paused' : a.status === 'running')
+    for (const agent of targetAgents) {
+      await setAgentStatus(db, agent.id, status)
+      if (status === 'running') {
+        scheduleAgent(db, agent)
+      } else {
+        unscheduleAgent(agent.id)
+      }
+    }
+    await logActivity(db, status === 'running' ? 'agents_resumed' : 'agents_paused', null, `All agents ${status === 'running' ? 'resumed' : 'paused'} (${targetAgents.length})`, undefined, teamId)
+    res.json({ updated: targetAgents.length, status })
+  })
+
   app.get('/api/agents/:id', async (req, res) => {
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('agents', req.params.id, teamId)) return res.status(404).json({ error: 'Agent not found' })
@@ -672,6 +692,11 @@ async function main() {
     const approval = await resolveApproval(db, req.params.id, status)
     if (!approval) return res.status(404).json({ error: 'Approval not found' })
     await logActivity(db, 'approval_resolved', approval.agentId, `Approval ${status}: ${approval.actionType} — ${approval.actionDetail.slice(0, 100)}`, { approvalId: approval.id, status }, teamId)
+    // Notify team about resolution
+    void notifyTeam(db, teamId, 'system',
+      `Approval ${status}: ${approval.actionType}`,
+      approval.actionDetail.slice(0, 200),
+      approval.taskId ? `/tasks/${approval.taskId}` : '/approvals')
     // SSE: broadcast updated approval count
     const resolvedApprovalCount = await countPendingApprovals(db, teamId)
     broadcastToTeam(teamId, 'approval_count', { count: resolvedApprovalCount })
@@ -786,6 +811,23 @@ async function main() {
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
     const body = validate(UpdateTaskSchema, req.body)
+
+    // When unblocking (status changes FROM blocked to something else), clear blocked fields
+    const existing = await getTask(db, req.params.id)
+    if (existing?.status === 'blocked' && body.status && body.status !== 'blocked') {
+      await unblockTask(db, req.params.id, body.status as 'todo' | 'backlog' | 'in_progress' | 'review' | 'done')
+      const task = await getTask(db, req.params.id)
+      if (task?.status === 'done') {
+        void onTaskCompleted(db, task.id).catch((err) => console.error('[workflows] onTaskCompleted error:', err))
+      }
+      return res.json(task)
+    }
+
+    // When setting TO blocked, require blockedReason
+    if (body.status === 'blocked' && !(body as Record<string, unknown>).blockedReason) {
+      return res.status(400).json({ error: 'blockedReason is required when setting status to blocked' })
+    }
+
     const task = await updateTask(db, req.params.id, body as Record<string, unknown>)
     if (!task) return res.status(404).json({ error: 'Task not found' })
     // Workflow step chaining: if task is done, advance linked workflow
@@ -795,12 +837,56 @@ async function main() {
     res.json(task)
   })
 
+  app.post('/api/tasks/:id/retry', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
+    await unblockTask(db, req.params.id, 'todo')
+    const task = await getTask(db, req.params.id)
+    res.json(task)
+  })
+
+  app.post('/api/tasks/:id/unblock', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
+    const existing = await getTask(db, req.params.id)
+    // If task had a linked approval, resolve it as approved
+    if (existing?.blockedApprovalId) {
+      await resolveApproval(db, existing.blockedApprovalId, 'approved')
+    } else {
+      // resolveApproval already calls unblockTask, so only call directly if no approval
+      await unblockTask(db, req.params.id, 'todo')
+    }
+    const task = await getTask(db, req.params.id)
+    res.json(task)
+  })
+
   app.delete('/api/tasks/:id', async (req, res) => {
     if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
     await deleteTask(db, req.params.id)
     res.status(204).end()
+  })
+
+  // Bulk archive completed tasks — moves all 'done' tasks to 'archived' status
+  app.post('/api/tasks/archive-completed', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    // Count first, then update
+    const rows = await db.query<{ count: number }>(
+      "SELECT COUNT(*)::int AS count FROM tasks WHERE team_id = $1 AND status = 'done'",
+      [teamId],
+    )
+    const count = rows[0]?.count ?? 0
+    if (count > 0) {
+      await db.run(
+        "UPDATE tasks SET status = 'archived', updated_at = NOW() WHERE team_id = $1 AND status = 'done'",
+        [teamId],
+      )
+    }
+    res.json({ archived: count })
   })
 
   // ---- Task Attachments & Header Images ----
@@ -1847,6 +1933,7 @@ async function main() {
   })
 
   app.get('/api/vault/record/:id/stream', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
     const session = getRecordingSession(req.params.id)
     if (!session) return res.status(404).json({ error: 'Recording session not found' })
     if (session.teamId !== req.user!.activeTeamId!) return res.status(403).json({ error: 'Forbidden' })
@@ -1860,14 +1947,23 @@ async function main() {
     let closed = false
     req.on('close', () => { closed = true })
 
-    // Stream screenshots at ~2fps
+    const MAX_STREAM_DURATION = 60 * 60 * 1000 // 1 hour
+    const MAX_STREAM_BYTES = 50 * 1024 * 1024   // 50MB
+    const startTime = Date.now()
+    let bytesWritten = 0
+
+    // Stream screenshots at ~2fps with timeout + size cap
     const sendScreenshot = async () => {
       while (!closed) {
+        if (Date.now() - startTime > MAX_STREAM_DURATION) { res.write('event: timeout\ndata: {}\n\n'); break }
+        if (bytesWritten > MAX_STREAM_BYTES) { res.write('event: size_limit\ndata: {}\n\n'); break }
         try {
           const active = getRecordingSession(req.params.id)
           if (!active) { res.write('event: closed\ndata: {}\n\n'); break }
           const result = await captureScreenshot(req.params.id)
-          res.write(`data: ${JSON.stringify(result)}\n\n`)
+          const chunk = `data: ${JSON.stringify(result)}\n\n`
+          bytesWritten += chunk.length
+          res.write(chunk)
         } catch {
           break
         }

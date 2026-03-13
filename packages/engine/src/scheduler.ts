@@ -18,8 +18,9 @@ import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel,
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
 import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget, deductCredits } from './billing.ts'
-import { listTasks, getSubtasks, isBlocked as isTaskBlocked, type Task } from './tasks.ts'
-import { getTaskThread, getChannelMessages } from './chat.ts'
+import { listTasks, getSubtasks, isBlocked as isTaskBlocked, blockTask, type Task } from './tasks.ts'
+import { notifyTeam } from './notifications.ts'
+import { getTaskThread, getChannelMessages, getMessage } from './chat.ts'
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
@@ -278,12 +279,21 @@ export async function respondToMention(
   triggerMessage: { senderId: string; content: string; parentMessageId?: number | null },
 ): Promise<void> {
   const startMs = Date.now()
-  const { getAgent } = await import('./agent.ts')
+  const { getAgent, setAgentStatus } = await import('./agent.ts')
   const { getChannelMessages } = await import('./chat.ts')
   const { chatCompletion } = await import('./model.ts')
   const agent = await getAgent(db, agentId)
-  if (!agent || agent.status !== 'running') return
+  if (!agent) return
   if (agent.teamId !== teamId) return
+
+  // Auto-resume paused agents on @mention — human signal means "wake up"
+  if (agent.status === 'paused') {
+    await setAgentStatus(db, agent.id, 'running')
+    scheduleAgent(db, agent)
+    console.log(`[scheduler] Auto-resumed "${agent.name}" on @mention`)
+  } else if (agent.status !== 'running') {
+    return
+  }
 
   // Hard stop: no credits = no response
   if (HOSTED_MODE) {
@@ -347,7 +357,12 @@ export async function respondToMention(
     if (reply && reply.length > 0) {
       // Stop typing, post the ack message (in the same thread if the trigger was a thread reply)
       broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
-      const replyParentId = triggerMessage.parentMessageId ?? undefined
+      // Verify parent message belongs to the same channel before threading
+      let replyParentId = triggerMessage.parentMessageId ?? undefined
+      if (replyParentId) {
+        const parentMsg = await getMessage(db, replyParentId)
+        if (!parentMsg || parentMsg.channelId !== channelId) replyParentId = undefined
+      }
       await sendMessage(db, channelId, 'agent', agent.id, reply, undefined, teamId, undefined, undefined, undefined, replyParentId)
       await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${reply.slice(0, 150)}`, undefined, teamId)
 
@@ -372,14 +387,21 @@ export async function respondToMention(
   }
 
   // Reset sprint counts and unblock tasks on @mention — human signal means "retry"
-  try {
-    await db.run(
-      `UPDATE tasks SET sprint_count = 0, status = 'todo' WHERE assigned_agent_id = $1 AND team_id = $2 AND status = 'blocked'`,
-      [agentId, teamId],
-    )
-    console.log(`[scheduler] @mention reset: unblocked tasks for "${agent.name}"`)
-  } catch (err) {
-    console.error(`[scheduler] Failed to reset blocked tasks on @mention:`, err)
+  // Rate-limit: max 1 reset per agent per 5 minutes to prevent mention spam
+  const mentionResetKey = `mention_reset:${agentId}`
+  const lastReset = mentionResetCooldowns.get(mentionResetKey)
+  const resetNow = Date.now()
+  if (!lastReset || resetNow - lastReset > 5 * 60 * 1000) {
+    mentionResetCooldowns.set(mentionResetKey, resetNow)
+    try {
+      await db.run(
+        `UPDATE tasks SET sprint_count = 0, status = 'todo', blocked_reason = NULL, blocked_approval_id = NULL WHERE assigned_agent_id = $1 AND team_id = $2 AND status = 'blocked'`,
+        [agentId, teamId],
+      )
+      console.log(`[scheduler] @mention reset: unblocked tasks for "${agent.name}"`)
+    } catch (err) {
+      console.error(`[scheduler] Failed to reset blocked tasks on @mention:`, err)
+    }
   }
 
   // ---- Phase 2: Background work via react loop (fire-and-forget) ----
@@ -406,8 +428,14 @@ export async function respondToMention(
       const cleanResponse = result.response ? stripToolSyntax(result.response) : null
       if (cleanResponse && cleanResponse.trim().length > 0
         && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op') {
+        // Reuse the validated replyParentId from the ack phase (same mention context)
         const followupParentId = triggerMessage.parentMessageId ?? undefined
-        await sendMessage(db, channelId, 'agent', agent.id, cleanResponse, undefined, teamId, undefined, undefined, undefined, followupParentId)
+        let safeFollowupParentId = followupParentId
+        if (safeFollowupParentId) {
+          const parentMsg = await getMessage(db, safeFollowupParentId)
+          if (!parentMsg || parentMsg.channelId !== channelId) safeFollowupParentId = undefined
+        }
+        await sendMessage(db, channelId, 'agent', agent.id, cleanResponse, undefined, teamId, undefined, undefined, undefined, safeFollowupParentId)
         await logActivity(db, 'mention_followup', agent.id, `Follow-up: ${cleanResponse.slice(0, 150)}`, undefined, teamId)
         console.log(`[scheduler] "${agent.name}" posted mention follow-up`)
       }
@@ -434,20 +462,31 @@ export function unscheduleAgent(agentId: string): void {
 // ---- Cheap-poll: check for new messages before running generic check-in ----
 
 async function hasNewMessages(db: Db, teamId: string, agentId: string, sinceSec: number): Promise<boolean> {
-  const since = db.driver === 'postgres'
-    ? `NOW() - INTERVAL '${sinceSec} seconds'`
-    : `datetime('now', '-${sinceSec} seconds')`
+  // Sanitize sinceSec to integer to prevent SQL injection via agent config
+  const safeSinceSec = Math.max(1, Math.floor(Number(sinceSec) || 60))
   const row = await db.queryOne<{ cnt: number }>(
-    `SELECT COUNT(*) as cnt FROM chat_messages
-     WHERE channel_id IN (
-       SELECT id FROM chat_channels WHERE team_id = $1 AND (type = 'team' OR type = 'group' OR name = 'dm:' || $2)
-     )
-     AND sender_id != $2
-     AND created_at > ${since}`,
-    [teamId, agentId],
+    db.driver === 'postgres'
+      ? `SELECT COUNT(*) as cnt FROM chat_messages
+         WHERE channel_id IN (
+           SELECT id FROM chat_channels WHERE team_id = $1 AND (type = 'team' OR type = 'group' OR name = 'dm:' || $2)
+         )
+         AND sender_id != $2
+         AND created_at > NOW() - INTERVAL '1 second' * $3`
+      : `SELECT COUNT(*) as cnt FROM chat_messages
+         WHERE channel_id IN (
+           SELECT id FROM chat_channels WHERE team_id = ? AND (type = 'team' OR type = 'group' OR name = 'dm:' || ?)
+         )
+         AND sender_id != ?
+         AND created_at > datetime('now', '-' || ? || ' seconds')`,
+    db.driver === 'postgres'
+      ? [teamId, agentId, safeSinceSec]
+      : [teamId, agentId, agentId, safeSinceSec],
   )
   return (row?.cnt ?? 0) > 0
 }
+
+// ---- Mention reset cooldown (prevent spam-unblocking) ----
+const mentionResetCooldowns = new Map<string, number>()
 
 // ---- Task-focused sprint helpers ----
 
@@ -465,7 +504,11 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
       `SELECT sprint_count, last_sprint_at FROM tasks WHERE id = $1`, [task.id],
     )
     if ((row?.sprint_count ?? 0) >= MAX_SPRINT_ATTEMPTS) {
-      await db.run(`UPDATE tasks SET status = 'blocked' WHERE id = $1`, [task.id])
+      await blockTask(db, task.id, 'max_retries')
+      void notifyTeam(db, teamId, 'system',
+        `Task blocked: ${task.title}`,
+        `Agent failed after ${MAX_SPRINT_ATTEMPTS} attempts. Tap to retry or reassign.`,
+        `/tasks/${task.id}`)
       console.log(`[scheduler] Auto-blocked task "${task.title}" — ${row?.sprint_count} failed sprints`)
       continue
     }
@@ -658,8 +701,13 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
           // Auto-set task status to 'blocked' so it won't be retried on next heartbeat
           if (result.taskBlocked) {
-            await db.run(`UPDATE tasks SET status = 'blocked' WHERE id = $1 AND status != 'done'`, [task.id])
-            console.log(`[scheduler] Task "${task.title}" auto-set to blocked — will not retry until unblocked`)
+            // Find the most recent pending approval for this task (created by the request_approval tool)
+            const latestApproval = await db.queryOne<{ id: string }>(
+              `SELECT id FROM approvals WHERE agent_id = $1 AND team_id = $2 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
+              [agent.id, agent.teamId],
+            )
+            await blockTask(db, task.id, 'approval_pending', latestApproval?.id)
+            console.log(`[scheduler] Task "${task.title}" auto-set to blocked (approval_pending) — will not retry until unblocked`)
           }
 
           // Clean tool-call syntax from response before posting to chat

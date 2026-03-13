@@ -8,6 +8,7 @@
 
 import type { Db } from './db/types.ts'
 import { randomUUID } from 'crypto'
+import { unblockTask } from './tasks.ts'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
@@ -19,6 +20,7 @@ export interface Approval {
   actionDetail: string
   riskLevel: RiskLevel
   status: ApprovalStatus
+  taskId: string | null
   createdAt: string
   resolvedAt: string | null
 }
@@ -34,11 +36,12 @@ export async function createApproval(
   actionType: string,
   actionDetail: string,
   riskLevel: RiskLevel,
+  taskId?: string,
 ): Promise<Approval> {
   const id = randomUUID()
   await db.run(
-    'INSERT INTO approvals (id, team_id, agent_id, action_type, action_detail, risk_level) VALUES ($1, $2, $3, $4, $5, $6)',
-    [id, teamId, agentId, actionType, actionDetail, riskLevel],
+    'INSERT INTO approvals (id, team_id, agent_id, action_type, action_detail, risk_level, task_id) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [id, teamId, agentId, actionType, actionDetail, riskLevel, taskId ?? null],
   )
   return (await getApproval(db, id))!
 }
@@ -69,7 +72,12 @@ export async function resolveApproval(
     `UPDATE approvals SET status = $1, resolved_at = ${db.now()} WHERE id = $2`,
     [status, id],
   )
-  return getApproval(db, id)
+  const approval = await getApproval(db, id)
+  // Auto-unblock linked task on resolve (both approve and reject — agent can pivot on rejection)
+  if (approval?.taskId) {
+    await unblockTask(db, approval.taskId, 'todo')
+  }
+  return approval
 }
 
 export async function countPendingApprovals(db: Db, teamId?: string): Promise<number> {
@@ -95,6 +103,7 @@ function rowToApproval(row: Record<string, unknown>): Approval {
     actionDetail: row.action_detail as string,
     riskLevel: row.risk_level as RiskLevel,
     status: row.status as ApprovalStatus,
+    taskId: (row.task_id as string | null) ?? null,
     createdAt: row.created_at as string,
     resolvedAt: row.resolved_at as string | null,
   }

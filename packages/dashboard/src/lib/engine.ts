@@ -108,7 +108,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 export interface EngineAgent {
   id: string
   name: string
-  status: 'stopped' | 'running' | 'error'
+  status: 'stopped' | 'running' | 'paused' | 'error'
   department: string | null
   iconName: string | null
   iconColor: string | null
@@ -137,7 +137,7 @@ export interface EngineTask {
   id: string
   title: string
   description: string | null
-  status: 'backlog' | 'todo' | 'in_progress' | 'review' | 'done'
+  status: 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'blocked' | 'archived'
   priority: 'low' | 'medium' | 'high' | 'urgent'
   assignedAgentId: string | null
   parentTaskId: string | null
@@ -145,6 +145,9 @@ export interface EngineTask {
   headerImage: string | null
   attachments: TaskAttachment[]
   tags: TaskTag[]
+  blockedReason: 'max_retries' | 'approval_pending' | 'dependency' | 'manual' | null
+  blockedApprovalId: string | null
+  sprintCount: number
   createdAt: string
   updatedAt: string
 }
@@ -160,6 +163,7 @@ export interface EngineApproval {
   actionDetail: string
   riskLevel: 'low' | 'medium' | 'high' | 'critical'
   status: 'pending' | 'approved' | 'rejected'
+  taskId: string | null
   createdAt: string
   resolvedAt: string | null
 }
@@ -243,6 +247,10 @@ export const deleteAgent = (id: string) =>
   request<void>(`/api/agents/${id}`, { method: 'DELETE' })
     .then(r => { invalidateCache('agents'); return r })
 
+export const bulkSetAgentStatus = (status: 'running' | 'paused') =>
+  request<{ updated: number; status: string }>('/api/agents/bulk-status', { method: 'POST', body: JSON.stringify({ status }) })
+    .then(r => { invalidateCache('agents'); return r })
+
 export const startAgent = (id: string) =>
   request<EngineAgent>(`/api/agents/${id}/start`, { method: 'POST' })
     .then(a => { invalidateCache('agents'); return a })
@@ -312,6 +320,15 @@ export const updateTask = (id: string, data: Record<string, unknown>) =>
 
 export const deleteTask = (id: string) =>
   request<void>(`/api/tasks/${id}`, { method: 'DELETE' }).then(() => { invalidateCache('task') })
+
+export const retryTask = (id: string) =>
+  request<EngineTask>(`/api/tasks/${id}/retry`, { method: 'POST' }).then(t => { invalidateCache('task'); return t })
+
+export const unblockTask = (id: string) =>
+  request<EngineTask>(`/api/tasks/${id}/unblock`, { method: 'POST' }).then(t => { invalidateCache('task'); return t })
+
+export const archiveCompletedTasks = () =>
+  request<{ archived: number }>('/api/tasks/archive-completed', { method: 'POST' }).then(r => { invalidateCache('task'); return r })
 
 export const uploadTaskAttachment = async (taskId: string, file: File): Promise<{ url: string; attachments: TaskAttachment[] }> => {
   const contentBase64 = await fileToBase64(file)

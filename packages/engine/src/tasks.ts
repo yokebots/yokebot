@@ -5,8 +5,9 @@
 import type { Db } from './db/types.ts'
 import { randomUUID } from 'crypto'
 
-export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done'
+export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'archived' | 'blocked'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
+export type BlockedReason = 'max_retries' | 'approval_pending' | 'dependency' | 'manual'
 
 export interface TaskAttachment {
   name: string; url: string; type: string; size: number
@@ -21,6 +22,7 @@ export interface Task {
   assignedAgentId: string | null; assignedUserId: string | null; parentTaskId: string | null; deadline: string | null
   headerImage: string | null; attachments: TaskAttachment[]
   tags: TaskTag[]
+  blockedReason: BlockedReason | null; blockedApprovalId: string | null; sprintCount: number
   createdAt: string; updatedAt: string
 }
 
@@ -54,6 +56,8 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
 
   if (filters?.teamId) { sql += ` AND t.team_id = $${paramIdx++}`; params.push(filters.teamId) }
   if (filters?.status) { sql += ` AND t.status = $${paramIdx++}`; params.push(filters.status) }
+  // Exclude archived tasks by default (unless explicitly filtering by 'archived' status)
+  if (!filters?.status || filters.status !== 'archived') { sql += ` AND t.status != 'archived'` }
   if (filters?.agentId) { sql += ` AND t.assigned_agent_id = $${paramIdx++}`; params.push(filters.agentId) }
   if (filters?.parentId !== undefined) {
     if (filters.parentId === null) { sql += ' AND t.parent_task_id IS NULL' }
@@ -162,6 +166,28 @@ function rowToTask(row: Record<string, unknown>): Task {
     status: row.status as TaskStatus, priority: row.priority as TaskPriority,
     assignedAgentId: row.assigned_agent_id as string | null, assignedUserId: (row.assigned_user_id as string | null) ?? null, parentTaskId: row.parent_task_id as string | null,
     deadline: row.deadline as string | null, headerImage: (row.header_image as string | null) ?? null,
-    attachments, tags: [], createdAt: row.created_at as string, updatedAt: row.updated_at as string,
+    attachments, tags: [],
+    blockedReason: (row.blocked_reason as BlockedReason | null) ?? null,
+    blockedApprovalId: (row.blocked_approval_id as string | null) ?? null,
+    sprintCount: (row.sprint_count as number) ?? 0,
+    createdAt: row.created_at as string, updatedAt: row.updated_at as string,
   }
+}
+
+/** Block a task with a specific reason and optional linked approval. */
+export async function blockTask(db: Db, taskId: string, reason: BlockedReason, approvalId?: string): Promise<void> {
+  const now = db.now()
+  await db.run(
+    `UPDATE tasks SET status = 'blocked', blocked_reason = $1, blocked_approval_id = $2, updated_at = ${now} WHERE id = $3`,
+    [reason, approvalId ?? null, taskId],
+  )
+}
+
+/** Unblock a task: clear blocked fields, reset sprint_count, set target status. */
+export async function unblockTask(db: Db, taskId: string, targetStatus: TaskStatus = 'todo'): Promise<void> {
+  const now = db.now()
+  await db.run(
+    `UPDATE tasks SET status = $1, blocked_reason = NULL, blocked_approval_id = NULL, sprint_count = 0, updated_at = ${now} WHERE id = $2`,
+    [targetStatus, taskId],
+  )
 }

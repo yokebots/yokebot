@@ -5,7 +5,7 @@ import TagManager from '@/components/TagManager'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 
-const STATUS_OPTIONS = ['backlog', 'todo', 'in_progress', 'blocked', 'review', 'done']
+const STATUS_OPTIONS = ['backlog', 'todo', 'in_progress', 'blocked', 'review', 'done', 'archived']
 const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent']
 
 interface TaskDetailProps {
@@ -96,6 +96,38 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
 
   const assignedAgent = task.assignedAgentId ? agents.find(a => a.id === task.assignedAgentId) : null
 
+  const [actionLoading, setActionLoading] = useState(false)
+
+  const handleRetry = async () => {
+    setActionLoading(true)
+    try {
+      const updated = await engine.retryTask(taskId)
+      setTask(prev => prev ? { ...prev, ...updated } : prev)
+    } catch { /* ignore */ }
+    setActionLoading(false)
+  }
+
+  const handleUnblock = async () => {
+    setActionLoading(true)
+    try {
+      const updated = await engine.unblockTask(taskId)
+      setTask(prev => prev ? { ...prev, ...updated } : prev)
+    } catch { /* ignore */ }
+    setActionLoading(false)
+  }
+
+  const handleApprovalAction = async (status: 'approved' | 'rejected') => {
+    if (!task.blockedApprovalId) return
+    setActionLoading(true)
+    try {
+      await engine.resolveApproval(task.blockedApprovalId, status)
+      // Refresh task (resolveApproval auto-unblocks)
+      const detail = await engine.getTaskDetail(taskId)
+      setTask(detail.task)
+    } catch { /* ignore */ }
+    setActionLoading(false)
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header with back button */}
@@ -106,6 +138,81 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
         <span className="material-symbols-outlined text-[16px] text-text-muted">task_alt</span>
         <span className="text-sm font-semibold text-text-main truncate flex-1">{task.title}</span>
       </div>
+
+      {/* Blocked banner */}
+      {task.status === 'blocked' && (
+        <div className={`px-3 py-2.5 border-b shrink-0 ${
+          task.blockedReason === 'max_retries' ? 'bg-amber-50 border-amber-200' :
+          task.blockedReason === 'approval_pending' ? 'bg-blue-50 border-blue-200' :
+          'bg-gray-50 border-gray-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            <span className={`material-symbols-outlined text-[18px] ${
+              task.blockedReason === 'max_retries' ? 'text-amber-600' :
+              task.blockedReason === 'approval_pending' ? 'text-blue-600' :
+              'text-gray-500'
+            }`}>
+              {task.blockedReason === 'approval_pending' ? 'hourglass_top' : 'error'}
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-text-main">
+                {task.blockedReason === 'max_retries' && `Agent failed after ${task.sprintCount} attempts`}
+                {task.blockedReason === 'approval_pending' && 'Waiting for approval'}
+                {task.blockedReason === 'dependency' && 'Blocked by another task'}
+                {task.blockedReason === 'manual' && 'Manually blocked'}
+                {!task.blockedReason && 'Task is blocked'}
+              </p>
+            </div>
+            <div className="flex gap-1.5 shrink-0">
+              {task.blockedReason === 'max_retries' && (
+                <button
+                  onClick={handleRetry}
+                  disabled={actionLoading}
+                  className="rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  Retry
+                </button>
+              )}
+              {task.blockedReason === 'approval_pending' && (
+                <>
+                  <button
+                    onClick={() => handleApprovalAction('rejected')}
+                    disabled={actionLoading}
+                    className="rounded-lg border border-red-200 px-2.5 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => handleApprovalAction('approved')}
+                    disabled={actionLoading}
+                    className="rounded-lg bg-forest-green px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-forest-green/90 disabled:opacity-50"
+                  >
+                    Approve
+                  </button>
+                </>
+              )}
+              {(task.blockedReason === 'manual' || task.blockedReason === 'dependency') && (
+                <button
+                  onClick={handleUnblock}
+                  disabled={actionLoading}
+                  className="rounded-lg bg-forest-green px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-forest-green/90 disabled:opacity-50"
+                >
+                  Unblock
+                </button>
+              )}
+              {!task.blockedReason && (
+                <button
+                  onClick={handleRetry}
+                  disabled={actionLoading}
+                  className="rounded-lg bg-forest-green px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-forest-green/90 disabled:opacity-50"
+                >
+                  Unblock
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Task details + thread (scrollable) */}
       <div className="flex-1 overflow-y-auto">

@@ -74,7 +74,8 @@ export const CreateTaskSchema = z.object({
 export const UpdateTaskSchema = z.object({
   title: z.string().min(1).max(500).optional(),
   description: z.string().max(5000).optional(),
-  status: z.enum(['backlog', 'todo', 'in_progress', 'review', 'done']).optional(),
+  status: z.enum(['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked', 'archived']).optional(),
+  blockedReason: z.enum(['max_retries', 'approval_pending', 'dependency', 'manual']).optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   assignedAgentId: z.string().max(200).nullable().optional(),
   deadline: futureDeadline.nullable().optional(),
@@ -102,6 +103,7 @@ export const CreateApprovalSchema = z.object({
   actionType: z.string().min(1).max(200),
   actionDetail: z.string().min(1).max(5000),
   riskLevel: z.enum(['low', 'medium', 'high', 'critical']),
+  taskId: z.string().max(200).optional(),
 })
 
 export const ResolveApprovalSchema = z.object({

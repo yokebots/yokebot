@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import * as engine from '@/lib/engine'
-import type { EngineApproval, EngineAgent } from '@/lib/engine'
+import type { EngineApproval, EngineAgent, EngineTask } from '@/lib/engine'
 
 const riskStyle: Record<string, string> = {
   low: 'bg-gray-50 text-gray-600',
@@ -13,12 +13,21 @@ export function ApprovalsPage() {
   const [approvals, setApprovals] = useState<EngineApproval[]>([])
   const [agents, setAgents] = useState<EngineAgent[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [taskMap, setTaskMap] = useState<Map<string, EngineTask>>(new Map())
 
   const loadData = async () => {
     try {
       const [a, ag] = await Promise.all([engine.listApprovals(), engine.listAgents()])
       setApprovals(a)
       setAgents(ag)
+      // Load linked tasks for approvals that have taskId
+      const taskIds = [...new Set(a.filter(ap => ap.taskId).map(ap => ap.taskId!))]
+      if (taskIds.length > 0) {
+        const tasks = await Promise.all(taskIds.map(id => engine.getTask(id).catch(() => null)))
+        const map = new Map<string, EngineTask>()
+        for (const t of tasks) { if (t) map.set(t.id, t) }
+        setTaskMap(map)
+      }
     } catch { /* offline */ }
   }
 
@@ -128,7 +137,17 @@ export function ApprovalsPage() {
 
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-text-main">{approval.actionDetail}</p>
-                        <p className="text-xs text-text-muted">{approval.actionType}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs text-text-muted">{approval.actionType}</p>
+                          {approval.taskId && taskMap.get(approval.taskId) && (
+                            <a
+                              href={`/workspace?task=${approval.taskId}`}
+                              className="text-xs text-forest-green hover:underline truncate"
+                            >
+                              {taskMap.get(approval.taskId)!.title}
+                            </a>
+                          )}
+                        </div>
                       </div>
 
                       <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${riskStyle[approval.riskLevel]}`}>
