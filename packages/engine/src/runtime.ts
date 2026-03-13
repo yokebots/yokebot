@@ -349,6 +349,45 @@ function getBuiltinTools(): ToolDef[] {
       reason: { type: 'string', description: 'Why the session appears expired (e.g. "redirected to login page")' },
     }, ['domain', 'reason']),
 
+    // Browser tools — executed via executeBrowserTool() side-channel, but must be
+    // advertised here so the LLM knows they exist and can call them.
+    toolDef('browser_navigate', 'Navigate to a URL in the browser.', {
+      url: { type: 'string', description: 'The URL to navigate to' },
+    }, ['url']),
+
+    toolDef('browser_snapshot', 'Get the current page\'s accessibility tree (structured text representation of visible elements). Use this to see what\'s on the page.', {}, []),
+
+    toolDef('browser_click', 'Click an element on the page by its accessibility ref (from browser_snapshot).', {
+      ref: { type: 'string', description: 'Accessibility ref of the element to click (from snapshot)' },
+    }, ['ref']),
+
+    toolDef('browser_type', 'Type text into an input field identified by accessibility ref.', {
+      ref: { type: 'string', description: 'Accessibility ref of the input element' },
+      text: { type: 'string', description: 'Text to type' },
+      submit: { type: 'boolean', description: 'Press Enter after typing (default: false)' },
+    }, ['ref', 'text']),
+
+    toolDef('browser_select_option', 'Select an option from a dropdown/select element.', {
+      ref: { type: 'string', description: 'Accessibility ref of the select element' },
+      value: { type: 'string', description: 'Value or label of the option to select' },
+    }, ['ref', 'value']),
+
+    toolDef('browser_press_key', 'Press a keyboard key (Enter, Tab, Escape, ArrowDown, etc.).', {
+      key: { type: 'string', description: 'Key to press (e.g., \'Enter\', \'Tab\', \'Escape\', \'ArrowDown\')' },
+    }, ['key']),
+
+    toolDef('browser_screenshot', 'Take a screenshot of the current page. Optionally save to the knowledge base.', {
+      saveTo: { type: 'string', description: 'Optional: knowledge base folder path to save the screenshot (e.g. \'screenshots/project-x\'). If omitted, returns base64 data only.' },
+    }, []),
+
+    toolDef('browser_start_recording', 'Start recording a visual screencast of browser actions. Each subsequent browser action will be captured as a screenshot. Call browser_stop_recording to save all frames.', {
+      saveTo: { type: 'string', description: 'Knowledge base folder path to save the recording frames (e.g. \'recordings/demo\')' },
+    }, ['saveTo']),
+
+    toolDef('browser_stop_recording', 'Stop recording and save all captured frames to the knowledge base.', {}, []),
+
+    toolDef('browser_close', 'Close the browser session and free resources.', {}, []),
+
   ]
 }
 
@@ -610,6 +649,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         args.actionType as string,
         args.actionDetail as string,
         args.riskLevel as 'low' | 'medium' | 'high' | 'critical',
+        ctx.currentTaskId,
       )
       return `Approval request created (id: ${approval.id}, status: pending). A human will review it.`
     }
@@ -893,7 +933,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const domain = args.domain as string
       const { findVaultSessionByDomain, updateSessionUsage, logVaultEvent: logVault } = await import('./session-vault.ts')
       const { restartWithStorageState } = await import('./browser.ts')
-      const { writeFileSync, unlinkSync } = await import('node:fs')
+      const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs')
       const { join } = await import('node:path')
       const { tmpdir } = await import('node:os')
 
@@ -901,13 +941,14 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (!session) return `No active saved login found for "${domain}". The team needs to record a login session for this domain in Settings → Session Vault.`
       if (session.info.status !== 'active') return `The saved login for "${domain}" is ${session.info.status}. The team needs to re-record it.`
 
-      // Write storageState to temp file, restart browser, then delete
-      const tmpPath = join(tmpdir(), `vault-${crypto.randomUUID()}.json`)
-      writeFileSync(tmpPath, session.storageState)
+      // Write storageState to a secure temp directory (mode 0o700), then delete
+      const tempDir = mkdtempSync(join(tmpdir(), 'vault-'))
+      const tmpPath = join(tempDir, 'state.json')
+      writeFileSync(tmpPath, session.storageState, { mode: 0o600 })
       try {
         await restartWithStorageState(ctx.agentId, tmpPath)
       } finally {
-        try { unlinkSync(tmpPath) } catch { /* best effort */ }
+        try { rmSync(tempDir, { recursive: true, force: true }) } catch { /* best effort */ }
       }
 
       await updateSessionUsage(ctx.db, session.info.id)

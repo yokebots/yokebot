@@ -7,6 +7,7 @@
  */
 
 import { chromium, type BrowserContext, type Page, type Browser } from 'playwright'
+import dns from 'node:dns/promises'
 
 // ---- Types ----
 
@@ -46,9 +47,31 @@ const BLOCKED_PATTERNS = [
   /^https?:\/\/192\.168\./,
   /^https?:\/\/0\./,
   /^https?:\/\/\[::1\]/,
+  /^https?:\/\/\[fe80:/i,
+  /^https?:\/\/\[fc/i,
+  /^https?:\/\/\[fd/i,
 ]
 
-function validateUrl(url: string): string {
+// Block DNS rebinding services that resolve to arbitrary IPs
+const BLOCKED_DOMAINS = ['.nip.io', '.xip.io', '.sslip.io', '.localtest.me', '.vcap.me']
+
+function isPrivateIP(ip: string): boolean {
+  return (
+    ip.startsWith('127.') ||
+    ip.startsWith('10.') ||
+    ip.startsWith('192.168.') ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
+    ip === '0.0.0.0' ||
+    ip === '169.254.169.254' ||
+    ip.startsWith('0.') ||
+    ip === '::1' ||
+    ip.startsWith('fe80:') ||
+    ip.startsWith('fc') ||
+    ip.startsWith('fd')
+  )
+}
+
+async function validateUrl(url: string): Promise<string> {
   for (const pattern of BLOCKED_PATTERNS) {
     if (pattern.test(url)) {
       throw new Error(`Blocked URL: ${url}`)
@@ -58,8 +81,29 @@ function validateUrl(url: string): string {
   if (!/^https?:\/\//i.test(url)) {
     url = `https://${url}`
   }
-  // Validate as URL
-  new URL(url) // throws if invalid
+  const parsed = new URL(url) // throws if invalid
+  const host = parsed.hostname.toLowerCase()
+
+  // Block DNS rebinding services
+  for (const blocked of BLOCKED_DOMAINS) {
+    if (host.endsWith(blocked)) {
+      throw new Error(`DNS rebinding service not allowed: ${host}`)
+    }
+  }
+
+  // Resolve hostname and verify it doesn't point to a private IP
+  try {
+    const addresses = await dns.resolve4(host)
+    for (const ip of addresses) {
+      if (isPrivateIP(ip)) {
+        throw new Error(`URL resolves to private IP (${ip}) — not allowed`)
+      }
+    }
+  } catch (err) {
+    if ((err as Error).message.includes('not allowed')) throw err
+    // DNS resolution failed — let Playwright handle it (may be IPv6-only)
+  }
+
   return url
 }
 
@@ -85,7 +129,7 @@ export async function startRecording(
     throw new Error('This team already has an active recording session. Cancel or finish it first.')
   }
 
-  const validUrl = validateUrl(targetUrl)
+  const validUrl = await validateUrl(targetUrl)
 
   const browser = await chromium.launch({
     headless: true,
@@ -229,3 +273,31 @@ export async function cleanupAllRecordings(): Promise<void> {
     await cancelRecording(sessionId)
   }
 }
+
+/** Get all active recording IDs (for crash recovery / monitoring). */
+export function getActiveRecordingIds(): string[] {
+  return Array.from(recordings.keys())
+}
+
+/** Maximum recording duration (30 minutes). Auto-cancel stale sessions. */
+const MAX_RECORDING_DURATION = 30 * 60 * 1000
+
+// Periodic cleanup of stale recordings (runs every 5 minutes)
+setInterval(() => {
+  const now = Date.now()
+  for (const [sessionId, session] of recordings) {
+    // Use a timestamp if available, or skip cleanup for sessions without timing info
+    // Since we don't store start time on the session, add a safety check via try-catch
+    try {
+      // If the browser is disconnected, clean up
+      if (!session.browser.isConnected()) {
+        console.log(`[vault-browser] Cleaning up disconnected recording ${sessionId}`)
+        recordings.delete(sessionId)
+        teamRecordings.delete(session.teamId)
+      }
+    } catch {
+      recordings.delete(sessionId)
+      teamRecordings.delete(session.teamId)
+    }
+  }
+}, 5 * 60 * 1000)

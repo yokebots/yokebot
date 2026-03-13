@@ -1317,6 +1317,22 @@ registerHandler('unenroll_contact', async (args, _creds, ctx) => {
   return `Contact unenrolled from sequence.`
 })
 
+// ---- Input sanitizers for API skill handlers ----
+
+/** Validate an ID parameter is safe for use in URL paths (alphanumeric, dashes, underscores only). */
+function validateApiId(value: unknown, name: string): string | null {
+  const id = String(value ?? '').trim()
+  if (!id) return `${name} is required.`
+  if (!/^[\w-]+$/.test(id)) return `${name} contains invalid characters.`
+  if (id.length > 256) return `${name} is too long.`
+  return null // valid
+}
+
+/** Sanitize a text field with length cap. */
+function sanitizeText(value: unknown, maxLen = 5000): string {
+  return String(value ?? '').slice(0, maxLen)
+}
+
 // ---- Google Docs ----
 registerHandler('google_docs', async (args, creds) => {
   const token = creds.google
@@ -1353,7 +1369,8 @@ registerHandler('google_docs', async (args, creds) => {
       return `Document created: "${doc.title}"\nID: ${doc.documentId}\nURL: https://docs.google.com/document/d/${doc.documentId}/edit`
     }
     case 'read': {
-      if (!args.documentId) return 'documentId is required for read action.'
+      const idErr = validateApiId(args.documentId, 'documentId')
+      if (idErr) return idErr
       const res = await fetch(`https://docs.googleapis.com/v1/documents/${args.documentId as string}`, { headers })
       if (!res.ok) return `Google Docs error: ${res.status}`
       const doc = await res.json() as { title: string; body?: { content?: Array<{ paragraph?: { elements?: Array<{ textRun?: { content: string } }> } }> } }
@@ -1365,7 +1382,8 @@ registerHandler('google_docs', async (args, creds) => {
       return `Document: "${doc.title}"\n\n${truncated}`
     }
     case 'append': {
-      if (!args.documentId) return 'documentId is required for append action.'
+      const idErr = validateApiId(args.documentId, 'documentId')
+      if (idErr) return idErr
       if (!args.content) return 'content is required for append action.'
       // Get document length first
       const getRes = await fetch(`https://docs.googleapis.com/v1/documents/${args.documentId as string}`, { headers })
@@ -1416,8 +1434,9 @@ registerHandler('google_sheets', async (args, creds) => {
       return `Spreadsheet created: "${sheet.properties.title}"\nID: ${sheet.spreadsheetId}\nURL: ${sheet.spreadsheetUrl}`
     }
     case 'read': {
-      if (!args.spreadsheetId) return 'spreadsheetId is required for read action.'
-      const range = (args.range as string) || 'Sheet1'
+      const idErr = validateApiId(args.spreadsheetId, 'spreadsheetId')
+      if (idErr) return idErr
+      const range = sanitizeText(args.range, 100) || 'Sheet1'
       const res = await fetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId as string}/values/${encodeURIComponent(range)}`,
         { headers },
@@ -1430,7 +1449,8 @@ registerHandler('google_sheets', async (args, creds) => {
       return rows.map((row) => row.join('\t')).join('\n')
     }
     case 'write': {
-      if (!args.spreadsheetId) return 'spreadsheetId is required for write action.'
+      const idErr = validateApiId(args.spreadsheetId, 'spreadsheetId')
+      if (idErr) return idErr
       if (!args.range) return 'range is required for write action.'
       if (!args.values) return 'values is required for write action (JSON array of row arrays).'
       let values: string[][]
@@ -1444,8 +1464,9 @@ registerHandler('google_sheets', async (args, creds) => {
       return `Updated ${result.updatedCells ?? 0} cells in range ${args.range as string}.`
     }
     case 'append': {
-      if (!args.spreadsheetId) return 'spreadsheetId is required for append action.'
-      const range = (args.range as string) || 'Sheet1'
+      const idErr = validateApiId(args.spreadsheetId, 'spreadsheetId')
+      if (idErr) return idErr
+      const range = sanitizeText(args.range, 100) || 'Sheet1'
       if (!args.values) return 'values is required for append action (JSON array of row arrays).'
       let values: string[][]
       try { values = JSON.parse(args.values as string) } catch { return 'Invalid values JSON. Expected array of arrays.' }
@@ -1471,17 +1492,19 @@ registerHandler('discord_manage', async (args, creds) => {
 
   switch (action) {
     case 'send-message': {
-      if (!args.channelId) return 'channelId is required for send-message.'
+      const idErr = validateApiId(args.channelId, 'channelId')
+      if (idErr) return idErr
       if (!args.content) return 'content is required for send-message.'
       const res = await fetch(`${baseUrl}/channels/${args.channelId as string}/messages`, {
-        method: 'POST', headers, body: JSON.stringify({ content: args.content as string }),
+        method: 'POST', headers, body: JSON.stringify({ content: sanitizeText(args.content, 2000) }),
       })
       if (!res.ok) return `Discord error: ${res.status} ${await res.text()}`
       const msg = await res.json() as { id: string }
       return `Message sent (ID: ${msg.id}).`
     }
     case 'list-channels': {
-      if (!args.guildId) return 'guildId is required for list-channels.'
+      const idErr = validateApiId(args.guildId, 'guildId')
+      if (idErr) return idErr
       const res = await fetch(`${baseUrl}/guilds/${args.guildId as string}/channels`, { headers })
       if (!res.ok) return `Discord error: ${res.status}`
       const channels = await res.json() as Array<{ id: string; name: string; type: number }>
@@ -1489,7 +1512,8 @@ registerHandler('discord_manage', async (args, creds) => {
       return channels.map((c) => `#${c.name} (${typeNames[c.type] ?? `type:${c.type}`}) — ID: ${c.id}`).join('\n')
     }
     case 'list-members': {
-      if (!args.guildId) return 'guildId is required for list-members.'
+      const idErr = validateApiId(args.guildId, 'guildId')
+      if (idErr) return idErr
       const res = await fetch(`${baseUrl}/guilds/${args.guildId as string}/members?limit=50`, { headers })
       if (!res.ok) return `Discord error: ${res.status}`
       const members = await res.json() as Array<{ user?: { id: string; username: string }; nick?: string; joined_at: string }>
@@ -1497,18 +1521,21 @@ registerHandler('discord_manage', async (args, creds) => {
       return members.map((m) => `${m.nick ?? m.user?.username ?? 'Unknown'} (@${m.user?.username}) — Joined: ${m.joined_at?.slice(0, 10)} — ID: ${m.user?.id}`).join('\n')
     }
     case 'create-channel': {
-      if (!args.guildId) return 'guildId is required for create-channel.'
+      const idErr = validateApiId(args.guildId, 'guildId')
+      if (idErr) return idErr
       if (!args.channelName) return 'channelName is required for create-channel.'
       const res = await fetch(`${baseUrl}/guilds/${args.guildId as string}/channels`, {
-        method: 'POST', headers, body: JSON.stringify({ name: args.channelName as string, type: 0 }),
+        method: 'POST', headers, body: JSON.stringify({ name: sanitizeText(args.channelName, 100), type: 0 }),
       })
       if (!res.ok) return `Discord error: ${res.status} ${await res.text()}`
       const ch = await res.json() as { id: string; name: string }
       return `Channel #${ch.name} created (ID: ${ch.id}).`
     }
     case 'pin-message': {
-      if (!args.channelId) return 'channelId is required for pin-message.'
-      if (!args.messageId) return 'messageId is required for pin-message.'
+      let idErr = validateApiId(args.channelId, 'channelId')
+      if (idErr) return idErr
+      idErr = validateApiId(args.messageId, 'messageId')
+      if (idErr) return idErr
       const res = await fetch(`${baseUrl}/channels/${args.channelId as string}/pins/${args.messageId as string}`, {
         method: 'PUT', headers,
       })
@@ -1516,8 +1543,10 @@ registerHandler('discord_manage', async (args, creds) => {
       return `Message ${args.messageId as string} pinned.`
     }
     case 'delete-message': {
-      if (!args.channelId) return 'channelId is required for delete-message.'
-      if (!args.messageId) return 'messageId is required for delete-message.'
+      let idErr = validateApiId(args.channelId, 'channelId')
+      if (idErr) return idErr
+      idErr = validateApiId(args.messageId, 'messageId')
+      if (idErr) return idErr
       const res = await fetch(`${baseUrl}/channels/${args.channelId as string}/messages/${args.messageId as string}`, {
         method: 'DELETE', headers,
       })
@@ -1537,7 +1566,9 @@ registerHandler('hubspot_emails', async (args, creds) => {
 
   switch (action) {
     case 'log': {
-      if (!args.contactId) return 'contactId is required to log an email.'
+      const idErr = validateApiId(args.contactId, 'contactId')
+      if (idErr) return idErr
+      if (args.dealId) { const dErr = validateApiId(args.dealId, 'dealId'); if (dErr) return dErr }
       if (!args.subject) return 'subject is required to log an email.'
       const direction = (args.direction as string) === 'incoming' ? 'INCOMING_EMAIL' : 'EMAIL'
       const timestamp = Date.now()
@@ -1563,7 +1594,8 @@ registerHandler('hubspot_emails', async (args, creds) => {
       return `Email logged (engagement ID: ${data.engagement?.id}). Subject: "${args.subject as string}" — Direction: ${(args.direction as string) || 'outgoing'}`
     }
     case 'list': {
-      if (!args.contactId) return 'contactId is required to list emails.'
+      const idErr = validateApiId(args.contactId, 'contactId')
+      if (idErr) return idErr
       const res = await fetch(
         `https://api.hubapi.com/engagements/v1/engagements/associated/CONTACT/${args.contactId as string}/paged?limit=20`,
         { headers },
@@ -1579,7 +1611,8 @@ registerHandler('hubspot_emails', async (args, creds) => {
       }).join('\n')
     }
     case 'track': {
-      if (!args.contactId) return 'contactId is required to track email activity.'
+      const idErr = validateApiId(args.contactId, 'contactId')
+      if (idErr) return idErr
       // Fetch recent engagements and summarize
       const res = await fetch(
         `https://api.hubapi.com/engagements/v1/engagements/associated/CONTACT/${args.contactId as string}/paged?limit=50`,

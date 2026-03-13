@@ -272,6 +272,17 @@ export async function updateSessionUsage(db: Db, sessionId: string): Promise<voi
   )
 }
 
+/** Sanitize details to avoid logging sensitive info (URLs, tokens, error messages). */
+function sanitizeLogDetails(details?: string): string | null {
+  if (!details) return null
+  // Strip URLs, API keys, tokens, and other sensitive patterns
+  return details
+    .replace(/https?:\/\/[^\s]+/gi, '[url]')
+    .replace(/Bearer\s+\S+/gi, '[token]')
+    .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]')
+    .slice(0, 200) // Cap length
+}
+
 /** Write an audit log entry. */
 export async function logVaultEvent(
   db: Db,
@@ -283,10 +294,11 @@ export async function logVaultEvent(
   details?: string,
 ): Promise<void> {
   const id = generateId()
+  const safeDetails = sanitizeLogDetails(details)
   await db.run(
     `INSERT INTO session_vault_log (id, session_id, team_id, event_type, agent_id, user_id, details, created_at)
      VALUES (${p(db, 1)}, ${p(db, 2)}, ${p(db, 3)}, ${p(db, 4)}, ${p(db, 5)}, ${p(db, 6)}, ${p(db, 7)}, ${now(db)})`,
-    [id, sessionId, teamId, eventType, agentId ?? null, userId ?? null, details ?? null],
+    [id, sessionId, teamId, eventType, agentId ?? null, userId ?? null, safeDetails],
   )
 }
 
