@@ -36,6 +36,11 @@ FROM node:20-slim
 RUN corepack enable && corepack prepare pnpm@latest --activate
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
+# Install system deps for browser-use (Chromium) and render-video (FFmpeg)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY --from=base /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
@@ -52,6 +57,7 @@ ENV NODE_ENV=production
 ENV YOKEBOT_PORT=3001
 ENV YOKEBOT_SKILLS_DIR=/app/skills
 ENV YOKEBOT_DATA_DIR=/app/data
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Create non-root user and data directory
 RUN groupadd -r yokebot && useradd -r -g yokebot -m yokebot \

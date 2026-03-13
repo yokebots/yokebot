@@ -149,7 +149,7 @@ export async function executeSkillHandler(
     const missing = requiredCredentials.filter((id) => !credentials[id])
     if (missing.length > 0) {
       return `This skill requires credentials that haven't been configured: ${missing.join(', ')}. ` +
-        `Ask a team admin to add them in Settings → Integrations.`
+        `Ask a team admin to add them in the dashboard at Settings → Integrations (https://yokebot.com/settings/integrations).`
     }
   }
 
@@ -1316,3 +1316,284 @@ registerHandler('unenroll_contact', async (args, _creds, ctx) => {
   await unenrollContact(ctx.db, args.enrollmentId as string, ctx.teamId)
   return `Contact unenrolled from sequence.`
 })
+
+// ---- Google Docs ----
+registerHandler('google_docs', async (args, creds) => {
+  const token = creds.google
+  const action = args.action as string
+  const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+
+  switch (action) {
+    case 'create': {
+      const title = (args.title as string) || 'Untitled Document'
+      const res = await fetch('https://docs.googleapis.com/v1/documents', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ title }),
+      })
+      if (!res.ok) return `Google Docs error: ${res.status} ${await res.text()}`
+      const doc = await res.json() as { documentId: string; title: string }
+      // If content provided, append it via batchUpdate
+      if (args.content) {
+        await fetch(`https://docs.googleapis.com/v1/documents/${doc.documentId}:batchUpdate`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            requests: [{ insertText: { location: { index: 1 }, text: args.content as string } }],
+          }),
+        })
+      }
+      // If folderId provided, move via Drive API
+      if (args.folderId) {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${doc.documentId}?addParents=${encodeURIComponent(args.folderId as string)}`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${token}` },
+        })
+      }
+      return `Document created: "${doc.title}"\nID: ${doc.documentId}\nURL: https://docs.google.com/document/d/${doc.documentId}/edit`
+    }
+    case 'read': {
+      if (!args.documentId) return 'documentId is required for read action.'
+      const res = await fetch(`https://docs.googleapis.com/v1/documents/${args.documentId as string}`, { headers })
+      if (!res.ok) return `Google Docs error: ${res.status}`
+      const doc = await res.json() as { title: string; body?: { content?: Array<{ paragraph?: { elements?: Array<{ textRun?: { content: string } }> } }> } }
+      const text = (doc.body?.content ?? [])
+        .flatMap((block) => block.paragraph?.elements ?? [])
+        .map((el) => el.textRun?.content ?? '')
+        .join('')
+      const truncated = text.length > 8000 ? text.slice(0, 8000) + '\n\n[...truncated]' : text
+      return `Document: "${doc.title}"\n\n${truncated}`
+    }
+    case 'append': {
+      if (!args.documentId) return 'documentId is required for append action.'
+      if (!args.content) return 'content is required for append action.'
+      // Get document length first
+      const getRes = await fetch(`https://docs.googleapis.com/v1/documents/${args.documentId as string}`, { headers })
+      if (!getRes.ok) return `Google Docs error: ${getRes.status}`
+      const existing = await getRes.json() as { body?: { content?: Array<{ endIndex?: number }> } }
+      const endIndex = (existing.body?.content ?? []).reduce((max, b) => Math.max(max, b.endIndex ?? 0), 1) - 1
+      const res = await fetch(`https://docs.googleapis.com/v1/documents/${args.documentId as string}:batchUpdate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          requests: [{ insertText: { location: { index: Math.max(endIndex, 1) }, text: '\n' + (args.content as string) } }],
+        }),
+      })
+      if (!res.ok) return `Google Docs error: ${res.status}`
+      return `Content appended to document ${args.documentId as string}.`
+    }
+    case 'search': {
+      if (!args.query) return 'query is required for search action.'
+      const q = encodeURIComponent(`name contains '${(args.query as string).replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.document'`)
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime,webViewLink)&pageSize=10`, { headers })
+      if (!res.ok) return `Google Drive search error: ${res.status}`
+      const data = await res.json() as { files?: Array<{ id: string; name: string; modifiedTime: string; webViewLink: string }> }
+      const files = data.files ?? []
+      if (files.length === 0) return 'No documents found matching your query.'
+      return files.map((f) => `${f.name} — Modified: ${f.modifiedTime}\n  ID: ${f.id}\n  ${f.webViewLink}`).join('\n\n')
+    }
+    default:
+      return `Unknown action "${action}". Use: create, read, append, search.`
+  }
+}, ['google'])
+
+// ---- Google Sheets ----
+registerHandler('google_sheets', async (args, creds) => {
+  const token = creds.google
+  const action = args.action as string
+  const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+
+  switch (action) {
+    case 'create': {
+      const title = (args.title as string) || 'Untitled Spreadsheet'
+      const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ properties: { title } }),
+      })
+      if (!res.ok) return `Google Sheets error: ${res.status} ${await res.text()}`
+      const sheet = await res.json() as { spreadsheetId: string; properties: { title: string }; spreadsheetUrl: string }
+      return `Spreadsheet created: "${sheet.properties.title}"\nID: ${sheet.spreadsheetId}\nURL: ${sheet.spreadsheetUrl}`
+    }
+    case 'read': {
+      if (!args.spreadsheetId) return 'spreadsheetId is required for read action.'
+      const range = (args.range as string) || 'Sheet1'
+      const res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId as string}/values/${encodeURIComponent(range)}`,
+        { headers },
+      )
+      if (!res.ok) return `Google Sheets error: ${res.status}`
+      const data = await res.json() as { values?: string[][] }
+      const rows = data.values ?? []
+      if (rows.length === 0) return 'No data found in the specified range.'
+      // Format as a table
+      return rows.map((row) => row.join('\t')).join('\n')
+    }
+    case 'write': {
+      if (!args.spreadsheetId) return 'spreadsheetId is required for write action.'
+      if (!args.range) return 'range is required for write action.'
+      if (!args.values) return 'values is required for write action (JSON array of row arrays).'
+      let values: string[][]
+      try { values = JSON.parse(args.values as string) } catch { return 'Invalid values JSON. Expected array of arrays, e.g. [["A","B"],["1","2"]]' }
+      const res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId as string}/values/${encodeURIComponent(args.range as string)}?valueInputOption=USER_ENTERED`,
+        { method: 'PUT', headers, body: JSON.stringify({ values }) },
+      )
+      if (!res.ok) return `Google Sheets error: ${res.status}`
+      const result = await res.json() as { updatedCells?: number }
+      return `Updated ${result.updatedCells ?? 0} cells in range ${args.range as string}.`
+    }
+    case 'append': {
+      if (!args.spreadsheetId) return 'spreadsheetId is required for append action.'
+      const range = (args.range as string) || 'Sheet1'
+      if (!args.values) return 'values is required for append action (JSON array of row arrays).'
+      let values: string[][]
+      try { values = JSON.parse(args.values as string) } catch { return 'Invalid values JSON. Expected array of arrays.' }
+      const res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId as string}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        { method: 'POST', headers, body: JSON.stringify({ values }) },
+      )
+      if (!res.ok) return `Google Sheets error: ${res.status}`
+      const result = await res.json() as { updates?: { updatedRows?: number } }
+      return `Appended ${result.updates?.updatedRows ?? 0} row(s) to ${range}.`
+    }
+    default:
+      return `Unknown action "${action}". Use: read, write, append, create.`
+  }
+}, ['google'])
+
+// ---- Discord Manage (Bot API) ----
+registerHandler('discord_manage', async (args, creds) => {
+  const botToken = creds.discord
+  const action = args.action as string
+  const baseUrl = 'https://discord.com/api/v10'
+  const headers = { 'Authorization': `Bot ${botToken}`, 'Content-Type': 'application/json' }
+
+  switch (action) {
+    case 'send-message': {
+      if (!args.channelId) return 'channelId is required for send-message.'
+      if (!args.content) return 'content is required for send-message.'
+      const res = await fetch(`${baseUrl}/channels/${args.channelId as string}/messages`, {
+        method: 'POST', headers, body: JSON.stringify({ content: args.content as string }),
+      })
+      if (!res.ok) return `Discord error: ${res.status} ${await res.text()}`
+      const msg = await res.json() as { id: string }
+      return `Message sent (ID: ${msg.id}).`
+    }
+    case 'list-channels': {
+      if (!args.guildId) return 'guildId is required for list-channels.'
+      const res = await fetch(`${baseUrl}/guilds/${args.guildId as string}/channels`, { headers })
+      if (!res.ok) return `Discord error: ${res.status}`
+      const channels = await res.json() as Array<{ id: string; name: string; type: number }>
+      const typeNames: Record<number, string> = { 0: 'text', 2: 'voice', 4: 'category', 5: 'announcement', 13: 'stage', 15: 'forum' }
+      return channels.map((c) => `#${c.name} (${typeNames[c.type] ?? `type:${c.type}`}) — ID: ${c.id}`).join('\n')
+    }
+    case 'list-members': {
+      if (!args.guildId) return 'guildId is required for list-members.'
+      const res = await fetch(`${baseUrl}/guilds/${args.guildId as string}/members?limit=50`, { headers })
+      if (!res.ok) return `Discord error: ${res.status}`
+      const members = await res.json() as Array<{ user?: { id: string; username: string }; nick?: string; joined_at: string }>
+      if (members.length === 0) return 'No members found.'
+      return members.map((m) => `${m.nick ?? m.user?.username ?? 'Unknown'} (@${m.user?.username}) — Joined: ${m.joined_at?.slice(0, 10)} — ID: ${m.user?.id}`).join('\n')
+    }
+    case 'create-channel': {
+      if (!args.guildId) return 'guildId is required for create-channel.'
+      if (!args.channelName) return 'channelName is required for create-channel.'
+      const res = await fetch(`${baseUrl}/guilds/${args.guildId as string}/channels`, {
+        method: 'POST', headers, body: JSON.stringify({ name: args.channelName as string, type: 0 }),
+      })
+      if (!res.ok) return `Discord error: ${res.status} ${await res.text()}`
+      const ch = await res.json() as { id: string; name: string }
+      return `Channel #${ch.name} created (ID: ${ch.id}).`
+    }
+    case 'pin-message': {
+      if (!args.channelId) return 'channelId is required for pin-message.'
+      if (!args.messageId) return 'messageId is required for pin-message.'
+      const res = await fetch(`${baseUrl}/channels/${args.channelId as string}/pins/${args.messageId as string}`, {
+        method: 'PUT', headers,
+      })
+      if (!res.ok) return `Discord error: ${res.status}`
+      return `Message ${args.messageId as string} pinned.`
+    }
+    case 'delete-message': {
+      if (!args.channelId) return 'channelId is required for delete-message.'
+      if (!args.messageId) return 'messageId is required for delete-message.'
+      const res = await fetch(`${baseUrl}/channels/${args.channelId as string}/messages/${args.messageId as string}`, {
+        method: 'DELETE', headers,
+      })
+      if (!res.ok) return `Discord error: ${res.status}`
+      return `Message ${args.messageId as string} deleted.`
+    }
+    default:
+      return `Unknown action "${action}". Use: send-message, list-channels, list-members, create-channel, pin-message, delete-message.`
+  }
+}, ['discord'])
+
+// ---- HubSpot Emails ----
+registerHandler('hubspot_emails', async (args, creds) => {
+  const apiKey = creds.hubspot
+  const action = args.action as string
+  const headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+
+  switch (action) {
+    case 'log': {
+      if (!args.contactId) return 'contactId is required to log an email.'
+      if (!args.subject) return 'subject is required to log an email.'
+      const direction = (args.direction as string) === 'incoming' ? 'INCOMING_EMAIL' : 'EMAIL'
+      const timestamp = Date.now()
+      // Create engagement via Engagements API
+      const res = await fetch('https://api.hubapi.com/engagements/v1/engagements', {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          engagement: { active: true, type: direction, timestamp },
+          associations: {
+            contactIds: [Number(args.contactId)],
+            ...(args.dealId ? { dealIds: [Number(args.dealId)] } : {}),
+          },
+          metadata: {
+            from: { email: '' },
+            to: [{ email: '' }],
+            subject: args.subject as string,
+            html: (args.body as string) || '',
+          },
+        }),
+      })
+      if (!res.ok) return `HubSpot error: ${res.status} ${await res.text()}`
+      const data = await res.json() as { engagement?: { id: number } }
+      return `Email logged (engagement ID: ${data.engagement?.id}). Subject: "${args.subject as string}" — Direction: ${(args.direction as string) || 'outgoing'}`
+    }
+    case 'list': {
+      if (!args.contactId) return 'contactId is required to list emails.'
+      const res = await fetch(
+        `https://api.hubapi.com/engagements/v1/engagements/associated/CONTACT/${args.contactId as string}/paged?limit=20`,
+        { headers },
+      )
+      if (!res.ok) return `HubSpot error: ${res.status}`
+      const data = await res.json() as { results?: Array<{ engagement: { id: number; type: string; timestamp: number }; metadata?: { subject?: string } }> }
+      const emails = (data.results ?? []).filter((e) => e.engagement.type === 'EMAIL' || e.engagement.type === 'INCOMING_EMAIL')
+      if (emails.length === 0) return 'No email engagements found for this contact.'
+      return emails.map((e) => {
+        const date = new Date(e.engagement.timestamp).toISOString().slice(0, 10)
+        const dir = e.engagement.type === 'INCOMING_EMAIL' ? '← incoming' : '→ outgoing'
+        return `[${date}] ${dir}: ${e.metadata?.subject ?? '(no subject)'} (ID: ${e.engagement.id})`
+      }).join('\n')
+    }
+    case 'track': {
+      if (!args.contactId) return 'contactId is required to track email activity.'
+      // Fetch recent engagements and summarize
+      const res = await fetch(
+        `https://api.hubapi.com/engagements/v1/engagements/associated/CONTACT/${args.contactId as string}/paged?limit=50`,
+        { headers },
+      )
+      if (!res.ok) return `HubSpot error: ${res.status}`
+      const data = await res.json() as { results?: Array<{ engagement: { type: string; timestamp: number }; metadata?: { subject?: string } }> }
+      const emails = (data.results ?? []).filter((e) => e.engagement.type === 'EMAIL' || e.engagement.type === 'INCOMING_EMAIL')
+      const incoming = emails.filter((e) => e.engagement.type === 'INCOMING_EMAIL').length
+      const outgoing = emails.length - incoming
+      const latest = emails.length > 0 ? new Date(emails[0].engagement.timestamp).toISOString().slice(0, 10) : 'n/a'
+      return `Email activity for contact ${args.contactId as string}:\n  Total: ${emails.length} emails\n  Outgoing: ${outgoing}\n  Incoming: ${incoming}\n  Latest: ${latest}`
+    }
+    default:
+      return `Unknown action "${action}". Use: log, list, track.`
+  }
+}, ['hubspot'])
