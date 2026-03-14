@@ -321,7 +321,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === 'typing' ? 'bg-accent-green' : 'bg-accent-gold'}`} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
                     <span className="text-xs font-medium text-text-main">{agentName}</span>
                   </div>
-                  <AgentProgressPanel steps={steps} defaultExpanded={true} />
+                  <AgentProgressPanel steps={steps} />
                 </div>
               )
             }

@@ -131,7 +131,7 @@ export function HomePage() {
               <div className="space-y-4">
                 <h1 className="font-display text-6xl font-bold leading-[0.9] tracking-tight text-white md:text-7xl lg:text-8xl">
                   Build Your <br />
-                  <span className="bg-gradient-to-r from-forest-green via-green-400 to-accent-gold bg-clip-text text-transparent">AI Workforce</span>
+                  <span className="whitespace-nowrap bg-gradient-to-r from-forest-green via-green-400 to-accent-gold bg-clip-text text-transparent">AI Workforce</span>
                 </h1>
                 <p className="max-w-lg border-l-4 border-accent-gold py-2 pl-6 text-lg leading-relaxed text-gray-400 md:text-xl">
                   Deploy a team of AI agents who work together to scale your business. Your new specialists plan ahead, collaborate &amp; fully execute on their own.
