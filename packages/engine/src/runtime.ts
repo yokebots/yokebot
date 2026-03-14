@@ -124,7 +124,13 @@ function maskOldObservations(messages: ChatMessage[]): ChatMessage[] {
 // ---- Tool Result Offloading ----
 // When a tool returns >2KB, save to workspace file and return a reference + preview.
 const OFFLOAD_THRESHOLD = 2000
-const OFFLOAD_SKIP = new Set(['think', 'respond', 'update_task', 'update_scratchpad', 'send_chat_message'])
+const OFFLOAD_SKIP = new Set([
+  'think', 'respond', 'update_task', 'update_scratchpad', 'send_chat_message',
+  // Read-only tools — never create files as side-effects of reads
+  'read_workspace_file', 'list_workspace_files', 'list_tasks', 'query_source_of_record',
+  'search_knowledge_base', 'list_workflows', 'list_available_skills', 'list_team_members',
+  'browser_snapshot',
+])
 
 async function maybeOffloadResult(result: string, toolName: string, ctx: ToolContext): Promise<string> {
   if (result.length <= OFFLOAD_THRESHOLD) return result
@@ -141,6 +147,45 @@ async function maybeOffloadResult(result: string, toolName: string, ctx: ToolCon
 
   const preview = result.slice(0, 500)
   return `Result saved to workspace: ${filePath} (${result.length} chars)\n\nPreview:\n${preview}\n...\n\nUse read_workspace_file to see full result.`
+}
+
+/**
+ * If the model returned raw JSON structured output instead of a human-readable message,
+ * try to extract the human-facing text. Common patterns:
+ *   {"thought": "...", "tasks": [...]}
+ *   {"response": "...", "tool_calls": [...]}
+ *   {"message": "..."}
+ */
+function extractHumanMessage(content: string): string {
+  const trimmed = content.trim()
+  if (!trimmed.startsWith('{')) return content
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (typeof parsed !== 'object' || parsed === null) return content
+
+    // Look for a human-facing text field
+    const textField = parsed.response ?? parsed.message ?? parsed.output ?? parsed.result ?? parsed.reply
+    if (typeof textField === 'string' && textField.trim().length > 0) {
+      return textField.trim()
+    }
+
+    // If there's a "thought" field but also tool/function calls, it's an internal reasoning dump
+    if (parsed.thought && (parsed.tasks || parsed.tool_calls || parsed.function)) {
+      // Suppress the raw dump — return a no-op so it doesn't pollute chat
+      console.log('[runtime] Suppressing raw JSON tool-call dump from model output')
+      return 'no-op'
+    }
+
+    // If there's only a "thought" field with no tools, treat it as a think-aloud (OK to post)
+    if (parsed.thought && typeof parsed.thought === 'string' && Object.keys(parsed).length <= 2) {
+      return parsed.thought.trim()
+    }
+  } catch {
+    // Not valid JSON — return as-is
+  }
+
+  return content
 }
 
 export type ToolCategory = 'core' | 'workspace' | 'tasks' | 'chat' | 'approvals' | 'data' | 'media' | 'browser' | 'workflows' | 'team' | 'skills'
@@ -1790,7 +1835,9 @@ export async function runReactLoop(
       }
 
       // No text-based tool syntax detected — genuine text response
-      response = completion.content
+      // Guard: if the model returned structured JSON (e.g. {"thought":"...","tasks":[...]})
+      // instead of a human-readable message, extract the readable part.
+      response = extractHumanMessage(completion.content)
       await addMessage(db, agentId, 'assistant', response, teamId)
       emitProgress('idle', 'Done', i + 1)
       return { response, iterations: i + 1, toolCalls: toolCallLog }
