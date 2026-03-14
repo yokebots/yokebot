@@ -1616,6 +1616,127 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 38,
+    name: 'add_memory_nodes_and_noop',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        // memory_nodes table — DAG-based hierarchical conversation memory
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS memory_nodes (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            parent_id TEXT REFERENCES memory_nodes(id) ON DELETE SET NULL,
+            depth INTEGER NOT NULL DEFAULT 0,
+            summary TEXT NOT NULL,
+            msg_start_id BIGINT,
+            msg_end_id BIGINT,
+            msg_count INTEGER NOT NULL DEFAULT 0,
+            child_ids TEXT,
+            token_count INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_nodes_agent ON memory_nodes(agent_id, depth)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_nodes_team ON memory_nodes(team_id, agent_id)`)
+        await db.exec(`ALTER TABLE memory_nodes ENABLE ROW LEVEL SECURITY`)
+
+        // Add is_noop to messages
+        try {
+          await db.run(`ALTER TABLE messages ADD COLUMN is_noop BOOLEAN NOT NULL DEFAULT FALSE`)
+        } catch { /* column may already exist */ }
+
+        // Migrate existing conversation_summaries into memory_nodes as depth-0 nodes
+        const existing = await db.query<{ id: string; team_id: string; agent_id: string; summary: string; messages_summarized: number; created_at: string }>(
+          `SELECT id, team_id, agent_id, summary, messages_summarized, created_at FROM conversation_summaries`,
+        )
+        for (const row of existing) {
+          await db.run(
+            `INSERT INTO memory_nodes (id, team_id, agent_id, parent_id, depth, summary, msg_start_id, msg_end_id, msg_count, child_ids, token_count, created_at)
+             VALUES ($1, $2, $3, NULL, 0, $4, NULL, NULL, $5, NULL, $6, $7)
+             ON CONFLICT (id) DO NOTHING`,
+            [row.id, row.team_id, row.agent_id, row.summary, row.messages_summarized, Math.ceil(row.summary.length / 4), row.created_at],
+          )
+        }
+        if (existing.length > 0) {
+          console.log(`[migrations] Migrated ${existing.length} conversation_summaries → memory_nodes`)
+        }
+      } else {
+        // SQLite
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS memory_nodes (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            parent_id TEXT REFERENCES memory_nodes(id) ON DELETE SET NULL,
+            depth INTEGER NOT NULL DEFAULT 0,
+            summary TEXT NOT NULL,
+            msg_start_id INTEGER,
+            msg_end_id INTEGER,
+            msg_count INTEGER NOT NULL DEFAULT 0,
+            child_ids TEXT,
+            token_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_nodes_agent ON memory_nodes(agent_id, depth)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_nodes_team ON memory_nodes(team_id, agent_id)`)
+
+        // Add is_noop to messages
+        try {
+          await db.exec(`ALTER TABLE messages ADD COLUMN is_noop INTEGER NOT NULL DEFAULT 0`)
+        } catch { /* column may already exist */ }
+
+        // Migrate existing conversation_summaries
+        try {
+          const existing = await db.query<{ id: string; team_id: string; agent_id: string; summary: string; messages_summarized: number; created_at: string }>(
+            `SELECT id, team_id, agent_id, summary, messages_summarized, created_at FROM conversation_summaries`,
+          )
+          for (const row of existing) {
+            await db.run(
+              `INSERT OR IGNORE INTO memory_nodes (id, team_id, agent_id, parent_id, depth, summary, msg_start_id, msg_end_id, msg_count, child_ids, token_count, created_at)
+               VALUES ($1, $2, $3, NULL, 0, $4, NULL, NULL, $5, NULL, $6, $7)`,
+              [row.id, row.team_id, row.agent_id, row.summary, row.messages_summarized, Math.ceil(row.summary.length / 4), row.created_at],
+            )
+          }
+        } catch { /* conversation_summaries may not exist */ }
+      }
+    },
+  },
+  {
+    version: 39,
+    name: 'add_sandbox_sessions',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS sandbox_sessions (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL UNIQUE,
+            daytona_sandbox_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            preview_url TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_sandbox_sessions_team ON sandbox_sessions(team_id)`)
+        await db.exec(`ALTER TABLE sandbox_sessions ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS sandbox_sessions (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL UNIQUE,
+            daytona_sandbox_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            preview_url TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_activity TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+      }
+    },
+  },
 ]
 
 /**

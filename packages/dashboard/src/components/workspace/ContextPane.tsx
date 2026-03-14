@@ -8,6 +8,7 @@ import { WorkflowRunViewer } from './WorkflowRunViewer'
 import { VideoEditorPanel } from './VideoEditorPanel'
 import { BrowserPanel } from './BrowserPanel'
 import { AgentDetailPanel } from './AgentDetailPanel'
+import { PreviewPanel } from './PreviewPanel'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 import type { SorTable, SorRow } from '@/lib/engine'
@@ -116,6 +117,9 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
               )}
               {activeTab?.type === 'agent-detail' && (
                 <AgentDetailPanel agentId={activeTab.resourceId} />
+              )}
+              {activeTab?.type === 'sandbox-preview' && (
+                <PreviewPanel previewUrl={activeTab.resourceId} />
               )}
               {!activeTab && (
                 <div className="flex-1 flex items-center justify-center text-sm text-text-muted">

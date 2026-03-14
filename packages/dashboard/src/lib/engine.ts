@@ -1613,6 +1613,7 @@ export type SseEventType =
   | 'agent_typing'
   | 'agent_progress'
   | 'browser_frame'
+  | 'sandbox_preview'
 
 type SseListener = (data: unknown) => void
 
@@ -1925,4 +1926,44 @@ export async function saveBrowserToVault(sessionId: string, label: string): Prom
 
 export async function getAgentBrowserScreenshot(agentId: string): Promise<{ screenshot: string; url: string }> {
   return request(`/api/agents/${agentId}/browser/screenshot`)
+}
+
+// ---- Sandbox (Daytona app-building) ----
+
+export interface SandboxStatus {
+  status: string
+  previewUrl: string | null
+  createdAt: string | null
+  lastActivity: string | null
+}
+
+export interface SandboxFileEntry {
+  name: string
+  path: string
+  isDirectory: boolean
+  size: number
+}
+
+export async function getSandboxStatus(): Promise<SandboxStatus> {
+  return request('/api/sandbox/status')
+}
+
+export async function startSandbox(): Promise<{ status: string; sandboxId: string }> {
+  return request('/api/sandbox/start', { method: 'POST' })
+}
+
+export async function stopSandbox(): Promise<{ status: string }> {
+  return request('/api/sandbox/stop', { method: 'POST' })
+}
+
+export async function getSandboxPreview(port = 5173): Promise<{ url: string; port: number }> {
+  return request(`/api/sandbox/preview?port=${port}`)
+}
+
+export async function listSandboxFiles(dir = '/'): Promise<SandboxFileEntry[]> {
+  return request(`/api/sandbox/files?dir=${encodeURIComponent(dir)}`)
+}
+
+export async function readSandboxFile(path: string): Promise<{ path: string; content: string }> {
+  return request(`/api/sandbox/files${path}`)
 }

@@ -57,6 +57,23 @@ const SQLITE_DDL = `
     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
+    is_noop INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Hierarchical conversation memory (DAG)
+  CREATE TABLE IF NOT EXISTS memory_nodes (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    parent_id TEXT REFERENCES memory_nodes(id) ON DELETE SET NULL,
+    depth INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL,
+    msg_start_id INTEGER,
+    msg_end_id INTEGER,
+    msg_count INTEGER NOT NULL DEFAULT 0,
+    child_ids TEXT,
+    token_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -470,6 +487,17 @@ const SQLITE_DDL = `
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Sandbox sessions (Daytona sandboxes, one per team)
+  CREATE TABLE IF NOT EXISTS sandbox_sessions (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL UNIQUE,
+    daytona_sandbox_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    preview_url TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_activity TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -511,6 +539,8 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_onboarding_drips_pending ON onboarding_drips(status, next_send_at);
   CREATE INDEX IF NOT EXISTS idx_api_keys_team ON api_keys(team_id);
   CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+  CREATE INDEX IF NOT EXISTS idx_memory_nodes_agent ON memory_nodes(agent_id, depth);
+  CREATE INDEX IF NOT EXISTS idx_memory_nodes_team ON memory_nodes(team_id, agent_id);
 `
 
 const POSTGRES_DDL = `
@@ -560,6 +590,23 @@ const POSTGRES_DDL = `
     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
+    is_noop BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Hierarchical conversation memory (DAG)
+  CREATE TABLE IF NOT EXISTS memory_nodes (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    parent_id TEXT REFERENCES memory_nodes(id) ON DELETE SET NULL,
+    depth INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL,
+    msg_start_id BIGINT,
+    msg_end_id BIGINT,
+    msg_count INTEGER NOT NULL DEFAULT 0,
+    child_ids TEXT,
+    token_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
@@ -998,6 +1045,17 @@ const POSTGRES_DDL = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- Sandbox sessions (Daytona sandboxes, one per team)
+  CREATE TABLE IF NOT EXISTS sandbox_sessions (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL UNIQUE,
+    daytona_sandbox_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    preview_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -1102,6 +1160,12 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS workflow_run_steps ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS onboarding_drips ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS api_keys ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS memory_nodes ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS sandbox_sessions ENABLE ROW LEVEL SECURITY;
+
+  CREATE INDEX IF NOT EXISTS idx_memory_nodes_agent ON memory_nodes(agent_id, depth);
+  CREATE INDEX IF NOT EXISTS idx_memory_nodes_team ON memory_nodes(team_id, agent_id);
+  CREATE INDEX IF NOT EXISTS idx_sandbox_sessions_team ON sandbox_sessions(team_id);
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses

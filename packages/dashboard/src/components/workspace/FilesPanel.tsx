@@ -745,6 +745,9 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
         )}
       </div>
 
+      {/* Sandbox Section */}
+      <SandboxSection workspace={workspace} />
+
       {/* Context Menu */}
       {contextMenu && (
         <FileContextMenu
@@ -1087,6 +1090,136 @@ function ExportTablesDropdown({
             <span className="material-symbols-outlined text-[14px] text-text-muted">data_object</span>
             Export as JSON
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- Sandbox file explorer section ----
+
+function SandboxSection({ workspace }: { workspace: WorkspaceState }) {
+  const [expanded, setExpanded] = useState(false)
+  const [status, setStatus] = useState<engine.SandboxStatus | null>(null)
+  const [files, setFiles] = useState<engine.SandboxFileEntry[]>([])
+  const [currentDir, setCurrentDir] = useState('/')
+  const [loading, setLoading] = useState(false)
+
+  // Fetch sandbox status on expand
+  useEffect(() => {
+    if (!expanded) return
+    engine.getSandboxStatus().then(setStatus).catch(() => {})
+  }, [expanded])
+
+  // Fetch files when expanded and sandbox is running
+  useEffect(() => {
+    if (!expanded || status?.status !== 'running') return
+    setLoading(true)
+    engine.listSandboxFiles(currentDir)
+      .then(setFiles)
+      .catch(() => setFiles([]))
+      .finally(() => setLoading(false))
+  }, [expanded, status?.status, currentDir])
+
+  const openPreview = useCallback(() => {
+    workspace.addViewerTab({
+      id: 'sandbox-preview',
+      type: 'sandbox-preview' as import('@/pages/WorkspacePage').ViewerTabType,
+      label: 'Preview',
+      icon: 'preview',
+      resourceId: status?.previewUrl ?? '',
+    })
+  }, [workspace, status])
+
+  const openSandboxFile = useCallback((entry: engine.SandboxFileEntry) => {
+    if (entry.isDirectory) {
+      setCurrentDir(entry.path)
+    } else {
+      // Open sandbox file as a regular file tab (read-only view)
+      workspace.addViewerTab({
+        id: `sandbox-file:${entry.path}`,
+        type: 'file' as import('@/pages/WorkspacePage').ViewerTabType,
+        label: entry.name,
+        icon: 'code',
+        resourceId: `__sandbox__${entry.path}`,
+      })
+    }
+  }, [workspace])
+
+  return (
+    <div className="border-t border-border-subtle shrink-0">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold text-text-muted hover:bg-light-surface-alt transition-colors"
+      >
+        <span className="material-symbols-outlined text-[14px] transition-transform" style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+          chevron_right
+        </span>
+        <span className="material-symbols-outlined text-[14px]">deployed_code</span>
+        Sandbox
+        {status?.status === 'running' && (
+          <span className="ml-1 h-2 w-2 rounded-full bg-green-500" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="px-2 pb-2 max-h-48 overflow-y-auto">
+          {!status || status.status === 'none' ? (
+            <p className="px-2 py-2 text-center text-[10px] text-text-muted">
+              No sandbox active. Ask BuilderBot to build something!
+            </p>
+          ) : (
+            <>
+              {/* Status bar */}
+              <div className="flex items-center gap-2 px-2 py-1 text-[10px] text-text-muted">
+                <span className={`h-2 w-2 rounded-full ${status.status === 'running' ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                <span className="capitalize">{status.status}</span>
+                {status.previewUrl && (
+                  <button
+                    onClick={openPreview}
+                    className="ml-auto text-forest-green hover:underline"
+                  >
+                    Open Preview
+                  </button>
+                )}
+              </div>
+
+              {/* Breadcrumb */}
+              {currentDir !== '/' && (
+                <button
+                  onClick={() => {
+                    const parent = currentDir.split('/').slice(0, -1).join('/') || '/'
+                    setCurrentDir(parent)
+                  }}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-muted hover:text-text-main"
+                >
+                  <span className="material-symbols-outlined text-[12px]">arrow_back</span>
+                  {currentDir}
+                </button>
+              )}
+
+              {/* File list */}
+              {loading ? (
+                <p className="px-2 py-2 text-center text-[10px] text-text-muted">Loading...</p>
+              ) : (
+                files.map(f => (
+                  <button
+                    key={f.path}
+                    onClick={() => openSandboxFile(f)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-xs text-text-main hover:bg-light-surface-alt transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[14px] text-text-muted">
+                      {f.isDirectory ? 'folder' : 'description'}
+                    </span>
+                    <span className="truncate flex-1 text-left">{f.name}</span>
+                    {!f.isDirectory && (
+                      <span className="text-[10px] text-text-muted">{f.size > 1024 ? `${(f.size / 1024).toFixed(1)}K` : `${f.size}B`}</span>
+                    )}
+                  </button>
+                ))
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

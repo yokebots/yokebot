@@ -128,8 +128,10 @@ const OFFLOAD_SKIP = new Set([
   'think', 'respond', 'update_task', 'update_scratchpad', 'send_chat_message',
   // Read-only tools — never create files as side-effects of reads
   'read_workspace_file', 'list_workspace_files', 'list_tasks', 'query_source_of_record',
-  'search_knowledge_base', 'list_workflows', 'list_available_skills', 'list_team_members',
+  'search_knowledge_base', 'search_my_history', 'recall_detail',
+  'list_workflows', 'list_available_skills', 'list_team_members',
   'browser_snapshot',
+  'sandbox_read_file', 'sandbox_list_files', 'sandbox_preview',
 ])
 
 async function maybeOffloadResult(result: string, toolName: string, ctx: ToolContext): Promise<string> {
@@ -188,7 +190,7 @@ function extractHumanMessage(content: string): string {
   return content
 }
 
-export type ToolCategory = 'core' | 'workspace' | 'tasks' | 'chat' | 'approvals' | 'data' | 'media' | 'browser' | 'workflows' | 'team' | 'skills'
+export type ToolCategory = 'core' | 'workspace' | 'tasks' | 'chat' | 'approvals' | 'data' | 'media' | 'browser' | 'workflows' | 'team' | 'skills' | 'sandbox'
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   think: 'core',
@@ -201,6 +203,8 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   delete_workspace_file: 'workspace',
   search_knowledge_base: 'workspace',
   remember: 'workspace',
+  search_my_history: 'core',
+  recall_detail: 'core',
   create_task: 'tasks',
   update_task: 'tasks',
   delete_task: 'tasks',
@@ -239,9 +243,15 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   browser_ask_human: 'browser',
   browser_fill_form: 'browser',
   browser_download_file: 'browser',
+  sandbox_exec: 'sandbox',
+  sandbox_write_file: 'sandbox',
+  sandbox_read_file: 'sandbox',
+  sandbox_list_files: 'sandbox',
+  sandbox_preview: 'sandbox',
+  sandbox_install: 'sandbox',
 }
 
-export const ALL_CATEGORIES: ToolCategory[] = ['core', 'workspace', 'tasks', 'chat', 'approvals', 'data', 'media', 'browser', 'workflows', 'team', 'skills']
+export const ALL_CATEGORIES: ToolCategory[] = ['core', 'workspace', 'tasks', 'chat', 'approvals', 'data', 'media', 'browser', 'workflows', 'team', 'skills', 'sandbox']
 
 export function getFilteredBuiltinTools(categories: ToolCategory[]): ToolDef[] {
   return getBuiltinTools().filter(tool => {
@@ -314,6 +324,12 @@ const TOOL_LABELS: Record<string, string> = {
   generate_captions: 'Generating captions',
   search_properties: 'Searching properties',
   search_companies: 'Researching companies',
+  sandbox_exec: 'Running command',
+  sandbox_write_file: 'Writing sandbox file',
+  sandbox_read_file: 'Reading sandbox file',
+  sandbox_list_files: 'Browsing sandbox files',
+  sandbox_preview: 'Getting preview URL',
+  sandbox_install: 'Installing packages',
 }
 
 function getToolLabel(toolName: string): string {
@@ -468,6 +484,15 @@ function getBuiltinTools(): ToolDef[] {
       content: { type: 'string', description: 'The fact, learning, or insight to remember' },
     }, ['content']),
 
+    toolDef('search_my_history', 'Search your own conversation history and memory summaries. Returns matching messages and summary excerpts with timestamps. Use this to recall past decisions, context, or information from previous heartbeats.', {
+      query: { type: 'string', description: 'Search query — keywords to find in your past messages and summaries' },
+      maxResults: { type: 'number', description: 'Max results to return (default 10)' },
+    }, ['query']),
+
+    toolDef('recall_detail', 'Expand a memory summary back to its source material. Use this after search_my_history returns a summary node to see the original messages or child summaries it was built from.', {
+      nodeId: { type: 'string', description: 'The memory node ID to expand (from search_my_history results)' },
+    }, ['nodeId']),
+
     // Media generation
     toolDef('generate_image', 'Generate an image using AI. Returns the URL of the generated image. Supports style reference images — when image_urls are provided, the model uses its edit endpoint to generate a new image that matches the style/content of the references. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
       prompt: { type: 'string', description: 'Text description of the image to generate' },
@@ -599,6 +624,34 @@ function getBuiltinTools(): ToolDef[] {
     toolDef('browser_download_file', 'Wait for and save a file download from the current page. Call this right before or after clicking a download link.', {
       description: { type: 'string', description: 'Brief description of the file being downloaded (e.g. "Q4 revenue report from Stripe")' },
     }, ['description']),
+
+    // Sandbox tools — app-building in Daytona sandboxes
+    toolDef('sandbox_exec', 'Run a shell command in the team sandbox (isolated dev environment). Use for: npm create, npm run dev, git commands, installing packages, running builds, etc. The sandbox persists between calls.', {
+      command: { type: 'string', description: 'Shell command to execute (e.g. "npm create vite@latest app -- --template react-ts -y")' },
+      cwd: { type: 'string', description: 'Working directory (default: sandbox root)' },
+    }, ['command']),
+
+    toolDef('sandbox_write_file', 'Write or create a file in the team sandbox. Use for writing source code, config files, etc.', {
+      path: { type: 'string', description: 'Absolute path in the sandbox (e.g. "/app/src/App.tsx")' },
+      content: { type: 'string', description: 'File content to write' },
+    }, ['path', 'content']),
+
+    toolDef('sandbox_read_file', 'Read a file from the team sandbox.', {
+      path: { type: 'string', description: 'Absolute path in the sandbox (e.g. "/app/package.json")' },
+    }, ['path']),
+
+    toolDef('sandbox_list_files', 'List files and directories in the team sandbox.', {
+      directory: { type: 'string', description: 'Directory path (default: "/")' },
+    }, []),
+
+    toolDef('sandbox_preview', 'Get the public preview URL for a dev server running in the sandbox. The URL is accessible from the browser.', {
+      port: { type: 'number', description: 'Port number the dev server is listening on (e.g. 5173 for Vite, 3000 for Next.js)' },
+    }, ['port']),
+
+    toolDef('sandbox_install', 'Install packages in the sandbox using the appropriate package manager.', {
+      command: { type: 'string', description: 'Install command (e.g. "npm install react-router-dom", "pip install flask")' },
+      cwd: { type: 'string', description: 'Working directory (default: sandbox root)' },
+    }, ['command']),
 
   ]
 }
@@ -1133,6 +1186,24 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       return `Memory saved: "${content.slice(0, 100)}${content.length > 100 ? '...' : ''}"`
     }
 
+    case 'search_my_history': {
+      const { searchHistory } = await import('./memory.ts')
+      const query = args.query as string
+      const maxResults = Math.min(Math.max((args.maxResults as number) || 10, 1), 25)
+      const results = await searchHistory(ctx.db, ctx.agentId, ctx.teamId, query, maxResults)
+      if (results.length === 0) return 'No matching history found for that query.'
+      return results.map((r, i) => {
+        const nodeRef = r.node_id ? ` [node: ${r.node_id}]` : ''
+        return `[${i + 1}] (${r.timestamp}) ${r.content}${nodeRef}`
+      }).join('\n\n')
+    }
+
+    case 'recall_detail': {
+      const { recallDetail } = await import('./memory.ts')
+      const nodeId = args.nodeId as string
+      return recallDetail(ctx.db, ctx.agentId, ctx.teamId, nodeId)
+    }
+
     case 'create_workflow': {
       const { createWorkflow, addStep: addWfStep } = await import('./workflows.ts')
       const wf = await createWorkflow(ctx.db, ctx.teamId, args.name as string, {
@@ -1266,6 +1337,62 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         )
       }
       return `Session expiry reported for ${domain}. The team has been notified to re-record the login.`
+    }
+
+    // ---- Sandbox (Daytona app-building) ----
+    case 'sandbox_exec': {
+      const { execCommand: sbExec } = await import('./sandbox.ts')
+      const command = args.command as string
+      const cwd = args.cwd as string | undefined
+      const result = await sbExec(ctx.db, ctx.teamId, command, cwd)
+      await logActivity(ctx.db, 'sandbox_exec', ctx.agentId, `Sandbox: ${command.slice(0, 100)}`, undefined, ctx.teamId)
+      return result.exitCode === 0
+        ? result.stdout || '(no output)'
+        : `Exit code ${result.exitCode}\n${result.stderr || result.stdout}`
+    }
+
+    case 'sandbox_write_file': {
+      const { sandboxWriteFile } = await import('./sandbox.ts')
+      const path = args.path as string
+      const content = args.content as string
+      if (content.length > 200_000) return `Error: File content too large (${content.length} chars). Maximum is 200,000 characters.`
+      await sandboxWriteFile(ctx.db, ctx.teamId, path, content)
+      await logActivity(ctx.db, 'sandbox_write', ctx.agentId, `Sandbox: wrote ${path}`, undefined, ctx.teamId)
+      return `File written: ${path}`
+    }
+
+    case 'sandbox_read_file': {
+      const { sandboxReadFile } = await import('./sandbox.ts')
+      const path = args.path as string
+      const content = await sandboxReadFile(ctx.db, ctx.teamId, path)
+      return content
+    }
+
+    case 'sandbox_list_files': {
+      const { sandboxListFiles } = await import('./sandbox.ts')
+      const dir = (args.directory as string) ?? '/'
+      const files = await sandboxListFiles(ctx.db, ctx.teamId, dir)
+      if (files.length === 0) return `No files found in "${dir}".`
+      return files.map(f => `${f.isDirectory ? '[dir] ' : ''}${f.path} (${f.size} bytes)`).join('\n')
+    }
+
+    case 'sandbox_preview': {
+      const { getPreviewUrl } = await import('./sandbox.ts')
+      const port = args.port as number
+      const url = await getPreviewUrl(ctx.db, ctx.teamId, port)
+      await logActivity(ctx.db, 'sandbox_preview', ctx.agentId, `Sandbox preview: port ${port}`, undefined, ctx.teamId)
+      return `Preview URL: ${url}\n\nThe preview is now accessible in the dashboard.`
+    }
+
+    case 'sandbox_install': {
+      const { execCommand: sbExec } = await import('./sandbox.ts')
+      const command = args.command as string
+      const cwd = args.cwd as string | undefined
+      const result = await sbExec(ctx.db, ctx.teamId, command, cwd)
+      await logActivity(ctx.db, 'sandbox_install', ctx.agentId, `Sandbox install: ${command.slice(0, 100)}`, undefined, ctx.teamId)
+      return result.exitCode === 0
+        ? `Packages installed successfully.\n${result.stdout.slice(-500)}`
+        : `Install failed (exit code ${result.exitCode}):\n${result.stderr || result.stdout}`
     }
 
     default: {
@@ -1542,55 +1669,15 @@ export async function runReactLoop(
   const reactStart = Date.now()
   await addMessage(db, agentId, 'user', userMessage, teamId)
 
-  // Conversation compaction: summarize old messages if history is long
-  let conversationSummary: string | null = null
-  const fullHistory = await getMessages(db, agentId, 30, teamId)
-  try {
-    const summaryRow = await db.queryOne<{ summary: string; messages_summarized: number }>(
-      `SELECT summary, messages_summarized FROM conversation_summaries WHERE agent_id = $1 AND team_id = $2 ORDER BY created_at DESC LIMIT 1`,
-      [agentId, teamId],
-    )
-    const summarizedCount = summaryRow?.messages_summarized ?? 0
-    const newMessagesSinceSummary = fullHistory.length - summarizedCount
+  // Hierarchical conversation compaction (DAG-based, lossless)
+  const { compactConversation, assembleContext, getRootMemoryNodes, getFreshTail } = await import('./memory.ts')
+  await compactConversation(db, agentId, teamId, modelConfig, logicalModelId)
 
-    if (newMessagesSinceSummary >= 30 && fullHistory.length > 10) {
-      // Generate a new summary from older messages
-      const toSummarize = fullHistory.slice(0, -10)
-      const summaryMessages: ChatMessage[] = [
-        { role: 'system', content: 'Summarize the following conversation concisely, preserving key facts, decisions, and context. Output only the summary.' },
-        { role: 'user', content: toSummarize.map((m) => `${m.role}: ${m.content}`).join('\n\n') },
-      ]
-      try {
-        const { chatCompletion } = await import('./model.ts')
-        const summaryResult = await chatCompletion(modelConfig, summaryMessages)
-        if (summaryResult.content) {
-          const summaryId = (await import('crypto')).randomUUID()
-          await db.run(
-            `INSERT INTO conversation_summaries (id, team_id, agent_id, summary, messages_summarized) VALUES ($1, $2, $3, $4, $5)`,
-            [summaryId, teamId, agentId, summaryResult.content, fullHistory.length],
-          )
-          conversationSummary = summaryResult.content
-          console.log(`[runtime] Conversation compacted for agent ${agentId}: ${toSummarize.length} messages summarized`)
-        }
-      } catch (err) {
-        console.error('[runtime] Compaction failed:', err)
-      }
-    } else if (summaryRow) {
-      conversationSummary = summaryRow.summary
-    }
-  } catch { /* compaction is best-effort */ }
-
-  // Build the message history (reuse fullHistory, no second fetch)
-  const messages: ChatMessage[] = conversationSummary
-    ? [
-        { role: 'system', content: systemPrompt },
-        { role: 'system', content: `## Previous Conversation Summary\n\n${conversationSummary}` },
-        ...fullHistory.slice(-10).map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
-      ]
-    : [
-        { role: 'system', content: systemPrompt },
-        ...fullHistory.map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
-      ]
+  // Build context from memory DAG + fresh tail
+  const [memoryNodes, tailMessages] = await Promise.all([
+    getRootMemoryNodes(db, agentId, teamId),
+    getFreshTail(db, agentId, teamId),
+  ])
 
   // Merge builtin tools with installed skill tools + MCP tools
   const installedSkills = (await getAgentSkills(db, agentId)).map((s) => s.skillName)
@@ -1635,6 +1722,9 @@ export async function runReactLoop(
   const maxInputTokens = Math.floor(contextWindow * 0.8) // reserve 20% for response
   const toolsTokens = estimateToolsTokens(tools)
 
+  // Assemble context from DAG memory + fresh tail
+  const messages = assembleContext(systemPrompt, memoryNodes, tailMessages, maxInputTokens, toolsTokens)
+
   // Inject relevant memories into system prompt
   try {
     const { searchMemories } = await import('./knowledge-base.ts')
@@ -1649,7 +1739,7 @@ export async function runReactLoop(
   let trimmedMessages = trimMessagesToFit(messages, maxInputTokens, toolsTokens)
 
   const setupMs = Date.now() - reactStart
-  console.log(`[runtime] React loop setup: ${setupMs}ms (${fullHistory.length} msgs, ${tools.length} tools)`)
+  console.log(`[runtime] React loop setup: ${setupMs}ms (${tailMessages.length} tail msgs, ${memoryNodes.length} memory nodes, ${tools.length} tools)`)
 
   for (let i = 0; i < config.maxIterations; i++) {
     // Deduct LLM credits before each ReAct iteration (hosted mode only, skip for free agents like AdvisorBot)

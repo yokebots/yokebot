@@ -13,7 +13,7 @@ import * as engine from '@/lib/engine'
 
 // ---- Tab types for the context pane viewer ----
 
-export type ViewerTabType = 'file' | 'data-table' | 'browser' | 'workflow' | 'workflow-run' | 'video-editor' | 'agent-detail'
+export type ViewerTabType = 'file' | 'data-table' | 'browser' | 'workflow' | 'workflow-run' | 'video-editor' | 'agent-detail' | 'sandbox-preview'
 
 export interface ViewerTab {
   id: string
@@ -91,6 +91,20 @@ export function WorkspacePage() {
   })
   useRealtimeEvent('task_created', () => {
     engine.getUnreadTaskIds().then(res => setUnreadTaskIds(new Set(res.taskIds))).catch(() => {})
+  })
+
+  // Auto-open sandbox preview tab when a preview URL is generated
+  useRealtimeEvent('sandbox_preview', (data: Record<string, unknown>) => {
+    const url = data?.url as string
+    if (url) {
+      addViewerTab({
+        id: 'sandbox-preview',
+        type: 'sandbox-preview',
+        label: 'Preview',
+        icon: 'preview',
+        resourceId: url,
+      })
+    }
   })
 
   const handleMarkFileRead = useCallback((path: string) => {

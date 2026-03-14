@@ -453,6 +453,12 @@ async function main() {
     setBrowserBroadcast((teamId, event, data) => {
       broadcastToTeam(teamId, event, data)
     })
+
+    // Wire sandbox broadcast so preview URLs auto-open in dashboard
+    const { setSandboxBroadcast } = await import('./sandbox.ts')
+    setSandboxBroadcast((teamId, url) => {
+      broadcastToTeam(teamId, 'sandbox_preview', { url })
+    })
   }
 
   // ===== Ollama Detection =====
@@ -2164,6 +2170,75 @@ async function main() {
       const result = await captureAgentScreenshot(agent.id)
       if (!result) return res.status(404).json({ error: 'Agent has no active browser session' })
       res.json(result)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  // ===== Sandbox (Daytona app-building) =====
+
+  app.get('/api/sandbox/status', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const { getSandboxStatus } = await import('./sandbox.ts')
+    const status = await getSandboxStatus(db, teamId)
+    res.json(status ?? { status: 'none', previewUrl: null, createdAt: null, lastActivity: null })
+  })
+
+  app.post('/api/sandbox/start', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { getOrCreateSandbox } = await import('./sandbox.ts')
+      const session = await getOrCreateSandbox(db, teamId)
+      res.json({ status: 'running', sandboxId: session.sandbox.id })
+    } catch (err) {
+      console.error('[sandbox] Start error:', (err as Error).message)
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/sandbox/stop', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { stopSandbox } = await import('./sandbox.ts')
+      await stopSandbox(db, teamId)
+      res.json({ status: 'stopped' })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/sandbox/preview', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const port = Number(req.query.port) || 5173
+    try {
+      const { getPreviewUrl } = await import('./sandbox.ts')
+      const url = await getPreviewUrl(db, teamId, port)
+      res.json({ url, port })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/sandbox/files', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const dir = (req.query.dir as string) ?? '/'
+    try {
+      const { sandboxListFiles } = await import('./sandbox.ts')
+      const files = await sandboxListFiles(db, teamId, dir)
+      res.json(files)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/sandbox/files/*path', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    // Extract file path from wildcard — everything after /api/sandbox/files/
+    const filePath = '/' + (req.params.path || '')
+    try {
+      const { sandboxReadFile } = await import('./sandbox.ts')
+      const content = await sandboxReadFile(db, teamId, filePath)
+      res.json({ path: filePath, content })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }
