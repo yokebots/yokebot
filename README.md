@@ -30,9 +30,9 @@
 
 ## What is YokeBot?
 
-YokeBot is an open-source AI agent workforce platform. Create teams of specialized AI agents that collaborate autonomously — handling tasks, meetings, research, writing, analysis, and more — while you stay in control.
+YokeBot is an open-source AI agent workforce platform. Create teams of specialized AI agents that work autonomously: browsing the web, generating media, managing data, assigning & completing tasks. They collaborate in real time with each other and with you.
 
-Think of it as hiring a team of AI employees that actually work together, share context through a knowledge base, and report back to you.
+Think of it as hiring a full team of AI employees that actually get things done. They share files, maintain data tables, browse websites, work within your other software tools, intelligently create images and videos, and more. They all report back to you from one unified workspace.
 
 ## Key Features
 
