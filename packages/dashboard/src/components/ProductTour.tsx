@@ -14,7 +14,7 @@ interface TourStep {
 const TOUR_STEPS: TourStep[] = [
   {
     title: 'Welcome to YokeBot',
-    description: 'This is your Dashboard. It shows a snapshot of your agents, tasks, and activity at a glance. Click any card to dive deeper.',
+    description: 'This is your Dashboard. It shows a snapshot of your agents, tasks, and activity at a glance. You can click it to continue, or use the buttons below.',
     target: '[data-tour="dashboard"]',
     position: 'bottom',
   },
@@ -191,16 +191,18 @@ export function ProductTour({ forceStart, onComplete }: ProductTourProps) {
         />
       </svg>
 
-      {/* Highlight ring */}
+      {/* Highlight ring + click target — clicking the highlighted element advances the tour */}
       {highlightRect && (
         <div
-          className="absolute rounded-lg ring-2 ring-forest-green ring-offset-2 pointer-events-none"
+          className="absolute rounded-lg ring-2 ring-forest-green ring-offset-2 cursor-pointer"
           style={{
             top: highlightRect.top - 4,
             left: highlightRect.left - 4,
             width: highlightRect.width + 8,
             height: highlightRect.height + 8,
+            zIndex: 10000,
           }}
+          onClick={next}
         />
       )}
 
