@@ -87,12 +87,71 @@ function trimMessagesToFit(messages: ChatMessage[], maxTokens: number, toolsToke
   return [systemMsg, ...middle, ...tail]
 }
 
+export type ToolCategory = 'core' | 'workspace' | 'tasks' | 'chat' | 'approvals' | 'data' | 'media' | 'browser' | 'workflows' | 'team' | 'skills'
+
+const TOOL_CATEGORIES: Record<string, ToolCategory> = {
+  think: 'core',
+  respond: 'core',
+  read_workspace_file: 'workspace',
+  write_workspace_file: 'workspace',
+  list_workspace_files: 'workspace',
+  rename_workspace_file: 'workspace',
+  move_workspace_file: 'workspace',
+  delete_workspace_file: 'workspace',
+  search_knowledge_base: 'workspace',
+  remember: 'workspace',
+  create_task: 'tasks',
+  update_task: 'tasks',
+  delete_task: 'tasks',
+  add_subtask: 'tasks',
+  list_tasks: 'tasks',
+  update_scratchpad: 'tasks',
+  send_chat_message: 'chat',
+  request_approval: 'approvals',
+  create_source_of_record: 'data',
+  query_source_of_record: 'data',
+  add_source_of_record_row: 'data',
+  update_source_of_record: 'data',
+  generate_image: 'media',
+  generate_video: 'media',
+  render_video: 'media',
+  generate_3d: 'media',
+  create_workflow: 'workflows',
+  start_workflow: 'workflows',
+  list_workflows: 'workflows',
+  list_team_members: 'team',
+  list_available_skills: 'skills',
+  install_skill: 'skills',
+  use_saved_login: 'browser',
+  vault_report_session_expired: 'browser',
+  browser_navigate: 'browser',
+  browser_snapshot: 'browser',
+  browser_click: 'browser',
+  browser_type: 'browser',
+  browser_select_option: 'browser',
+  browser_press_key: 'browser',
+  browser_screenshot: 'browser',
+  browser_start_recording: 'browser',
+  browser_stop_recording: 'browser',
+  browser_close: 'browser',
+}
+
+export const ALL_CATEGORIES: ToolCategory[] = ['core', 'workspace', 'tasks', 'chat', 'approvals', 'data', 'media', 'browser', 'workflows', 'team', 'skills']
+
+export function getFilteredBuiltinTools(categories: ToolCategory[]): ToolDef[] {
+  return getBuiltinTools().filter(tool => {
+    const cat = TOOL_CATEGORIES[tool.function.name]
+    return !cat || categories.includes(cat)
+  })
+}
+
 export interface RuntimeConfig {
   maxIterations: number  // safety limit to prevent infinite loops
   skipCredits?: boolean  // bypass credit deduction (e.g. AdvisorBot is free)
   taskFocused?: boolean  // enables task-loop exit conditions
   currentTaskId?: string // for logging
   onFileWritten?: (teamId: string, path: string) => void // SSE broadcast callback
+  extraToolCategories?: ToolCategory[] // task-context category boosts
 }
 
 const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -1281,10 +1340,18 @@ export async function runReactLoop(
   const installedSkills = (await getAgentSkills(db, agentId)).map((s) => s.skillName)
   const skillTools = getSkillTools(skillsDir, installedSkills)
   const mcpTools = await loadMcpTools(db, agentId)
-  const tools = [...getBuiltinTools(), ...skillTools, ...mcpTools]
 
-  // Look up agent name for progress broadcasts
+  // Filter built-in tools by agent's template categories
   const agentRow = await getAgent(db, agentId)
+  const template = agentRow?.templateId ? (await import('./templates.ts')).TEMPLATES.find((t: any) => t.id === agentRow.templateId) : null
+  const categories = template?.toolCategories ?? ALL_CATEGORIES
+  const effectiveCategories = config.extraToolCategories
+    ? [...new Set([...categories, ...config.extraToolCategories])]
+    : categories
+  const builtinTools = getFilteredBuiltinTools(effectiveCategories as ToolCategory[])
+  const tools = [...builtinTools, ...skillTools, ...mcpTools]
+
+  // Look up agent name for progress broadcasts (reuse agentRow from above)
   const agentName = agentRow?.name ?? agentId
 
   // Progress broadcast helper

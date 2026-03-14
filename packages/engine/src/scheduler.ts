@@ -12,7 +12,7 @@
 
 import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
-import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
+import { runReactLoop, buildAgentSystemPrompt, type ToolCategory } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
 import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage, broadcastAgentStatus, broadcastFileWritten } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
@@ -23,6 +23,23 @@ import { notifyTeam } from './notifications.ts'
 import { getTaskThread, getChannelMessages, getMessage } from './chat.ts'
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
+
+/**
+ * Detect which extra tool categories a task might need based on keywords
+ * in its title and description. Used to boost an agent's tool set when
+ * the task falls outside the template's default categories.
+ */
+function detectTaskCategories(title: string, description?: string | null): ToolCategory[] {
+  const text = `${title} ${description ?? ''}`.toLowerCase()
+  const boosts: ToolCategory[] = []
+  if (/video|render|animation|remotion|clip|footage/.test(text)) boosts.push('media')
+  if (/image|photo|graphic|design|logo|banner|poster/.test(text)) boosts.push('media')
+  if (/browse|website|scrape|login|navigate|url|webpage/.test(text)) boosts.push('browser')
+  if (/data|table|csv|spreadsheet|record|database|report/.test(text)) boosts.push('data')
+  if (/workflow|automate|pipeline|sequence/.test(text)) boosts.push('workflows')
+  if (/approv/.test(text)) boosts.push('approvals')
+  return [...new Set(boosts)]
+}
 
 /**
  * Strip tool-call-like syntax from agent responses before posting to chat.
@@ -437,7 +454,8 @@ export async function respondToMention(
     }
 
     // Fire and forget — don't block the mention response
-    const runtimeConfig = { maxIterations: mentionIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && mentionCost > 0 }
+    const mentionBoosts = detectTaskCategories(triggerMessage.content, '')
+    const runtimeConfig = { maxIterations: mentionIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && mentionCost > 0, extraToolCategories: mentionBoosts.length > 0 ? mentionBoosts : undefined }
     runReactLoop(
       db, agent.id, teamId, mentionWorkPrompt, modelConfig, systemPrompt,
       state.workspaceConfig, state.skillsDir, runtimeConfig, mentionModelId, channelId,
@@ -736,12 +754,14 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           if (remainingBudget < 2) break // need at least 2 iterations for meaningful work
 
           const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId)
+          const taskBoosts = detectTaskCategories(task.title, task.description)
           const runtimeConfig = {
             maxIterations: remainingBudget,
             taskFocused: true,
             currentTaskId: task.id,
             onFileWritten: broadcastFileWritten,
             skipCredits: HOSTED_MODE && costPerIteration > 0, // credits already reserved
+            extraToolCategories: taskBoosts.length > 0 ? taskBoosts : undefined,
           }
 
           const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)

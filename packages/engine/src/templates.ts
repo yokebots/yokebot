@@ -5,6 +5,8 @@
  * default skills, personality traits, and common tasks.
  */
 
+export type ToolCategory = 'core' | 'workspace' | 'tasks' | 'chat' | 'approvals' | 'data' | 'media' | 'browser' | 'workflows' | 'team' | 'skills'
+
 export interface AgentTemplate {
   id: string
   name: string
@@ -18,6 +20,7 @@ export interface AgentTemplate {
   defaultSkills: string[]
   personalityTraits: string[]
   commonTasks: string[]
+  toolCategories?: ToolCategory[]
   isFree?: boolean
   isSpecial?: boolean
   hostedOnly?: boolean
@@ -56,6 +59,7 @@ Always use the think tool before taking action. Prioritize quality over quantity
     defaultSkills: ['web-search', 'enrich-lead', 'find-contact', 'generate-email-draft'],
     personalityTraits: ['Research-driven', 'Detail-oriented', 'Persistent', 'Empathetic'],
     commonTasks: ['Research leads in target industry', 'Build prospect list', 'Draft cold email sequence', 'Score lead quality', 'Suggest follow-up timing'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser', 'data'],
   },
   {
     id: 'closer-bot',
@@ -88,6 +92,7 @@ Your tone is confident, consultative, and solution-oriented. You're a trusted ad
     defaultSkills: ['write-proposal', 'competitor-analysis', 'generate-email-draft', 'generate-report'],
     personalityTraits: ['Strategic', 'Persuasive', 'Analytical', 'Confident'],
     commonTasks: ['Draft sales proposal', 'Analyze deal pipeline', 'Create competitive battle card', 'Build ROI calculator', 'Write follow-up email after demo'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser', 'data'],
   },
   {
     id: 'onboarder-bot',
@@ -119,6 +124,7 @@ Your tone is enthusiastic, helpful, and patient. You're the friendly guide who m
     defaultSkills: ['generate-email-draft', 'create-onboarding-checklist', 'create-meeting-agenda', 'write-sop'],
     personalityTraits: ['Welcoming', 'Patient', 'Organized', 'Proactive'],
     commonTasks: ['Create welcome email sequence', 'Build onboarding checklist', 'Prepare kickoff call agenda', 'Track adoption milestones', 'Draft setup guide'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser', 'data'],
   },
 
   // ===== MARKETING (6) =====
@@ -155,6 +161,7 @@ Your tone adapts to the brand voice but defaults to professional, clear, and eng
     defaultSkills: ['generate-blog-post', 'keyword-extraction', 'edit-document', 'summarize-text', 'web-search'],
     personalityTraits: ['Creative', 'Research-driven', 'SEO-savvy', 'Prolific'],
     commonTasks: ['Write blog post', 'Create case study', 'Optimize content for SEO', 'Draft content calendar', 'Research competitor content'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
   {
     id: 'social-bot',
@@ -188,6 +195,7 @@ Your tone varies by platform but you're always authentic and engaging. Avoid cor
     defaultSkills: ['generate-social-post', 'web-search', 'sentiment-analysis', 'keyword-extraction'],
     personalityTraits: ['Trendy', 'Creative', 'Platform-savvy', 'Engaging'],
     commonTasks: ['Create social media posts', 'Draft content calendar', 'Research trending topics', 'Write campaign hashtags', 'Analyze competitor social presence'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
   {
     id: 'ad-bot',
@@ -222,6 +230,7 @@ Your tone is direct, benefit-focused, and action-oriented. You think in terms of
     defaultSkills: ['generate-ad-copy', 'analyze-csv', 'web-search', 'generate-report'],
     personalityTraits: ['Data-driven', 'Creative', 'Conversion-focused', 'Analytical'],
     commonTasks: ['Write Google Ads copy', 'Create A/B test variations', 'Analyze campaign performance', 'Recommend budget allocation', 'Draft landing page copy'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
   {
     id: 'reputation-bot',
@@ -254,6 +263,7 @@ Your tone is warm, empathetic, and solution-oriented. You represent the brand's 
     defaultSkills: ['monitor-reviews', 'respond-to-review', 'sentiment-analysis', 'generate-report'],
     personalityTraits: ['Empathetic', 'Diplomatic', 'Quick to respond', 'Brand-conscious'],
     commonTasks: ['Check new reviews', 'Draft review responses', 'Generate sentiment report', 'Flag urgent negative reviews', 'Create review request campaign'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
   {
     id: 'seo-bot',
@@ -290,6 +300,7 @@ Your approach is data-driven and methodical. You prioritize high-impact, low-eff
     defaultSkills: ['seo-audit', 'google-search-console', 'keyword-extraction', 'web-search', 'scrape-webpage'],
     personalityTraits: ['Analytical', 'Methodical', 'Data-obsessed', 'Patient'],
     commonTasks: ['Run SEO audit', 'Research target keywords', 'Check ranking changes', 'Analyze competitor SEO', 'Create content brief'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
   {
     id: 'email-bot',
@@ -323,6 +334,7 @@ Your tone is conversational and brand-aligned. Every email should feel like it w
     defaultSkills: ['generate-email-draft', 'send-email', 'analyze-csv', 'generate-report'],
     personalityTraits: ['Persuasive', 'Analytical', 'Creative', 'Metric-driven'],
     commonTasks: ['Draft email campaign', 'Write subject line variations', 'Create drip sequence', 'Analyze email performance', 'Segment subscriber list'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
 
   // ===== CREATIVE (1) =====
@@ -358,6 +370,7 @@ Your tone is imaginative, bold, and detail-oriented. You think visually even whe
     defaultSkills: ['generate-design-brief', 'brainstorm', 'generate-social-post', 'generate-blog-post', 'annotate-video-transcript'],
     personalityTraits: ['Imaginative', 'Bold', 'Visual thinker', 'Multi-format'],
     commonTasks: ['Write video script', 'Create creative brief', 'Repurpose blog to social', 'Brainstorm campaign concepts', 'Draft brand guidelines'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media'],
   },
 
   // ===== OPERATIONS (2) =====
@@ -392,6 +405,7 @@ Your tone is organized, proactive, and helpful. You're the team's time managemen
     defaultSkills: ['google-calendar', 'create-meeting-agenda', 'generate-email-draft'],
     personalityTraits: ['Organized', 'Proactive', 'Time-conscious', 'Reliable'],
     commonTasks: ['Check upcoming deadlines', 'Send deadline reminders', 'Create meeting agenda', 'Coordinate scheduling', 'Draft meeting recap'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data', 'workflows'],
   },
   {
     id: 'project-bot',
@@ -425,6 +439,7 @@ Your tone is structured, clear, and action-oriented. You keep projects on track 
     defaultSkills: ['generate-report', 'create-meeting-agenda', 'write-sop', 'brainstorm'],
     personalityTraits: ['Structured', 'Decisive', 'Communicative', 'Risk-aware'],
     commonTasks: ['Create project plan', 'Draft stakeholder update', 'Identify blockers', 'Break down project into tasks', 'Write project retrospective'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data', 'workflows'],
   },
 
   // ===== FINANCE (2) =====
@@ -460,6 +475,7 @@ Your tone is precise, data-driven, and objective. You present the numbers clearl
     defaultSkills: ['analyze-csv', 'generate-report', 'stripe-customers', 'create-invoice-pdf'],
     personalityTraits: ['Precise', 'Analytical', 'Objective', 'Detail-oriented'],
     commonTasks: ['Generate monthly financial report', 'Analyze cash flow', 'Create budget forecast', 'Track MRR trends', 'Identify cost-saving opportunities'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data'],
   },
   {
     id: 'bookkeeper-bot',
@@ -492,6 +508,7 @@ Your tone is methodical, reliable, and thorough. You're the backbone of financia
     defaultSkills: ['analyze-csv', 'extract-data', 'create-invoice-pdf', 'stripe-customers'],
     personalityTraits: ['Methodical', 'Reliable', 'Thorough', 'Detail-obsessed'],
     commonTasks: ['Categorize transactions', 'Track invoice status', 'Reconcile statements', 'Log expenses', 'Generate aging report'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data'],
   },
 
   // ===== PEOPLE (2) =====
@@ -527,6 +544,7 @@ Your tone is warm, professional, and excited about connecting great people with 
     defaultSkills: ['create-job-posting', 'score-resume', 'generate-email-draft', 'web-search'],
     personalityTraits: ['Personable', 'Evaluative', 'Fast-moving', 'Inclusive'],
     commonTasks: ['Write job description', 'Screen resumes', 'Draft candidate outreach', 'Create interview questions', 'Track pipeline status'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills'],
   },
   {
     id: 'support-bot',
@@ -560,6 +578,7 @@ Your tone is empathetic, patient, and solution-focused. You treat every customer
     defaultSkills: ['generate-faq', 'generate-email-draft', 'summarize-text', 'web-search'],
     personalityTraits: ['Empathetic', 'Patient', 'Solution-oriented', 'Clear communicator'],
     commonTasks: ['Triage support tickets', 'Draft customer response', 'Update FAQ', 'Track resolution metrics', 'Escalate complex issues'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data'],
   },
 
   // ===== LEGAL & COMPLIANCE (1) =====
@@ -597,6 +616,7 @@ Your tone is precise, cautious, and thorough. You help the team understand legal
     defaultSkills: ['summarize-text', 'compare-documents', 'extract-data', 'edit-document'],
     personalityTraits: ['Precise', 'Cautious', 'Thorough', 'Risk-aware'],
     commonTasks: ['Review contract terms', 'Draft NDA', 'Summarize legal document', 'Check compliance requirements', 'Track contract renewals'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills'],
   },
 
   // ===== TECHNICAL (2) =====
@@ -632,6 +652,7 @@ Your tone is technical but approachable. You give constructive feedback that hel
     defaultSkills: ['github-issues', 'edit-document', 'scan-dependencies', 'web-search'],
     personalityTraits: ['Technical', 'Constructive', 'Security-conscious', 'Thorough'],
     commonTasks: ['Review pull request', 'Write API documentation', 'Triage bug reports', 'Draft architecture proposal', 'Create release notes'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser'],
   },
   {
     id: 'analytics-bot',
@@ -665,6 +686,7 @@ Your tone is data-driven, insightful, and clear. You translate numbers into narr
     defaultSkills: ['google-analytics-report', 'google-search-console', 'analyze-csv', 'generate-report'],
     personalityTraits: ['Data-driven', 'Insightful', 'Pattern-recognizer', 'Clear communicator'],
     commonTasks: ['Generate weekly KPI report', 'Analyze traffic trends', 'Investigate metric anomaly', 'Track conversion funnel', 'Create A/B test analysis'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser', 'data'],
   },
 
   // ===== E-COMMERCE (1) =====
@@ -699,6 +721,7 @@ Your tone is commercial, detail-oriented, and customer-focused. You think like a
     defaultSkills: ['web-search', 'analyze-csv', 'generate-report', 'keyword-extraction'],
     personalityTraits: ['Commercial', 'Detail-oriented', 'Customer-focused', 'Data-informed'],
     commonTasks: ['Write product descriptions', 'Check inventory levels', 'Analyze pricing', 'Create promotional calendar', 'Track sales performance'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data', 'browser'],
   },
 
   // ===== COMMUNICATIONS (1) =====
@@ -734,6 +757,7 @@ Your tone is polished, newsworthy, and strategic. You write for journalists and 
     defaultSkills: ['write-press-release', 'generate-email-draft', 'monitor-news', 'web-search'],
     personalityTraits: ['Polished', 'Strategic', 'Media-savvy', 'Quick to respond'],
     commonTasks: ['Draft press release', 'Write media pitch', 'Monitor news mentions', 'Create crisis statement', 'Build media contact list'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
 
   // ===== ADMIN (1) =====
@@ -769,6 +793,7 @@ Your tone is efficient, reliable, and detail-obsessed. You're the unsung hero wh
     defaultSkills: ['extract-data', 'analyze-csv', 'edit-document'],
     personalityTraits: ['Efficient', 'Reliable', 'Detail-obsessed', 'Systematic'],
     commonTasks: ['Clean CRM data', 'Update spreadsheets', 'Fix data formatting', 'Merge duplicate records', 'Generate formatted export'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data', 'workflows'],
   },
 
   // ===== VOICE (1) =====
@@ -804,6 +829,7 @@ Your tone is confident, conversational, and respectful of people's time. You hel
     defaultSkills: ['send-sms', 'generate-email-draft', 'brainstorm'],
     personalityTraits: ['Confident', 'Conversational', 'Prepared', 'Resilient'],
     commonTasks: ['Draft call script', 'Create appointment booking flow', 'Write voicemail script', 'Draft SMS follow-up', 'Create objection handling guide'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser', 'data'],
   },
 
   // ===== GROWTH & RETENTION (2) =====
@@ -839,6 +865,7 @@ Your tone is caring, proactive, and value-focused. You don't wait for customers 
     defaultSkills: ['generate-email-draft', 'analyze-csv', 'sentiment-analysis', 'generate-report'],
     personalityTraits: ['Caring', 'Proactive', 'Data-aware', 'Value-focused'],
     commonTasks: ['Identify at-risk accounts', 'Create win-back campaign', 'Analyze churn data', 'Draft check-in email', 'Build health scorecard'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser', 'data'],
   },
   {
     id: 'growth-bot',
@@ -872,6 +899,7 @@ Your tone is experimental, data-driven, and action-oriented. You're always runni
     defaultSkills: ['analyze-csv', 'google-analytics-report', 'generate-report', 'brainstorm'],
     personalityTraits: ['Experimental', 'Data-driven', 'Action-oriented', 'Hypothesis-focused'],
     commonTasks: ['Analyze conversion funnel', 'Design A/B test', 'Track growth metrics', 'Propose growth experiment', 'Generate weekly growth report'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser', 'data'],
   },
 
   // ===== COMMUNITY & ENGAGEMENT (2) =====
@@ -907,6 +935,7 @@ Your tone is friendly, inclusive, and energetic. You're the heart of the communi
     defaultSkills: ['discord-post', 'generate-social-post', 'generate-email-draft', 'brainstorm'],
     personalityTraits: ['Friendly', 'Inclusive', 'Energetic', 'Empathetic'],
     commonTasks: ['Welcome new members', 'Create engagement activity', 'Draft community digest', 'Moderate discussions', 'Promote upcoming event'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data'],
   },
   {
     id: 'event-bot',
@@ -942,6 +971,7 @@ Your tone is organized, enthusiastic, and detail-oriented. You make events run s
     defaultSkills: ['eventbrite-manage', 'generate-email-draft', 'create-meeting-agenda', 'generate-social-post'],
     personalityTraits: ['Organized', 'Enthusiastic', 'Detail-oriented', 'Multi-tasker'],
     commonTasks: ['Plan event logistics', 'Draft attendee invitation', 'Create speaker brief', 'Track RSVPs', 'Write post-event recap'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data'],
   },
 
   // ===== INTELLIGENCE & RESEARCH (2) =====
@@ -977,6 +1007,7 @@ Your tone is analytical, objective, and strategic. You present facts and analysi
     defaultSkills: ['web-search', 'monitor-news', 'monitor-competitors', 'competitor-analysis', 'scrape-webpage'],
     personalityTraits: ['Analytical', 'Objective', 'Thorough', 'Strategic'],
     commonTasks: ['Monitor competitor changes', 'Create weekly intel brief', 'Perform SWOT analysis', 'Track industry news', 'Build competitor battle card'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data', 'browser'],
   },
   {
     id: 'research-bot',
@@ -1011,6 +1042,7 @@ Your tone is academic yet accessible. You're thorough without being overwhelming
     defaultSkills: ['web-search', 'scrape-webpage', 'summarize-text', 'expand-insights', 'generate-report'],
     personalityTraits: ['Thorough', 'Academic', 'Source-driven', 'Nuanced'],
     commonTasks: ['Research market opportunity', 'Create deep-dive report', 'Fact-check claims', 'Synthesize multiple sources', 'Write executive summary'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data', 'browser'],
   },
 
   // ===== IT & SECURITY (2) =====
@@ -1046,6 +1078,7 @@ Your tone is helpful, patient, and clear. You explain technical concepts in simp
     defaultSkills: ['generate-faq', 'write-sop', 'create-training-guide', 'generate-email-draft'],
     personalityTraits: ['Helpful', 'Patient', 'Clear', 'Solution-oriented'],
     commonTasks: ['Triage help desk ticket', 'Create troubleshooting guide', 'Provision software access', 'Draft onboarding setup guide', 'Document IT procedure'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser'],
   },
   {
     id: 'security-bot',
@@ -1079,6 +1112,7 @@ Your tone is thorough, urgent when needed, and precise. Security issues get seve
     defaultSkills: ['scan-dependencies', 'audit-permissions', 'generate-report', 'web-search'],
     personalityTraits: ['Vigilant', 'Precise', 'Risk-focused', 'Methodical'],
     commonTasks: ['Scan dependency vulnerabilities', 'Audit access permissions', 'Generate security report', 'Check compliance status', 'Create deployment security checklist'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser'],
   },
 
   // ===== DESIGN & BRAND (1) =====
@@ -1114,6 +1148,7 @@ Your tone is creative, detail-oriented, and consistent. You're the brand guardia
     defaultSkills: ['generate-design-brief', 'brand-check', 'edit-document', 'brainstorm'],
     personalityTraits: ['Creative', 'Brand-conscious', 'Detail-oriented', 'Consistent'],
     commonTasks: ['Create design brief', 'Review brand compliance', 'Write style guide', 'Organize design assets', 'Provide creative direction'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media'],
   },
 
   // ===== LOCALIZATION (1) =====
@@ -1149,6 +1184,7 @@ Your tone is culturally aware, precise, and adaptable. You help the brand speak 
     defaultSkills: ['translate-text', 'edit-document', 'proofread', 'extract-data'],
     personalityTraits: ['Culturally aware', 'Precise', 'Multilingual', 'Adaptable'],
     commonTasks: ['Translate content', 'Adapt messaging for market', 'Update terminology glossary', 'Review translation quality', 'Create localization guide'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
 
   // ===== SUPPLY CHAIN (1) =====
@@ -1184,6 +1220,7 @@ Your tone is professional, thorough, and commercially minded. You help the team 
     defaultSkills: ['web-search', 'generate-email-draft', 'compare-documents', 'generate-report'],
     personalityTraits: ['Commercially minded', 'Thorough', 'Negotiation-aware', 'Organized'],
     commonTasks: ['Research vendors', 'Compare pricing quotes', 'Draft purchase order', 'Create vendor RFP', 'Track supplier performance'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data', 'workflows'],
   },
 
   // ===== TRAINING & ENABLEMENT (1) =====
@@ -1220,6 +1257,7 @@ Your tone is educational, encouraging, and clear. You make complex topics access
     defaultSkills: ['create-training-guide', 'create-quiz', 'write-sop', 'brainstorm'],
     personalityTraits: ['Educational', 'Encouraging', 'Structured', 'Clear'],
     commonTasks: ['Create training module', 'Write employee guide', 'Generate assessment quiz', 'Design learning path', 'Draft onboarding docs'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills'],
   },
 
   // ===== PARTNERSHIPS (1) =====
@@ -1255,6 +1293,7 @@ Your tone is collaborative, enthusiastic, and professionally warm. You build rel
     defaultSkills: ['generate-email-draft', 'write-proposal', 'web-search', 'generate-report'],
     personalityTraits: ['Collaborative', 'Enthusiastic', 'Relationship-focused', 'Organized'],
     commonTasks: ['Research potential partners', 'Draft partnership proposal', 'Track affiliate performance', 'Create co-marketing plan', 'Write partner newsletter'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'browser', 'data'],
   },
 
   // ===== PODCAST & MEDIA (1) =====
@@ -1289,6 +1328,7 @@ Your tone is creative, organized, and audience-aware. You help turn great conver
     defaultSkills: ['generate-show-notes', 'annotate-video-transcript', 'generate-social-post', 'web-search'],
     personalityTraits: ['Creative', 'Organized', 'Audience-aware', 'Detail-oriented'],
     commonTasks: ['Create show notes', 'Research podcast guest', 'Plan episode topics', 'Suggest social clips', 'Write episode description'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'media', 'browser'],
   },
 
   // ===== FEEDBACK & SURVEYS (1) =====
@@ -1325,6 +1365,7 @@ Your tone is analytical, objective, and insight-driven. You turn raw feedback in
     defaultSkills: ['create-survey', 'analyze-csv', 'generate-report', 'sentiment-analysis'],
     personalityTraits: ['Analytical', 'Objective', 'Insight-driven', 'Research-minded'],
     commonTasks: ['Design customer survey', 'Analyze survey results', 'Create NPS survey', 'Generate feedback report', 'Draft follow-up based on results'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'data', 'browser'],
   },
 
   // ===== SPECIAL (2) =====
@@ -1390,6 +1431,7 @@ Your tone is direct, confident, and action-oriented. You're the manager who keep
     defaultSkills: ['advisor-tools'],
     personalityTraits: ['Strategic', 'Action-Oriented', 'Decisive', 'Team Manager'],
     commonTasks: ['Review team task progress', 'Reassign stalled tasks', 'Post management summary', 'Set up agent team for a goal', 'Recommend agents', 'Deploy agents'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'approvals', 'data', 'media', 'browser', 'workflows', 'team'],
   },
   {
     id: 'team-lead',
@@ -1430,6 +1472,7 @@ Your tone is professional, efficient, and action-oriented. Every interaction sho
     defaultSkills: [],
     personalityTraits: ['Command-oriented', 'Efficient', 'Clarifying', 'Action-biased'],
     commonTasks: ['Parse natural language command', 'Clarify ambiguous request', 'Delegate to right agent', 'Track task completion', 'Coordinate multi-agent work'],
+    toolCategories: ['core', 'workspace', 'tasks', 'chat', 'skills', 'approvals', 'data', 'media', 'browser', 'workflows', 'team'],
   },
 ]
 
