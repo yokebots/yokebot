@@ -115,16 +115,12 @@ export async function getChannel(db: Db, id: string): Promise<ChatChannel | null
   return { id: row.id as string, name: row.name as string, type: row.type as ChannelType, createdAt: row.created_at as string }
 }
 
-export async function listChannels(db: Db, teamId?: string): Promise<ChatChannel[]> {
-  if (teamId) {
-    const rows = await db.query<Record<string, unknown>>('SELECT * FROM chat_channels WHERE team_id = $1 ORDER BY created_at DESC', [teamId])
-    return rows.map((row) => ({ id: row.id as string, name: row.name as string, type: row.type as ChannelType, createdAt: row.created_at as string }))
-  }
-  const rows = await db.query<Record<string, unknown>>('SELECT * FROM chat_channels ORDER BY created_at DESC')
+export async function listChannels(db: Db, teamId: string): Promise<ChatChannel[]> {
+  const rows = await db.query<Record<string, unknown>>('SELECT * FROM chat_channels WHERE team_id = $1 ORDER BY created_at DESC', [teamId])
   return rows.map((row) => ({ id: row.id as string, name: row.name as string, type: row.type as ChannelType, createdAt: row.created_at as string }))
 }
 
-export async function getDmChannel(db: Db, agentId: string, teamId = ''): Promise<ChatChannel> {
+export async function getDmChannel(db: Db, agentId: string, teamId: string): Promise<ChatChannel> {
   const dmName = `dm:${agentId}`
   const existing = await db.queryOne<Record<string, unknown>>('SELECT * FROM chat_channels WHERE name = $1 AND team_id = $2', [dmName, teamId])
   if (existing) {
@@ -133,7 +129,7 @@ export async function getDmChannel(db: Db, agentId: string, teamId = ''): Promis
   return createChannel(db, teamId, dmName, 'dm')
 }
 
-export async function getTaskThread(db: Db, taskId: string, teamId = ''): Promise<ChatChannel> {
+export async function getTaskThread(db: Db, taskId: string, teamId: string): Promise<ChatChannel> {
   const threadName = `task:${taskId}`
   const existing = await db.queryOne<Record<string, unknown>>('SELECT * FROM chat_channels WHERE name = $1 AND team_id = $2', [threadName, teamId])
   if (existing) {
@@ -146,7 +142,7 @@ export async function getTaskThread(db: Db, taskId: string, teamId = ''): Promis
 
 export async function sendMessage(
   db: Db, channelId: string, senderType: SenderType, senderId: string, content: string,
-  taskId?: string, teamId = '', attachments?: ChatAttachment[],
+  taskId?: string, teamId: string = '', attachments?: ChatAttachment[],
   audioKey?: string, audioDurationMs?: number, parentMessageId?: number,
 ): Promise<ChatMessage> {
   const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null
@@ -195,10 +191,10 @@ export async function getChannelMessages(db: Db, channelId: string, limit = 50, 
 }
 
 /** Get all replies to a specific message (thread view). */
-export async function getThreadReplies(db: Db, parentMessageId: number, limit = 100): Promise<ChatMessage[]> {
+export async function getThreadReplies(db: Db, parentMessageId: number, teamId: string, limit = 100): Promise<ChatMessage[]> {
   const rows = await db.query<Record<string, unknown>>(
-    'SELECT *, 0 AS reply_count, NULL AS latest_reply_at FROM chat_messages WHERE parent_message_id = $1 ORDER BY id ASC LIMIT $2',
-    [parentMessageId, limit],
+    'SELECT *, 0 AS reply_count, NULL AS latest_reply_at FROM chat_messages WHERE parent_message_id = $1 AND team_id = $2 ORDER BY id ASC LIMIT $3',
+    [parentMessageId, teamId, limit],
   )
   return rows.map(rowToMessage)
 }

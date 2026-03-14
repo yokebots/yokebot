@@ -411,7 +411,7 @@ export async function respondToMention(
 
   // Reset sprint counts and unblock tasks on @mention — human signal means "retry"
   // Rate-limit: max 1 reset per agent per 5 minutes to prevent mention spam
-  const mentionResetKey = `mention_reset:${agentId}`
+  const mentionResetKey = `mention_reset:${teamId}:${agentId}`
   const lastReset = mentionResetCooldowns.get(mentionResetKey)
   const resetNow = Date.now()
   if (!lastReset || resetNow - lastReset > 5 * 60 * 1000) {

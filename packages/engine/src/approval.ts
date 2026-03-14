@@ -52,11 +52,10 @@ export async function getApproval(db: Db, id: string): Promise<Approval | null> 
   return rowToApproval(row)
 }
 
-export async function listPendingApprovals(db: Db, teamId?: string, agentId?: string): Promise<Approval[]> {
-  let sql = 'SELECT * FROM approvals WHERE status = $1'
-  const params: unknown[] = ['pending']
-  let paramIdx = 2
-  if (teamId) { sql += ` AND team_id = $${paramIdx++}`; params.push(teamId) }
+export async function listPendingApprovals(db: Db, teamId: string, agentId?: string): Promise<Approval[]> {
+  let sql = 'SELECT * FROM approvals WHERE status = $1 AND team_id = $2'
+  const params: unknown[] = ['pending', teamId]
+  let paramIdx = 3
   if (agentId) { sql += ` AND agent_id = $${paramIdx++}`; params.push(agentId) }
   sql += ' ORDER BY created_at DESC'
   const rows = await db.query<Record<string, unknown>>(sql, params)
@@ -80,17 +79,10 @@ export async function resolveApproval(
   return approval
 }
 
-export async function countPendingApprovals(db: Db, teamId?: string): Promise<number> {
-  if (teamId) {
-    const row = await db.queryOne<{ count: number }>(
-      'SELECT COUNT(*) as count FROM approvals WHERE status = $1 AND team_id = $2',
-      ['pending', teamId],
-    )
-    return row?.count ?? 0
-  }
+export async function countPendingApprovals(db: Db, teamId: string): Promise<number> {
   const row = await db.queryOne<{ count: number }>(
-    'SELECT COUNT(*) as count FROM approvals WHERE status = $1',
-    ['pending'],
+    'SELECT COUNT(*) as count FROM approvals WHERE status = $1 AND team_id = $2',
+    ['pending', teamId],
   )
   return row?.count ?? 0
 }

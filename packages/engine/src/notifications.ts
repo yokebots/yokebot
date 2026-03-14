@@ -187,12 +187,8 @@ export async function markRead(db: Db, id: string, userId: string): Promise<void
   await db.run('UPDATE notifications SET read = 1 WHERE id = $1 AND user_id = $2', [id, userId])
 }
 
-export async function markAllRead(db: Db, userId: string, teamId?: string): Promise<void> {
-  if (teamId) {
-    await db.run('UPDATE notifications SET read = 1 WHERE user_id = $1 AND team_id = $2 AND read = 0', [userId, teamId])
-  } else {
-    await db.run('UPDATE notifications SET read = 1 WHERE user_id = $1 AND read = 0', [userId])
-  }
+export async function markAllRead(db: Db, userId: string, teamId: string): Promise<void> {
+  await db.run('UPDATE notifications SET read = 1 WHERE user_id = $1 AND team_id = $2 AND read = 0', [userId, teamId])
 }
 
 // ---- Preferences ----

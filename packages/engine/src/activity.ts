@@ -22,7 +22,7 @@ export async function logActivity(
   agentId: string | null,
   description: string,
   details?: Record<string, unknown>,
-  teamId = '',
+  teamId: string = '',
 ): Promise<void> {
   await db.run(
     'INSERT INTO activity_log (team_id, event_type, agent_id, description, details) VALUES ($1, $2, $3, $4, $5)',

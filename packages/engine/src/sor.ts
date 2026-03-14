@@ -52,32 +52,19 @@ export async function getSorTable(db: Db, id: string): Promise<SorTable | null> 
   return { id: row.id as string, name: row.name as string, createdAt: row.created_at as string }
 }
 
-export async function getSorTableByName(db: Db, name: string, teamId?: string): Promise<SorTable | null> {
+export async function getSorTableByName(db: Db, name: string, teamId: string): Promise<SorTable | null> {
   let row: Record<string, unknown> | null
-  if (teamId) {
-    // Team-scoped lookup (used by runtime to prevent cross-team access)
-    if (db.driver === 'postgres') {
-      row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE LOWER(name) = LOWER($1) AND team_id = $2', [name, teamId])
-    } else {
-      row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE name = $1 COLLATE NOCASE AND team_id = $2', [name, teamId])
-    }
+  if (db.driver === 'postgres') {
+    row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE LOWER(name) = LOWER($1) AND team_id = $2', [name, teamId])
   } else {
-    if (db.driver === 'postgres') {
-      row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE LOWER(name) = LOWER($1)', [name])
-    } else {
-      row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE name = $1 COLLATE NOCASE', [name])
-    }
+    row = await db.queryOne<Record<string, unknown>>('SELECT * FROM sor_tables WHERE name = $1 COLLATE NOCASE AND team_id = $2', [name, teamId])
   }
   if (!row) return null
   return { id: row.id as string, name: row.name as string, createdAt: row.created_at as string }
 }
 
-export async function listSorTables(db: Db, teamId?: string): Promise<SorTable[]> {
-  if (teamId) {
-    const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_tables WHERE team_id = $1 ORDER BY created_at DESC', [teamId])
-    return rows.map((r) => ({ id: r.id as string, name: r.name as string, createdAt: r.created_at as string }))
-  }
-  const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_tables ORDER BY created_at DESC')
+export async function listSorTables(db: Db, teamId: string): Promise<SorTable[]> {
+  const rows = await db.query<Record<string, unknown>>('SELECT * FROM sor_tables WHERE team_id = $1 ORDER BY created_at DESC', [teamId])
   return rows.map((r) => ({ id: r.id as string, name: r.name as string, createdAt: r.created_at as string }))
 }
 

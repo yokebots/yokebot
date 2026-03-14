@@ -1252,8 +1252,9 @@ async function main() {
   // ===== Thread Replies =====
 
   app.get('/api/chat/messages/:messageId/replies', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
     const limit = Math.min(Number(req.query.limit) || 100, 200)
-    const replies = await getThreadReplies(db, Number(req.params.messageId), limit)
+    const replies = await getThreadReplies(db, Number(req.params.messageId), teamId, limit)
     res.json(replies)
   })
 
@@ -1371,14 +1372,14 @@ async function main() {
   // ===== Workspace =====
 
   app.get('/api/workspace/files', async (req, res) => {
-    const teamId = req.user?.activeTeamId ?? ''
+    const teamId = req.user!.activeTeamId!
     const dir = (req.query.dir as string) ?? ''
     const recursive = req.query.recursive === 'true'
     res.json(await listFiles(db, teamId, dir, recursive))
   })
 
   app.get('/api/workspace/file', async (req, res) => {
-    const teamId = req.user?.activeTeamId ?? ''
+    const teamId = req.user!.activeTeamId!
     const path = req.query.path as string
     if (!path) return res.status(400).json({ error: 'path is required' })
     const file = await readFile(db, teamId, path)
@@ -1413,7 +1414,7 @@ async function main() {
 
   app.put('/api/workspace/file', async (req, res) => {
     if (!requireRole(req, res, 'admin')) return
-    const teamId = req.user?.activeTeamId ?? ''
+    const teamId = req.user!.activeTeamId!
     const { path, content, agentId } = validate(WriteFileSchema, req.body)
     // CSV files auto-import as SOR data tables instead of workspace files
     if (path.toLowerCase().endsWith('.csv')) {
@@ -1431,7 +1432,7 @@ async function main() {
   // Upload binary file to workspace (base64-encoded)
   app.post('/api/workspace/file/upload', async (req, res) => {
     if (!requireRole(req, res, 'admin')) return
-    const teamId = req.user?.activeTeamId ?? ''
+    const teamId = req.user!.activeTeamId!
     const { path: filePath, base64, mimeType, fileName } = req.body as {
       path?: string; base64?: string; mimeType?: string; fileName?: string
     }
@@ -1461,7 +1462,7 @@ async function main() {
 
   app.patch('/api/workspace/file', async (req, res) => {
     if (!requireRole(req, res, 'admin')) return
-    const teamId = req.user?.activeTeamId ?? ''
+    const teamId = req.user!.activeTeamId!
     const { path, newPath } = req.body as { path?: string; newPath?: string }
     if (!path || !newPath) return res.status(400).json({ error: 'path and newPath are required' })
     const result = await renameFile(db, teamId, path, newPath)
@@ -1471,7 +1472,7 @@ async function main() {
 
   app.delete('/api/workspace/file', async (req, res) => {
     if (!requireRole(req, res, 'admin')) return
-    const teamId = req.user?.activeTeamId ?? ''
+    const teamId = req.user!.activeTeamId!
     const path = req.query.path as string
     if (!path) return res.status(400).json({ error: 'path is required' })
     const result = await deleteFile(db, teamId, path)
@@ -3316,7 +3317,7 @@ ${truncated}`,
   })
 
   app.post('/api/notifications/read-all', async (req, res) => {
-    const teamId = req.query.teamId as string | undefined
+    const teamId = (req.query.teamId as string) || req.user!.activeTeamId!
     await markAllRead(db, req.user!.id, teamId)
     broadcastToUser(req.user!.id, 'notification_count', { count: 0 })
     res.json({ success: true })

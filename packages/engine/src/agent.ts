@@ -68,7 +68,12 @@ export async function createAgent(db: Db, teamId: string, config: AgentConfig): 
   return (await getAgent(db, id))!
 }
 
-export async function getAgent(db: Db, id: string): Promise<Agent | null> {
+export async function getAgent(db: Db, id: string, teamId?: string): Promise<Agent | null> {
+  if (teamId) {
+    const row = await db.queryOne<Record<string, unknown>>('SELECT * FROM agents WHERE id = $1 AND team_id = $2', [id, teamId])
+    if (!row) return null
+    return rowToAgent(row)
+  }
   const row = await db.queryOne<Record<string, unknown>>('SELECT * FROM agents WHERE id = $1', [id])
   if (!row) return null
   return rowToAgent(row)
@@ -125,14 +130,21 @@ export async function deleteAgent(db: Db, id: string): Promise<void> {
 
 // ---- Conversation history ----
 
-export async function addMessage(db: Db, agentId: string, role: string, content: string, teamId = ''): Promise<void> {
+export async function addMessage(db: Db, agentId: string, role: string, content: string, teamId: string): Promise<void> {
   await db.run(
     'INSERT INTO messages (team_id, agent_id, role, content) VALUES ($1, $2, $3, $4)',
     [teamId, agentId, role, content],
   )
 }
 
-export async function getMessages(db: Db, agentId: string, limit = 50): Promise<Array<{ role: string; content: string; created_at: string }>> {
+export async function getMessages(db: Db, agentId: string, limit = 50, teamId?: string): Promise<Array<{ role: string; content: string; created_at: string }>> {
+  if (teamId) {
+    const rows = await db.query<{ role: string; content: string; created_at: string }>(
+      'SELECT role, content, created_at FROM messages WHERE agent_id = $1 AND team_id = $2 ORDER BY created_at DESC LIMIT $3',
+      [agentId, teamId, limit],
+    )
+    return rows.reverse()
+  }
   const rows = await db.query<{ role: string; content: string; created_at: string }>(
     'SELECT role, content, created_at FROM messages WHERE agent_id = $1 ORDER BY created_at DESC LIMIT $2',
     [agentId, limit],

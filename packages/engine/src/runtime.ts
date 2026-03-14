@@ -730,7 +730,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         if (task.deadline) parts.push(`Deadline: ${task.deadline}`)
         if (appliedTags.length > 0) parts.push(`Tags: ${appliedTags.join(', ')}`)
         parts.push(`Status: ${task.status}`)
-        await sendMessage(ctx.db, thread.id, 'agent', ctx.agentId, parts.join('\n'))
+        await sendMessage(ctx.db, thread.id, 'agent', ctx.agentId, parts.join('\n'), undefined, ctx.teamId)
       } catch { /* thread creation is best-effort */ }
       await logActivity(ctx.db, 'task_created', ctx.agentId, `Created task: ${task.title}`, undefined, ctx.teamId)
       return `Task created: "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${appliedTags.length ? `, tags: ${appliedTags.join(', ')}` : ''})`
@@ -857,7 +857,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           // Trying to send to a DM channel by ID — treat same as 'dm'
         } else {
           // Valid non-DM channel — send normally
-          const msg = await sendMessage(ctx.db, channelId, 'agent', ctx.agentId, content)
+          const msg = await sendMessage(ctx.db, channelId, 'agent', ctx.agentId, content, undefined, ctx.teamId)
           await logActivity(ctx.db, 'message_sent', ctx.agentId, `Sent message to chat`, undefined, ctx.teamId)
           return `Message sent (id: ${msg.id})`
         }
@@ -874,7 +874,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         bestChannel = exact || partial || bestChannel
       }
       const fallback = bestChannel || groupChannels[0] || await createChannel(ctx.db, ctx.teamId, 'general', 'group')
-      const msg = await sendMessage(ctx.db, fallback.id, 'agent', ctx.agentId, content)
+      const msg = await sendMessage(ctx.db, fallback.id, 'agent', ctx.agentId, content, undefined, ctx.teamId)
       await logActivity(ctx.db, 'message_sent', ctx.agentId, `Sent message to ${fallback.name || 'chat'}`, undefined, ctx.teamId)
       return `Message sent to #${fallback.name} (id: ${msg.id}). Note: Direct messages are not allowed — use group channels or task threads instead.`
     }
@@ -1544,11 +1544,11 @@ export async function runReactLoop(
 
   // Conversation compaction: summarize old messages if history is long
   let conversationSummary: string | null = null
-  const fullHistory = await getMessages(db, agentId, 30)
+  const fullHistory = await getMessages(db, agentId, 30, teamId)
   try {
     const summaryRow = await db.queryOne<{ summary: string; messages_summarized: number }>(
-      `SELECT summary, messages_summarized FROM conversation_summaries WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [agentId],
+      `SELECT summary, messages_summarized FROM conversation_summaries WHERE agent_id = $1 AND team_id = $2 ORDER BY created_at DESC LIMIT 1`,
+      [agentId, teamId],
     )
     const summarizedCount = summaryRow?.messages_summarized ?? 0
     const newMessagesSinceSummary = fullHistory.length - summarizedCount

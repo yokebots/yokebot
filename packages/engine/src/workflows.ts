@@ -239,14 +239,14 @@ export async function getRun(db: Db, id: string): Promise<WorkflowRun | null> {
   return rowToRun(row)
 }
 
-export async function listRuns(db: Db, filters?: { teamId?: string; workflowId?: string; status?: RunStatus }): Promise<WorkflowRun[]> {
+export async function listRuns(db: Db, filters: { teamId?: string; workflowId?: string; status?: RunStatus }): Promise<WorkflowRun[]> {
   let sql = 'SELECT * FROM workflow_runs WHERE 1=1'
   const params: unknown[] = []
   let paramIdx = 1
 
-  if (filters?.teamId) { sql += ` AND team_id = $${paramIdx++}`; params.push(filters.teamId) }
-  if (filters?.workflowId) { sql += ` AND workflow_id = $${paramIdx++}`; params.push(filters.workflowId) }
-  if (filters?.status) { sql += ` AND status = $${paramIdx++}`; params.push(filters.status) }
+  if (filters.teamId) { sql += ` AND team_id = $${paramIdx++}`; params.push(filters.teamId) }
+  if (filters.workflowId) { sql += ` AND workflow_id = $${paramIdx++}`; params.push(filters.workflowId) }
+  if (filters.status) { sql += ` AND status = $${paramIdx++}`; params.push(filters.status) }
 
   sql += ' ORDER BY started_at DESC'
   const rows = await db.query<Record<string, unknown>>(sql, params)
