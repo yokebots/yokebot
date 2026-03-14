@@ -315,10 +315,24 @@ async function main() {
 
   // ===== Ownership verification helper =====
   // Prevents IDOR: verifies an object belongs to the requesting user's team
-  const OWNERSHIP_TABLES = new Set(['agents', 'tasks', 'goals', 'kpi_goals', 'approvals', 'chat_channels', 'sor_tables', 'kb_documents', 'workflows', 'workflow_runs', 'video_projects'])
+  // Uses pre-defined queries to avoid SQL injection via table name interpolation
+  const OWNERSHIP_QUERIES: Record<string, string> = {
+    agents: 'SELECT team_id FROM agents WHERE id = $1',
+    tasks: 'SELECT team_id FROM tasks WHERE id = $1',
+    goals: 'SELECT team_id FROM goals WHERE id = $1',
+    kpi_goals: 'SELECT team_id FROM kpi_goals WHERE id = $1',
+    approvals: 'SELECT team_id FROM approvals WHERE id = $1',
+    chat_channels: 'SELECT team_id FROM chat_channels WHERE id = $1',
+    sor_tables: 'SELECT team_id FROM sor_tables WHERE id = $1',
+    kb_documents: 'SELECT team_id FROM kb_documents WHERE id = $1',
+    workflows: 'SELECT team_id FROM workflows WHERE id = $1',
+    workflow_runs: 'SELECT team_id FROM workflow_runs WHERE id = $1',
+    video_projects: 'SELECT team_id FROM video_projects WHERE id = $1',
+  }
   async function verifyOwnership(table: string, id: string, teamId: string): Promise<boolean> {
-    if (!OWNERSHIP_TABLES.has(table)) throw new Error(`verifyOwnership: unknown table "${table}"`)
-    const row = await db.queryOne<{ team_id: string }>(`SELECT team_id FROM ${table} WHERE id = $1`, [id])
+    const query = OWNERSHIP_QUERIES[table]
+    if (!query) throw new Error(`verifyOwnership: unknown table "${table}"`)
+    const row = await db.queryOne<{ team_id: string }>(query, [id])
     return row !== null && row.team_id === teamId
   }
 
@@ -2057,11 +2071,13 @@ async function main() {
   })
 
   app.get('/api/browser-sessions', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     res.json(listActiveSessions(teamId))
   })
 
   app.get('/api/browser-sessions/:id/screenshot', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const session = getSessionInfo(req.params.id)
     if (!session) return res.status(404).json({ error: 'Browser session not found' })
@@ -2835,6 +2851,10 @@ ${truncated}`,
     if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
       return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
     }
+    // Verify the authenticated user belongs to this team
+    if (req.user?.activeTeamId !== req.params.id) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
 
     try {
       const cloudPath2 = './cloud/orchestrator.js'
@@ -2875,6 +2895,9 @@ ${truncated}`,
     if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
       return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
     }
+    if (req.user?.activeTeamId !== req.params.id) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
 
     const { content } = req.body as { content?: string }
     if (!content || typeof content !== 'string' || content.trim().length === 0) {
@@ -2907,6 +2930,9 @@ ${truncated}`,
   app.post('/api/teams/:id/meetings/:meetingId/voice', async (req, res) => {
     if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
       return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
+    }
+    if (req.user?.activeTeamId !== req.params.id) {
+      return res.status(403).json({ error: 'Forbidden' })
     }
 
     try {
@@ -2967,6 +2993,9 @@ ${truncated}`,
   app.post('/api/teams/:id/meetings/:meetingId/raise-hand', async (req, res) => {
     if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
       return res.status(403).json({ error: 'Meetings are only available in hosted mode' })
+    }
+    if (req.user?.activeTeamId !== req.params.id) {
+      return res.status(403).json({ error: 'Forbidden' })
     }
 
     try {
@@ -3146,8 +3175,26 @@ ${truncated}`,
     }
 
     try {
+      // Token format: base64url(userId:teamId:hmac)
       const decoded = Buffer.from(token, 'base64url').toString()
-      const [userId, teamId] = decoded.split(':')
+      const parts = decoded.split(':')
+      if (parts.length < 2) {
+        res.status(400).send('Invalid token')
+        return
+      }
+      const [userId, teamId, tokenHmac] = parts
+
+      // Verify HMAC if a signing secret is available (new tokens are signed)
+      const hmacSecret = process.env.YOKEBOT_ENCRYPTION_KEY || process.env.SUPABASE_JWT_SECRET
+      if (hmacSecret && tokenHmac) {
+        const crypto = await import('node:crypto')
+        const expectedHmac = crypto.createHmac('sha256', hmacSecret).update(`${userId}:${teamId}`).digest('hex').slice(0, 16)
+        if (tokenHmac !== expectedHmac) {
+          res.status(400).send('Invalid token')
+          return
+        }
+      }
+
       if (!userId || !teamId) {
         res.status(400).send('Invalid token')
         return

@@ -383,16 +383,21 @@ export const CreateBrowserSessionSchema = z.object({
 
 export const BrowserInteractSchema = z.object({
   type: z.enum(['click', 'type', 'press', 'scroll']),
-  x: z.number().int().min(0).optional(),
-  y: z.number().int().min(0).optional(),
+  x: z.number().int().min(0).max(2000).optional(),
+  y: z.number().int().min(0).max(2000).optional(),
   text: z.string().max(5000).optional(),
   key: z.string().max(50).optional(),
-  deltaX: z.number().int().optional(),
-  deltaY: z.number().int().optional(),
+  deltaX: z.number().int().min(-10000).max(10000).optional(),
+  deltaY: z.number().int().min(-10000).max(10000).optional(),
 })
 
 export const BrowserNavigateSchema = z.object({
-  url: z.string().min(1).max(2000),
+  url: z.string().min(1).max(2000).refine((url) => {
+    try {
+      const parsed = new URL(url.startsWith('http') ? url : `https://${url}`)
+      return ['http:', 'https:'].includes(parsed.protocol)
+    } catch { return false }
+  }, { message: 'Only http:// and https:// URLs are allowed' }),
 })
 
 export const SaveBrowserToVaultSchema = z.object({

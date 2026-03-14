@@ -1603,6 +1603,19 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 37,
+    name: 'security_hardening_rls',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        // Enable RLS on tables that were missing it
+        await db.run(`ALTER TABLE IF EXISTS contact_submissions ENABLE ROW LEVEL SECURITY`)
+        await db.run(`ALTER TABLE IF EXISTS email_sequences ENABLE ROW LEVEL SECURITY`)
+        await db.run(`ALTER TABLE IF EXISTS email_sequence_enrollments ENABLE ROW LEVEL SECURITY`)
+        await db.run(`ALTER TABLE IF EXISTS approvals ENABLE ROW LEVEL SECURITY`)
+      }
+    },
+  },
 ]
 
 /**

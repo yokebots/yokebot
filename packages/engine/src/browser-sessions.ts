@@ -90,17 +90,24 @@ function isPrivateIP(ip: string): boolean {
     ip === '0.0.0.0' ||
     ip === '169.254.169.254' ||
     ip.startsWith('0.') ||
+    // IPv6 private/reserved ranges
     ip === '::1' ||
+    ip === '::' ||
     ip.startsWith('fe80:') ||
     ip.startsWith('fc') ||
-    ip.startsWith('fd')
+    ip.startsWith('fd') ||
+    ip.startsWith('ff') ||  // multicast
+    ip.startsWith('::ffff:127.') ||  // IPv4-mapped loopback
+    ip.startsWith('::ffff:10.') ||   // IPv4-mapped private
+    ip.startsWith('::ffff:192.168.') ||
+    /^::ffff:172\.(1[6-9]|2\d|3[01])\./.test(ip)
   )
 }
 
 export async function validateUrl(url: string): Promise<string> {
   for (const pattern of BLOCKED_PATTERNS) {
     if (pattern.test(url)) {
-      throw new Error(`Blocked URL: ${url}`)
+      throw new Error('This URL is not allowed.')
     }
   }
   if (!/^https?:\/\//i.test(url)) {
@@ -111,19 +118,37 @@ export async function validateUrl(url: string): Promise<string> {
 
   for (const blocked of BLOCKED_DOMAINS) {
     if (host.endsWith(blocked)) {
-      throw new Error(`DNS rebinding service not allowed: ${host}`)
+      throw new Error('This URL is not allowed.')
     }
   }
 
+  // Validate both IPv4 and IPv6 DNS resolution — fail closed on errors
   try {
-    const addresses = await dns.resolve4(host)
-    for (const ip of addresses) {
+    const [v4Addresses, v6Addresses] = await Promise.allSettled([
+      dns.resolve4(host),
+      dns.resolve6(host),
+    ])
+    const allAddresses: string[] = []
+    if (v4Addresses.status === 'fulfilled') allAddresses.push(...v4Addresses.value)
+    if (v6Addresses.status === 'fulfilled') allAddresses.push(...v6Addresses.value)
+
+    for (const ip of allAddresses) {
       if (isPrivateIP(ip)) {
-        throw new Error(`URL resolves to private IP (${ip}) — not allowed`)
+        throw new Error('This URL is not allowed.')
+      }
+    }
+
+    // If both failed with non-ENOTFOUND errors, block (fail closed)
+    if (allAddresses.length === 0) {
+      const v4Err = v4Addresses.status === 'rejected' ? (v4Addresses.reason as NodeJS.ErrnoException).code : null
+      const v6Err = v6Addresses.status === 'rejected' ? (v6Addresses.reason as NodeJS.ErrnoException).code : null
+      const isNotFound = v4Err === 'ENOTFOUND' || v6Err === 'ENOTFOUND'
+      if (!isNotFound) {
+        throw new Error('Unable to verify URL safety — please try again.')
       }
     }
   } catch (err) {
-    if ((err as Error).message.includes('not allowed')) throw err
+    if ((err as Error).message.includes('not allowed') || (err as Error).message.includes('Unable to verify')) throw err
   }
 
   return url
