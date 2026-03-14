@@ -12,7 +12,7 @@ import * as engine from '@/lib/engine'
 
 // ---- Tab types for the context pane viewer ----
 
-export type ViewerTabType = 'file' | 'data-table' | 'browser' | 'workflow' | 'workflow-run' | 'video-editor'
+export type ViewerTabType = 'file' | 'data-table' | 'browser' | 'workflow' | 'workflow-run' | 'video-editor' | 'agent-detail'
 
 export interface ViewerTab {
   id: string

@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router'
 import { UniversalSearch } from '@/components/UniversalSearch'
 import { NotificationCenter } from '@/components/NotificationCenter'
 import { ActivityDropdown } from '@/components/workspace/ActivityDropdown'
+import { HelpDropdown } from '@/components/HelpDropdown'
 import { useSidebar } from '@/lib/sidebar-context'
 import { useRealtimeEvent } from '@/lib/use-realtime'
 import * as engine from '@/lib/engine'
 
-export function TopBar() {
+export function TopBar({ onRestartTour }: { onRestartTour?: () => void }) {
   const [showSearch, setShowSearch] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [credits, setCredits] = useState<number | null>(null)
@@ -85,6 +86,7 @@ export function TopBar() {
           </button>
 
           <button
+            data-tour="search"
             onClick={() => setShowSearch(true)}
             className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-light-surface-alt py-2 pl-3 pr-4 text-sm text-text-muted transition-colors hover:border-forest-green"
           >
@@ -207,6 +209,9 @@ export function TopBar() {
               </span>
             )}
           </button>
+
+          {/* Help & Support */}
+          <HelpDropdown onRestartTour={onRestartTour} />
         </div>
       </header>
 

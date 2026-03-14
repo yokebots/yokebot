@@ -7,6 +7,7 @@ import { WorkflowViewer } from './WorkflowViewer'
 import { WorkflowRunViewer } from './WorkflowRunViewer'
 import { VideoEditorPanel } from './VideoEditorPanel'
 import { BrowserPanel } from './BrowserPanel'
+import { AgentDetailPanel } from './AgentDetailPanel'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 import type { SorTable, SorRow } from '@/lib/engine'
@@ -113,6 +114,9 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
               {activeTab?.type === 'video-editor' && (
                 <VideoEditorPanel projectId={activeTab.resourceId} />
               )}
+              {activeTab?.type === 'agent-detail' && (
+                <AgentDetailPanel agentId={activeTab.resourceId} />
+              )}
               {!activeTab && (
                 <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
                   Select a tab
@@ -133,7 +137,15 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
         className={hasViewerTabs ? 'flex flex-col overflow-hidden' : 'flex flex-col flex-1 overflow-hidden'}
         style={hasViewerTabs ? { height: `${(1 - splitRatio) * 100}%` } : undefined}
       >
-        <TeamChat teamChannelId={teamChannelId} onFileClick={handleFileClick} onTaskClick={handleTaskClick} />
+        <TeamChat
+          teamChannelId={teamChannelId}
+          onFileClick={handleFileClick}
+          onTaskClick={handleTaskClick}
+          onAgentClick={(agentId, agentName) => {
+            const tab: ViewerTab = { id: `agent:${agentId}`, type: 'agent-detail', label: agentName, icon: 'smart_toy', resourceId: agentId }
+            workspace.addViewerTab(tab)
+          }}
+        />
       </div>
 
       {/* Tab context menu (file tabs only) */}

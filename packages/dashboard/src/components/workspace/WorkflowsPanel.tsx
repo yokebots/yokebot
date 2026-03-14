@@ -90,12 +90,9 @@ export function WorkflowsPanel({ workspace }: WorkflowsPanelProps) {
   }
 
   const handleRunWorkflow = async (workflowId: string) => {
-    try {
-      const run = await engine.startWorkflowRun(workflowId)
-      loadData()
-      // Open the run in the center pane
-      handleRunClick(run)
-    } catch { /* ignore */ }
+    // Open the workflow tab — the viewer now handles runs inline
+    const wf = workflows.find(w => w.id === workflowId)
+    if (wf) handleWorkflowClick(wf)
   }
 
   if (loading) {

@@ -116,7 +116,7 @@ export function DashboardPage() {
   if (showWelcome) return <WelcomeScreen />
 
   return (
-    <div className="max-w-6xl">
+    <div className="max-w-6xl" data-tour="dashboard">
       {/* Header */}
       <div className="mb-8">
         <h1 className="mb-1 font-display text-3xl font-bold text-text-main">Dashboard</h1>
@@ -150,13 +150,13 @@ export function DashboardPage() {
               if (!latest) return null
               return (
                 <div key={agentId} className="rounded-lg">
-                  <div className="flex items-center gap-3 px-2 py-1.5 text-xs">
+                  <Link to={`/agents/${agentId}`} className="flex items-center gap-3 px-2 py-1.5 text-xs hover:bg-light-surface-alt rounded-lg transition-colors">
                     <span className="font-medium text-text-main shrink-0">{latest.agentName}</span>
                     <span className="flex-1 truncate text-text-muted">{latest.label}</span>
                     <span className="shrink-0 font-mono text-[10px] text-text-muted/60">
                       Step {latest.iteration}/{latest.maxIterations}
                     </span>
-                  </div>
+                  </Link>
                   <div className="px-2 pb-1">
                     <AgentProgressPanel steps={steps} />
                   </div>
@@ -286,7 +286,7 @@ export function DashboardPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
             {activeProjects.map((project) => (
-              <div key={project.id} className="rounded-xl border border-border-subtle bg-white p-4 shadow-card">
+              <Link key={project.id} to={`/projects/${project.id}`} className="rounded-xl border border-border-subtle bg-white p-4 shadow-card hover:border-forest-green/30 hover:shadow-md transition-all">
                 <h3 className="text-sm font-bold text-text-main truncate">{project.title}</h3>
                 <div className="mt-2">
                   <div className="flex items-center justify-between text-xs text-text-muted mb-1">
@@ -300,7 +300,7 @@ export function DashboardPage() {
                     />
                   </div>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
@@ -314,15 +314,18 @@ export function DashboardPage() {
             <Link to="/activity" className="text-xs text-forest-green hover:underline">View all</Link>
           </div>
           <div className="rounded-xl border border-border-subtle bg-white divide-y divide-border-subtle shadow-card">
-            {recentActivity.map((entry) => (
-              <div key={entry.id} className="flex items-center gap-3 px-4 py-2.5">
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-forest-green" />
-                <p className="flex-1 truncate text-sm text-text-main">{entry.description}</p>
-                <span className="shrink-0 text-xs text-text-muted">
-                  {new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-            ))}
+            {recentActivity.map((entry) => {
+              const linkTo = entry.agentId ? `/agents/${entry.agentId}` : '/activity'
+              return (
+                <Link key={entry.id} to={linkTo} className="flex items-center gap-3 px-4 py-2.5 hover:bg-light-surface-alt transition-colors">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-forest-green" />
+                  <p className="flex-1 truncate text-sm text-text-main">{entry.description}</p>
+                  <span className="shrink-0 text-xs text-text-muted">
+                    {new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </Link>
+              )
+            })}
           </div>
         </div>
       )}

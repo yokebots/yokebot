@@ -14,6 +14,7 @@ interface TeamChatProps {
   teamChannelId: string | null
   onFileClick?: (docId: string) => void
   onTaskClick?: (taskId: string) => void
+  onAgentClick?: (agentId: string, agentName: string) => void
 }
 
 interface ContextMenuState {
@@ -21,7 +22,7 @@ interface ContextMenuState {
   message: engine.ChatMessage
 }
 
-export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatProps) {
+export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick }: TeamChatProps) {
   const { user } = useAuth()
   const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'You'
   const [messages, setMessages] = useState<engine.ChatMessage[]>([])
@@ -265,6 +266,10 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
             onThreadClick={setThreadParent}
             onFileClick={onFileClick}
             onTaskClick={onTaskClick}
+            onAgentClick={onAgentClick ? (id) => {
+              const info = agentColorMap.get(id)
+              onAgentClick(id, info?.name ?? 'Agent')
+            } : undefined}
             onContextMenu={handleMessageContextMenu}
           />
         ))}
