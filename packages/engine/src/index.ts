@@ -2051,7 +2051,8 @@ async function main() {
       })
       res.status(201).json(result)
     } catch (err) {
-      res.status(400).json({ error: (err as Error).message })
+      const msg = (err as Error).message || 'Failed to create browser session — Playwright/Chromium may not be available on this server.'
+      res.status(400).json({ error: msg })
     }
   })
 
@@ -2282,6 +2283,12 @@ async function main() {
       await seedVideoProductionWorkflow(db, team.id)
     } catch (err) {
       console.error('[engine] Failed to seed Video Production workflow:', (err as Error).message)
+    }
+    try {
+      const { seedRapidImageAdsWorkflow } = await import('./ad-workflow-seed.ts')
+      await seedRapidImageAdsWorkflow(db, team.id)
+    } catch (err) {
+      console.error('[engine] Failed to seed Rapid Image Ads workflow:', (err as Error).message)
     }
 
     await logActivity(db, 'team_created', null, `Team "${name}" created`)

@@ -179,6 +179,10 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Drag-and-drop file move state
+  const [dragOverDir, setDragOverDir] = useState<string | null>(null)
+  const [movingFile, setMovingFile] = useState(false)
+
   const panelRef = useRef<HTMLDivElement>(null)
 
   const loadFiles = useCallback(async () => {
@@ -205,6 +209,23 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     } catch { /* offline */ }
     setTablesLoading(false)
   }, [])
+
+  const handleMoveFile = useCallback(async (sourcePath: string, targetDirPath: string) => {
+    const fileName = sourcePath.split('/').pop() ?? sourcePath
+    const newPath = targetDirPath ? `${targetDirPath}/${fileName}` : fileName
+    if (newPath === sourcePath) return
+    if (isChildPath(targetDirPath, sourcePath)) return
+    setMovingFile(true)
+    try {
+      await engine.renameFile(sourcePath, newPath)
+      const tab = workspace.viewerTabs.find(t => t.type === 'file' && t.resourceId === sourcePath)
+      if (tab) workspace.updateViewerTab(tab.id, { label: fileName, resourceId: newPath })
+      await loadFiles()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to move file')
+    }
+    setMovingFile(false)
+  }, [workspace, loadFiles])
 
   useEffect(() => { loadFiles() }, [loadFiles])
   useEffect(() => { if (activePanel === 'data') loadTables() }, [activePanel, loadTables])
@@ -589,6 +610,10 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
                   renamingPath={renamingPath}
                   onRenameSubmit={handleRename}
                   onRenameCancel={() => setRenamingPath(null)}
+                  dragOverDir={dragOverDir}
+                  setDragOverDir={setDragOverDir}
+                  onMoveFile={handleMoveFile}
+                  movingFile={movingFile}
                 />
               ))}
             </>
@@ -735,6 +760,10 @@ function TreeNodeRow({
   renamingPath,
   onRenameSubmit,
   onRenameCancel,
+  dragOverDir,
+  setDragOverDir,
+  onMoveFile,
+  movingFile,
 }: {
   node: TreeNode
   level: number
@@ -747,11 +776,17 @@ function TreeNodeRow({
   renamingPath: string | null
   onRenameSubmit: (oldPath: string, newName: string) => void
   onRenameCancel: () => void
+  dragOverDir: string | null
+  setDragOverDir: (path: string | null) => void
+  onMoveFile: (sourcePath: string, targetDirPath: string) => void
+  movingFile: boolean
 }) {
   const isExpanded = expandedDirs.has(node.path)
   const isUnread = !node.isDirectory && unreadFileIds?.has(node.path)
   const isActive = !node.isDirectory && node.path === activeFilePath
   const isRenaming = node.path === renamingPath
+  const isRecent = node.isDirectory ? hasRecentChild(node) : isRecentlyModified(node.modifiedAt)
+  const isDragTarget = node.isDirectory && dragOverDir === node.path
 
   return (
     <>
@@ -767,10 +802,35 @@ function TreeNodeRow({
         <button
           onClick={() => node.isDirectory ? toggleDir(node.path) : openFile(node.path)}
           onContextMenu={(e) => onContextMenu(e, node.path, node.isDirectory)}
+          draggable={!node.isDirectory && !movingFile}
+          onDragStart={(e) => {
+            if (node.isDirectory) return
+            e.dataTransfer.setData('text/plain', node.path)
+            e.dataTransfer.effectAllowed = 'move'
+          }}
+          onDragOver={(e) => {
+            if (!node.isDirectory) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            setDragOverDir(node.path)
+          }}
+          onDragLeave={() => {
+            if (dragOverDir === node.path) setDragOverDir(null)
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setDragOverDir(null)
+            if (!node.isDirectory) return
+            const sourcePath = e.dataTransfer.getData('text/plain')
+            if (sourcePath) onMoveFile(sourcePath, node.path)
+          }}
           className={`group flex w-full items-center gap-1.5 rounded-lg py-1 pr-2 text-left text-xs transition-colors ${
-            isActive
-              ? 'bg-forest-green/10 text-forest-green'
-              : 'hover:bg-light-surface-alt'
+            isDragTarget
+              ? 'bg-blue-50 ring-1 ring-blue-400'
+              : isActive
+                ? 'bg-forest-green/10 text-forest-green'
+                : 'hover:bg-light-surface-alt'
           }`}
           style={{ paddingLeft: `${level * 16 + 8}px` }}
         >
@@ -793,6 +853,11 @@ function TreeNodeRow({
           {/* Unread dot */}
           {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />}
 
+          {/* Recently modified dot (only if not already showing unread) */}
+          {isRecent && !isUnread && (
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" title={`Modified ${formatRelativeTime(node.modifiedAt)}`} />
+          )}
+
           {/* Name */}
           <span className={`flex-1 truncate ${isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>
             {node.name}
@@ -802,6 +867,13 @@ function TreeNodeRow({
           {!node.isDirectory && (
             <span className="text-[10px] text-text-muted shrink-0 opacity-0 group-hover:opacity-100">
               {formatSize(node.size)}
+            </span>
+          )}
+
+          {/* Relative time (files only, on hover) */}
+          {!node.isDirectory && isRecent && (
+            <span className="text-[10px] text-amber-500 shrink-0 opacity-0 group-hover:opacity-100 ml-0.5">
+              {formatRelativeTime(node.modifiedAt)}
             </span>
           )}
         </button>
@@ -822,6 +894,10 @@ function TreeNodeRow({
           renamingPath={renamingPath}
           onRenameSubmit={onRenameSubmit}
           onRenameCancel={onRenameCancel}
+          dragOverDir={dragOverDir}
+          setDragOverDir={setDragOverDir}
+          onMoveFile={onMoveFile}
+          movingFile={movingFile}
         />
       ))}
     </>
@@ -918,6 +994,32 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function isRecentlyModified(modifiedAt: string): boolean {
+  return Date.now() - new Date(modifiedAt).getTime() < 24 * 60 * 60 * 1000
+}
+
+function formatRelativeTime(dateStr: string): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+/** Check if any descendant of a directory was recently modified */
+function hasRecentChild(node: TreeNode): boolean {
+  if (!node.isDirectory) return isRecentlyModified(node.modifiedAt)
+  return node.children.some(child => child.isDirectory ? hasRecentChild(child) : isRecentlyModified(child.modifiedAt))
+}
+
+/** Check if a path is a child (or self) of another path */
+function isChildPath(childPath: string, parentPath: string): boolean {
+  return childPath === parentPath || childPath.startsWith(parentPath + '/')
 }
 
 function ExportTablesDropdown({

@@ -2,7 +2,11 @@
  * video-workflow-seed.ts — Seeds the Video Production workflow template for a team
  *
  * Creates a 13-step guided pipeline: brief → hooks → scripts → images → audio → assembly → export.
- * Each generation step is model-agnostic with configurable model selection.
+ *
+ * Hardcoded models for reliability:
+ * - Image generation: Nano Banana 2 (100 credits, excellent text rendering)
+ * - Image editing: FireRed Image Edit (150 credits, instruction-based editing)
+ * - Video generation: Kling 3.0 (3000 credits, premium quality)
  */
 
 import type { Db } from './db/types.ts'
@@ -89,16 +93,34 @@ Store the result using update_task with the scripts in the task notes.`,
       }),
     },
     {
+      title: 'Upload Style References',
+      description: 'Optional: upload up to 6 reference images to guide the visual style across all scenes.',
+      gate: 'approval' as const,
+      config: JSON.stringify({
+        instructions: `Ask the user if they have style reference images for the video's visual look.
+
+Style references ensure visual consistency across all scenes — brand imagery, mood boards, existing content, or any image whose aesthetic they want to match.
+
+- Accept up to 6 images (upload to workspace or provide URLs)
+- If they have references, store the image URLs/paths for use in image generation
+- If they don't have references, that's fine — skip this step
+
+These references will be passed to every image generation call to maintain a cohesive visual style.`,
+        outputVariable: 'styleRefs',
+      }),
+    },
+    {
       title: 'Draft Image Prompts',
-      description: 'AI writes detailed image generation prompts for each scene.',
+      description: 'AI writes detailed image generation prompts for each scene, optimized for Nano Banana 2.',
       gate: 'auto' as const,
       config: JSON.stringify({
         instructions: `Based on the approved script, write detailed image generation prompts for each scene.
-Each prompt should be optimized for the generate_image tool.
+Each prompt should be optimized for Nano Banana 2 (excellent at text rendering, character consistency, 4K output).
 Include: style, composition, lighting, color palette, subject details.
 Maintain visual consistency across scenes (same style, color palette, character descriptions).
+If style reference images were provided, note that they will be passed as image_urls during generation.
 Output as JSON: [{sceneNumber, prompt, negativePrompt, style}]`,
-        model: 'flux-pro',
+        model: 'nano-banana-2',
         outputVariable: 'imagePrompts',
       }),
     },
@@ -113,14 +135,25 @@ Output as JSON: [{sceneNumber, prompt, negativePrompt, style}]`,
     },
     {
       title: 'Generate Images',
-      description: 'Generate images for each scene using approved prompts. Shows credit estimate first.',
+      description: 'Generate images for each scene using Nano Banana 2 with style references. Shows credit estimate first.',
       gate: 'approval' as const,
       config: JSON.stringify({
         instructions: `Using the approved image prompts, generate images for each scene using generate_image.
-Before starting, calculate the total credit cost and present it to the user for approval.
+
+Use these settings for every call:
+- modelId: "nano-banana-2" (100 credits per image)
+- image_urls: include style reference images from the earlier step (if any were provided)
+
+Before starting, calculate the total credit cost:
+- Number of scenes × 100 credits per image
+- Present total and get user confirmation
+
 Save each image to the workspace under media/originals/.
-Track which scene each image belongs to.`,
-        model: 'flux-pro',
+Track which scene each image belongs to.
+
+If the user wants to fix text or make edits to any generated image, use edit_image with modelId "firered-image-edit" (150 credits per edit).`,
+        model: 'nano-banana-2',
+        editModel: 'firered-image-edit',
         outputVariable: 'generatedImages',
       }),
     },
@@ -161,14 +194,19 @@ Present credit estimate before generating.`,
     },
     {
       title: 'AI Video (Optional)',
-      description: 'Optionally generate AI video clips for hero scenes using Kling 3.0 or Wan 2.6.',
+      description: 'Optionally generate AI video clips for hero scenes using Kling 3.0.',
       gate: 'approval' as const,
       config: JSON.stringify({
         instructions: `Optional step: generate AI video clips for select hero scenes.
+
+Use generate_video with modelId "kling-3.0" (3000 credits per clip).
+
 Present the user with scenes that would benefit from motion (hero shots, transitions, product demos).
-Each AI video clip costs 3000 credits — show total estimate.
+Show total credit estimate (number of clips × 3000 credits) and get confirmation.
 The user can skip this step entirely if they prefer static images with motion graphics.
-Use the selected model (Kling 3.0 for premium quality, Wan 2.6 for budget).
+
+For image-to-video mode, pass the scene's generated image as imageUrl to create smooth motion from the still frame.
+
 Save clips to media/originals/.`,
         model: 'kling-3.0',
         outputVariable: 'videoClips',

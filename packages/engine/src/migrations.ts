@@ -1586,6 +1586,23 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 36,
+    name: 'add_nano_banana_2',
+    async up(db: Db) {
+      await db.run(
+        `INSERT INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (model_id) DO NOTHING`,
+        ['nano-banana-2', 100, 'image', 5, 5, 5,
+          'Pro-quality image gen at Flash speed — excellent text rendering, character consistency, native 4K',
+          'Fast creative director',
+          '["Pro-quality at half the price","Best-in-class text rendering","Character consistency","Native 4K","Fast (5-10s)"]',
+          '["Slightly less refined than Pro on complex scenes"]',
+          '2026-02-26', 85],
+      )
+    },
+  },
 ]
 
 /**

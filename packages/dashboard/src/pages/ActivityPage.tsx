@@ -19,6 +19,16 @@ const EVENT_CONFIG: Record<string, { icon: string; color: string; bg: string }> 
   workflow_run_failed:    { icon: 'error',         color: 'text-red-600',    bg: 'bg-red-50' },
   workflow_run_canceled:  { icon: 'cancel',        color: 'text-gray-600',   bg: 'bg-gray-100' },
   workflow_step_approved: { icon: 'verified_user', color: 'text-amber-600',  bg: 'bg-amber-50' },
+  file_written:           { icon: 'description',   color: 'text-blue-600',   bg: 'bg-blue-50' },
+  file_renamed:           { icon: 'drive_file_rename_outline', color: 'text-blue-600', bg: 'bg-blue-50' },
+  file_moved:             { icon: 'drive_file_move', color: 'text-blue-600',  bg: 'bg-blue-50' },
+  file_deleted:           { icon: 'delete_sweep',   color: 'text-red-600',    bg: 'bg-red-50' },
+  task_created:           { icon: 'add_task',        color: 'text-green-600',  bg: 'bg-green-50' },
+  task_updated:           { icon: 'edit_note',       color: 'text-blue-600',   bg: 'bg-blue-50' },
+  table_created:          { icon: 'table_chart',     color: 'text-green-600',  bg: 'bg-green-50' },
+  row_added:              { icon: 'playlist_add',    color: 'text-green-600',  bg: 'bg-green-50' },
+  row_updated:            { icon: 'edit_square',     color: 'text-blue-600',   bg: 'bg-blue-50' },
+  message_sent:           { icon: 'chat',            color: 'text-purple-600', bg: 'bg-purple-50' },
 }
 
 const EVENT_LABELS: Record<string, string> = {
@@ -37,6 +47,16 @@ const EVENT_LABELS: Record<string, string> = {
   workflow_run_failed: 'Workflow Run Failed',
   workflow_run_canceled: 'Workflow Run Canceled',
   workflow_step_approved: 'Step Approved',
+  file_written: 'File Written',
+  file_renamed: 'File Renamed',
+  file_moved: 'File Moved',
+  file_deleted: 'File Deletion Requested',
+  task_created: 'Task Created',
+  task_updated: 'Task Updated',
+  table_created: 'Table Created',
+  row_added: 'Row Added',
+  row_updated: 'Row Updated',
+  message_sent: 'Message Sent',
 }
 
 function formatTime(iso: string): string {

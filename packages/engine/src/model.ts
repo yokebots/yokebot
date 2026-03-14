@@ -205,6 +205,14 @@ export const MODEL_CATALOG: LogicalModel[] = [
     category: 'image',
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/nano-banana-pro', priority: 1 }],
   },
+  {
+    id: 'nano-banana-2',
+    name: 'Nano Banana 2',
+    description: 'Pro-quality image gen at Flash speed — excellent text rendering, character consistency, native 4K',
+    type: 'image',
+    category: 'image',
+    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/nano-banana-2', priority: 1 }],
+  },
 
   {
     id: 'flux-2-klein',

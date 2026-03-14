@@ -169,6 +169,7 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   add_source_of_record_row: 'data',
   update_source_of_record: 'data',
   generate_image: 'media',
+  edit_image: 'media',
   generate_video: 'media',
   render_video: 'media',
   generate_3d: 'media',
@@ -241,6 +242,7 @@ const TOOL_LABELS: Record<string, string> = {
   vault_report_session_expired: 'Reporting expired session',
   list_available_skills: 'Checking available skills',
   generate_image: 'Generating image',
+  edit_image: 'Editing image',
   generate_video: 'Generating video',
   generate_3d: 'Generating 3D model',
   render_video: 'Rendering video',
@@ -422,10 +424,18 @@ function getBuiltinTools(): ToolDef[] {
     }, ['content']),
 
     // Media generation
-    toolDef('generate_image', 'Generate an image using AI. Returns the URL of the generated image. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
+    toolDef('generate_image', 'Generate an image using AI. Returns the URL of the generated image. Supports style reference images — when image_urls are provided, the model uses its edit endpoint to generate a new image that matches the style/content of the references. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
       prompt: { type: 'string', description: 'Text description of the image to generate' },
-      modelId: { type: 'string', description: 'Image model to use. Options (cheapest first): "flux-2-klein" (50 credits, fast/cheap), "qwen-image-2.0" (150 credits, good quality), "seedream-4.5" (175 credits, solid mid-tier), "flux-2-dev" (50 credits, LoRA support), "seedream-5.0-lite" (150 credits, web search), "nano-banana-pro" (600 credits, premium 4K). NO DEFAULT — you must choose or ask the human.' },
+      modelId: { type: 'string', description: 'Image model to use. Options (cheapest first): "flux-2-klein" (50 credits, fast/cheap), "nano-banana-2" (100 credits, excellent text rendering, fast), "qwen-image-2.0" (150 credits, good quality + text), "seedream-4.5" (175 credits, solid mid-tier), "flux-2-dev" (50 credits, LoRA support), "seedream-5.0-lite" (150 credits, web search), "nano-banana-pro" (200 credits, premium 4K). NO DEFAULT — you must choose or ask the human.' },
+      image_urls: { type: 'array', description: 'Optional array of up to 6 image URLs to use as style references. When provided, the model generates a new image matching the style/content of these references. Uses the model\'s edit endpoint (e.g. nano-banana-2/edit).', items: { type: 'string' } },
+      aspect_ratio: { type: 'string', description: 'Aspect ratio for the generated image. Options: "1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "9:21". Default: "1:1".' },
     }, ['prompt', 'modelId']),
+
+    toolDef('edit_image', 'Edit an existing image using AI instruction-based editing. Use for: text correction, style transfer, object removal/addition, color changes. Default model: firered-image-edit (150 credits).', {
+      prompt: { type: 'string', description: 'Editing instruction — what to change about the image (e.g. "Change the headline text to Say Hello", "Remove the background", "Make it warmer tones")' },
+      image_urls: { type: 'array', description: 'Array of image URLs to edit (typically 1 source image)', items: { type: 'string' } },
+      modelId: { type: 'string', description: 'Image editing model. Options: "firered-image-edit" (150 credits, instruction-based editing). Default: firered-image-edit.' },
+    }, ['prompt', 'image_urls']),
 
     toolDef('generate_video', 'Generate a SHORT AI video clip from a text prompt using AI models (Wan, Kling). For programmatic/animated videos with code, use render_video instead. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one. Supports image-to-video with imageUrl for frame continuation.', {
       prompt: { type: 'string', description: 'Text description of the video to generate' },
@@ -586,7 +596,10 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         return `CSV imported as data table "${tableName}" (id: ${tableId})`
       }
       const result = await writeFile(ctx.db, ctx.teamId, filePath, content, ctx.agentId, ctx.currentTaskId)
-      if (result.success) ctx.onFileWritten?.(ctx.teamId, filePath)
+      if (result.success) {
+        ctx.onFileWritten?.(ctx.teamId, filePath)
+        await logActivity(ctx.db, 'file_written', ctx.agentId, `Wrote file: ${filePath}`, undefined, ctx.teamId)
+      }
       return result.success ? `File written: ${filePath}` : `Error: ${result.error}`
     }
 
@@ -602,6 +615,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const newPath = args.newPath as string
       if (!oldPath || !newPath) return 'Error: Both oldPath and newPath are required.'
       const result = await renameFile(ctx.db, ctx.teamId, oldPath, newPath)
+      if (result.success) await logActivity(ctx.db, 'file_renamed', ctx.agentId, `Renamed file: ${oldPath} → ${newPath}`, undefined, ctx.teamId)
       return result.success ? `Renamed: ${oldPath} → ${newPath}` : `Error: ${result.error}`
     }
 
@@ -611,6 +625,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const fileName = filePath.split('/').pop() ?? filePath
       const newPath = destFolder ? `${destFolder}/${fileName}` : fileName
       const result = await renameFile(ctx.db, ctx.teamId, filePath, newPath)
+      if (result.success) await logActivity(ctx.db, 'file_moved', ctx.agentId, `Moved file: ${filePath} → ${newPath}`, undefined, ctx.teamId)
       return result.success ? `Moved: ${filePath} → ${newPath}` : `Error: ${result.error}`
     }
 
@@ -624,6 +639,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         `Delete file "${filePath}". Reason: ${reason}`,
         'high',
       )
+      await logActivity(ctx.db, 'file_deleted', ctx.agentId, `Requested file deletion: ${filePath}`, undefined, ctx.teamId)
       return `Deletion request submitted for approval (approval id: ${deleteApproval.id}). File "${filePath}" will be deleted once a human approves.`
     }
 
@@ -671,6 +687,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         parts.push(`Status: ${task.status}`)
         await sendMessage(ctx.db, thread.id, 'agent', ctx.agentId, parts.join('\n'))
       } catch { /* thread creation is best-effort */ }
+      await logActivity(ctx.db, 'task_created', ctx.agentId, `Created task: ${task.title}`, undefined, ctx.teamId)
       return `Task created: "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${appliedTags.length ? `, tags: ${appliedTags.join(', ')}` : ''})`
     }
 
@@ -711,6 +728,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           await onTaskCompleted(ctx.db, task.id)
         } catch { /* best-effort */ }
       }
+      await logActivity(ctx.db, 'task_updated', ctx.agentId, `Updated task: ${args.taskId as string}`, undefined, ctx.teamId)
       return `Task updated: "${task.title}" (status: ${task.status}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${task.assignedAgentId ? `, assigned: ${task.assignedAgentId}` : ''})`
     }
 
@@ -795,6 +813,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         } else {
           // Valid non-DM channel — send normally
           const msg = await sendMessage(ctx.db, channelId, 'agent', ctx.agentId, content)
+          await logActivity(ctx.db, 'message_sent', ctx.agentId, `Sent message to chat`, undefined, ctx.teamId)
           return `Message sent (id: ${msg.id})`
         }
       }
@@ -811,6 +830,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       }
       const fallback = bestChannel || groupChannels[0] || await createChannel(ctx.db, ctx.teamId, 'general', 'group')
       const msg = await sendMessage(ctx.db, fallback.id, 'agent', ctx.agentId, content)
+      await logActivity(ctx.db, 'message_sent', ctx.agentId, `Sent message to ${fallback.name || 'chat'}`, undefined, ctx.teamId)
       return `Message sent to #${fallback.name} (id: ${msg.id}). Note: Direct messages are not allowed — use group channels or task threads instead.`
     }
 
@@ -842,6 +862,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       }
       // Grant the creating agent read+write permission
       await setSorPermission(ctx.db, ctx.agentId, newTable.id, true, true)
+      await logActivity(ctx.db, 'table_created', ctx.agentId, `Created data table: ${tableName}`, undefined, ctx.teamId)
       return `Created data table "${tableName}" with ${columns.length} columns: ${columns.map(c => c.name).join(', ')}. You now have read/write access.`
     }
 
@@ -876,6 +897,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           await advanceWorkflow(ctx.db, run.id)
         }
       } catch { /* best-effort */ }
+      await logActivity(ctx.db, 'row_added', ctx.agentId, `Added row to table: ${table.name}`, undefined, ctx.teamId)
       return `Row added to "${table.name}" (id: ${newRow.id}): ${JSON.stringify(newRow.data)}`
     }
 
@@ -888,24 +910,35 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (!writePerm || !writePerm.canWrite) return `Access denied: you do not have write permission on table "${table.name}".`
       const row = await updateSorRow(ctx.db, args.rowId as string, args.data as Record<string, unknown>)
       if (!row) return `Row not found: ${args.rowId as string}`
+      await logActivity(ctx.db, 'row_updated', ctx.agentId, `Updated row in table: ${table.name}`, undefined, ctx.teamId)
       return `Row updated: ${JSON.stringify(row.data)}`
     }
 
     // ---- Media Generation ----
     case 'generate_image': {
       const modelId = args.modelId as string
-      if (!modelId) return 'Error: modelId is required. Ask the human which model to use. Options: flux-2-klein (50 credits), qwen-image-2.0 (150 credits), seedream-4.5 (175 credits), flux-2-dev (50 credits), seedream-5.0-lite (150 credits), nano-banana-pro (600 credits, premium).'
+      if (!modelId) return 'Error: modelId is required. Ask the human which model to use. Options: flux-2-klein (50 credits), nano-banana-2 (100 credits, great text), qwen-image-2.0 (150 credits), seedream-4.5 (175 credits), flux-2-dev (50 credits), seedream-5.0-lite (150 credits), nano-banana-pro (200 credits, premium).'
       const logical = getLogicalModel(modelId)
       if (!logical || logical.type !== 'image') return `Unknown image model: ${modelId}`
-      const falModelId = logical.backends[0]?.providerModelId
+      let falModelId = logical.backends[0]?.providerModelId
       if (!falModelId) return `No backend configured for model: ${modelId}`
+
+      // When image_urls are provided, use the edit endpoint for style-referenced generation
+      const imageUrls = args.image_urls as string[] | undefined
+      if (imageUrls?.length) {
+        falModelId = `${falModelId}/edit`
+      }
+
       if (HOSTED_MODE) {
         const cost = await getModelCreditCost(ctx.db, modelId)
         const { success, balance } = await deductCredits(ctx.db, ctx.teamId, cost || 10, 'media_debit', `Image generation: ${(args.prompt as string).slice(0, 80)}`)
         if (!success) return `Insufficient credits. Image generation costs ${cost} credits but your team has ${balance}. Purchase more credits in Settings → Billing.`
       }
       try {
-        const result = await falGenerate(ctx.db, falModelId, { prompt: args.prompt as string })
+        const falInput: Record<string, unknown> = { prompt: args.prompt as string }
+        if (imageUrls?.length) falInput.image_urls = imageUrls
+        if (args.aspect_ratio) falInput.aspect_ratio = args.aspect_ratio as string
+        const result = await falGenerate(ctx.db, falModelId, falInput)
         const image = result.images?.[0]
         if (!image) return 'Image generation completed but no image was returned.'
 
@@ -924,6 +957,44 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         return JSON.stringify({ type: 'image', url: workspacePath, width: image.width, height: image.height })
       } catch (err) {
         return `Image generation failed: ${(err as Error).message}`
+      }
+    }
+
+    case 'edit_image': {
+      const modelId = (args.modelId as string) || 'firered-image-edit'
+      const imageUrls = args.image_urls as string[]
+      if (!imageUrls?.length) return 'Error: image_urls is required — provide at least one image URL to edit.'
+      const logical = getLogicalModel(modelId)
+      if (!logical || logical.type !== 'image') return `Unknown image model: ${modelId}`
+      const falModelId = logical.backends[0]?.providerModelId
+      if (!falModelId) return `No backend configured for model: ${modelId}`
+      if (HOSTED_MODE) {
+        const cost = await getModelCreditCost(ctx.db, modelId)
+        const { success, balance } = await deductCredits(ctx.db, ctx.teamId, cost || 10, 'media_debit', `Image editing: ${(args.prompt as string).slice(0, 80)}`)
+        if (!success) return `Insufficient credits. Image editing costs ${cost} credits but your team has ${balance}. Purchase more credits in Settings → Billing.`
+      }
+      try {
+        const result = await falGenerate(ctx.db, falModelId, {
+          prompt: args.prompt as string,
+          image_urls: imageUrls,
+        })
+        const image = result.images?.[0]
+        if (!image) return 'Image editing completed but no image was returned.'
+
+        const ext = image.content_type?.split('/')?.[1] ?? 'png'
+        const slug = (args.prompt as string).slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_')
+        const filename = `edited_${slug}.${ext}`
+        const workspacePath = await downloadAndSave(ctx.db, ctx.teamId, 'images', image.url, filename)
+        const attachment: ChatAttachment = {
+          type: 'image', url: workspacePath, filename,
+          mimeType: guessMimeType(filename), width: image.width, height: image.height,
+        }
+        const dmChannel = await getDmChannel(ctx.db, ctx.agentId, ctx.teamId)
+        await sendMessage(ctx.db, dmChannel.id, 'agent', ctx.agentId, `Edited image: ${(args.prompt as string).slice(0, 80)}`, undefined, ctx.teamId, [attachment])
+        await logActivity(ctx.db, 'media_generated', ctx.agentId, `Edited image: ${(args.prompt as string).slice(0, 80)}`, undefined, ctx.teamId)
+        return JSON.stringify({ type: 'image', url: workspacePath, width: image.width, height: image.height })
+      } catch (err) {
+        return `Image editing failed: ${(err as Error).message}`
       }
     }
 
@@ -1318,7 +1389,16 @@ Before creating ANY file, you MUST:
 
 **One file per topic.** If your task produces a deliverable that overlaps with an existing file, update that file. Never create parallel versions, drafts, or copies.
 
+**Prefer existing directories.** Before creating a new folder, check what directories already exist using list_files. Place files in the most relevant existing directory. Only create a new directory when no existing one fits AND you expect multiple files in that category.
+
 **Structured data belongs in Data Tables, NOT files.** When you need to store structured/tabular data (leads, contacts, inventory, metrics, etc.), use \`create_source_of_record\` to make a Data Table with typed columns — then add rows with \`add_source_of_record_row\`. NEVER create CSV, JSON, or other flat files for structured data. Data Tables are searchable, sortable, and visible in the dashboard.
+
+**Data Table Organization — CRITICAL:**
+- Before creating a new Data Table, ALWAYS use \`query_source_of_record\` to check what tables already exist.
+- If a table with a similar purpose already exists (e.g. "Leads", "Prospects", "Contacts" are all the same concept), add your data to the EXISTING table. Do NOT create a parallel table.
+- Use consistent column names across rows. If the existing table has columns like "Name", "Email", "Company", always use those exact column names — never create variant columns like "Full Name", "Email Address", "Organization" for the same data.
+- Standard CRM table names: "Contacts" for prospects/leads/contacts, "Companies" for company/org data, "Deals" for pipeline/opportunities. Always prefer these canonical names.
+- If you need columns the existing table doesn't have, add data to the closest matching columns and put extra info in a "Notes" column — do NOT create a new table just for different columns.
 
 **Content quality rules:**
 - Always include a Sources section at the bottom with links to references, data sources, or tools used
