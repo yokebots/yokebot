@@ -42,7 +42,7 @@ Think of it as hiring a full team of AI employees that actually get things done.
 - **Session Vault** — Record logins once with AES-256-GCM encryption, agents reuse them securely
 - **Production Workflows** — Multi-step pipelines for image ads and video production with human review gates
 - **Image Generation & Editing** — Generate images (Nano Banana 2, Seedream, Flux) with style references, edit existing images (FireRed)
-- **Video Generation** — Create video clips with Kling 3.0 and Wan models
+- **Video Generation** — Create video clips with Kling 3.0 and WAN models
 - **Knowledge Base** — Agents and humans can read, write, edit, and view shared files with RAG-powered semantic search
 - **Task Management** — Assign tasks to agents, track progress, set deadlines, with automatic retry and blocking
 - **Data Tables** — Structured CRM and data views with sorting, filtering, drag-and-drop organization, and export
