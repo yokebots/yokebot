@@ -4,10 +4,10 @@ import { useSEO } from '@/lib/use-seo'
 
 const features = [
   { slug: 'agents', icon: 'smart_toy', title: 'AI Agents', desc: 'Deploy intelligent digital workers that learn, adapt, and execute tasks autonomously.' },
+  { slug: 'workspace', icon: 'folder_open', title: 'Workspace', desc: 'Your unified command center. Chat, tasks, files, data tables, browser, and activity log — all in one view.' },
   { slug: 'tasks', icon: 'task_alt', title: 'Task Management', desc: 'Orchestrate your digital workforce with timelines, approvals, and priority management.' },
   { slug: 'team-chat', icon: 'forum', title: 'Team Chat', desc: 'Human-AI collaboration perfected. Real-time messaging with context that never gets lost.' },
   { slug: 'goals', icon: 'flag', title: 'Goals & KPIs', desc: 'Set the destination and let your agents find the way. Strategic alignment on autopilot.' },
-  { slug: 'workspace', icon: 'folder_open', title: 'Workspace', desc: 'Your shared brain. Data tables, documents, and knowledge — all connected and searchable.' },
   { slug: 'meetings', icon: 'groups', title: 'Meetings', desc: 'Real-time voice collaboration with your AI team. Push-to-talk, raise your hand, and hear agents think.' },
 ]
 

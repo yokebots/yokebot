@@ -55,12 +55,17 @@ export const docsSections: Array<{ title: string; icon: string; slugs: string[] 
   {
     title: 'Tasks',
     icon: 'task_alt',
-    slugs: ['tasks', 'tasks/workflows', 'tasks/blocked'],
+    slugs: ['tasks', 'tasks/workflows', 'tasks/production-workflows', 'tasks/blocked'],
   },
   {
     title: 'Media Generation',
     icon: 'movie',
     slugs: ['media', 'media/image', 'media/video', 'media/3d-music'],
+  },
+  {
+    title: 'Browser Automation',
+    icon: 'public',
+    slugs: ['browser', 'browser/session-vault'],
   },
   {
     title: 'Configuration',
@@ -159,10 +164,11 @@ export const docsContent: Record<string, DocEntry> = {
       P({ children: 'The Workspace is where you will spend most of your time. It puts everything on a single screen \u2014 team chat, tasks, files, data tables, and agent activity \u2014 so you can manage multiple agents and workstreams at once without switching between pages.' }),
       P({ children: 'The sidebar gives you quick access to supporting areas:' }),
       UL({ children: [
-        LI({ children: 'Workspace \u2014 your unified command center with chat, tasks, files, and data in one view' }),
+        LI({ children: 'Workspace \u2014 your unified command center with chat, tasks, files, data, browser, and activity log in one view' }),
         LI({ children: 'Agents \u2014 create and manage your AI agents' }),
         LI({ children: 'Pre-Built Agents \u2014 browse 40+ ready-made agent templates across business functions' }),
         LI({ children: 'Knowledge Base \u2014 upload documents for RAG-powered agent context' }),
+        LI({ children: 'Activity Log \u2014 audit trail of every agent action, file change, and system event' }),
         LI({ children: 'Settings \u2014 team management, business context, billing, and notifications' }),
       ] }),
 
@@ -486,7 +492,8 @@ After processing each document, post a summary in #data-imports.` }),
         headers: ['Category', 'Examples'],
         rows: [
           ['Search', 'Web search via Tavily or Brave'],
-          ['Media Generation', 'Image (Flux), Video (Kling/Wan), 3D (Hunyuan), Music (ACE-Step), Sound FX (MireloSFX)'],
+          ['Media Generation', 'Image (Nano Banana 2, Seedream, Flux), Image Editing (FireRed), Video (Kling 3.0, Wan), 3D (Hunyuan), Music (ACE-Step), Sound FX (MireloSFX)'],
+          ['Browser', 'Navigate, click, type, screenshot, fill forms, download files, ask-the-human'],
           ['Data', 'System of Record CRUD, Knowledge Base queries, Text Embedding'],
           ['External Tools', 'MCP (Model Context Protocol) integrations'],
           ['Custom', 'Any skill you define in a SKILL.md file'],
@@ -532,8 +539,40 @@ After processing each document, post a summary in #data-imports.` }),
       P({ children: 'Configure your preferred provider by setting the appropriate API key in your environment variables. If both are set, agents can choose between them.' }),
 
       H2({ children: 'Image Generation' }),
-      P({ children: 'Agents can generate images using the Flux model. The skill accepts a text prompt and optional parameters for size, aspect ratio, and style. Generated images are stored and displayed inline in chat messages.' }),
-      CodeBlock({ language: 'text', children: 'Skill: image_generation\nProvider: Flux\nRequired env: FAL_API_KEY\nParameters: prompt (required), width, height, aspect_ratio, num_images' }),
+      P({ children: 'Agents can generate images using multiple models. The default model is Nano Banana 2 — fast, high-quality, and cost-effective. Style references let agents provide up to 6 existing images to guide the visual output.' }),
+      Table({
+        headers: ['Model', 'Strengths', 'Credit Cost'],
+        rows: [
+          ['Nano Banana 2', 'Fast, versatile, supports style references via /edit endpoint.', '100'],
+          ['Seedream 3.0', 'Photorealistic, high detail, great for product imagery.', '100'],
+          ['Flux', 'Artistic styles, creative compositions.', '100'],
+        ],
+      }),
+      CodeBlock({ language: 'text', children: 'Skill: generate_image\nRequired env: FAL_API_KEY\nParameters: prompt (required), aspect_ratio, num_images, image_urls (style refs, up to 6)' }),
+      Tip({ children: 'When image_urls are provided, the model automatically switches to its style-reference mode, using the provided images to guide the visual output while following the text prompt.' }),
+
+      H2({ children: 'Image Editing' }),
+      P({ children: 'The edit_image skill uses the FireRed model to modify existing images based on text instructions. Agents can change backgrounds, swap elements, adjust styles, or composite multiple images together.' }),
+      CodeBlock({ language: 'text', children: 'Skill: edit_image\nProvider: FireRed Image Edit\nRequired env: FAL_API_KEY\nParameters: prompt (required), image_url (required), aspect_ratio\nCredit cost: 150' }),
+
+      H2({ children: 'Browser Automation' }),
+      P({ children: 'Agents have full browser automation capabilities via Playwright. These tools let agents complete any multi-step online task — filling forms, submitting orders, downloading files, navigating dashboards, and more.' }),
+      Table({
+        headers: ['Tool', 'Description'],
+        rows: [
+          ['browser_navigate', 'Navigate to a URL with SSRF protection.'],
+          ['browser_click', 'Click an element by CSS selector or coordinates.'],
+          ['browser_type', 'Type text into a focused input field.'],
+          ['browser_screenshot', 'Capture a screenshot of the current page.'],
+          ['browser_snapshot', 'Get an accessibility snapshot of the page DOM.'],
+          ['browser_fill_form', 'Fill multiple form fields at once.'],
+          ['browser_download_file', 'Download a file and save to workspace.'],
+          ['browser_ask_human', 'Ask the human a question when the agent hits ambiguity.'],
+          ['browser_select_option', 'Select an option from a dropdown.'],
+          ['browser_press_key', 'Press a keyboard key (Enter, Tab, etc.).'],
+        ],
+      }),
+      P({ children: ['Browser tools are covered in detail in the ', A({ href: '/docs/browser', children: 'Browser Automation' }), ' section.'] }),
 
       H2({ children: 'Video Generation' }),
       P({ children: 'YokeBot supports two video generation models:' }),
@@ -923,7 +962,7 @@ export const handler: SkillHandler = async (params) => {
 
       H2({ children: 'Use Cases' }),
       UL({ children: [
-        LI({ children: 'Contact lists with name, email, company, and status fields.' }),
+        LI({ children: 'CRM \u2014 "Contacts", "Companies", "Deals" tables with consistent column names across agents.' }),
         LI({ children: 'Inventory tracking with item, quantity, and location columns.' }),
         LI({ children: 'Project tracking with task, assignee, due date, and priority.' }),
         LI({ children: 'Research data collection \u2014 agents populate rows as they find information.' }),
@@ -934,7 +973,7 @@ export const handler: SkillHandler = async (params) => {
       OL({ children: [
         LI({ children: 'Navigate to Data Tables in the sidebar.' }),
         LI({ children: 'Click "New Table".' }),
-        LI({ children: 'Name the table (e.g., "Leads", "Inventory").' }),
+        LI({ children: 'Name the table (e.g., "Contacts", "Inventory").' }),
         LI({ children: 'Define columns with names, types (text, number, boolean, date), and optional default values.' }),
         LI({ children: 'Click Create.' }),
       ] }),
@@ -953,6 +992,15 @@ export const handler: SkillHandler = async (params) => {
 
       H2({ children: 'Agent Access' }),
       P({ children: 'When editing an agent, you can grant access to specific data tables. An agent with access can perform CRUD (Create, Read, Update, Delete) operations on the table\'s rows during its heartbeat cycle. Access is read-write by default; you can restrict agents to read-only if needed.' }),
+
+      H2({ children: 'Agent Organization' }),
+      P({ children: 'Agents are instructed to stay organized when working with data tables. They follow these rules automatically:' }),
+      UL({ children: [
+        LI({ children: 'Check for existing tables before creating new ones \u2014 agents query the table list and reuse matching tables.' }),
+        LI({ children: 'Use canonical CRM names \u2014 "Contacts" (not "Leads"), "Companies", "Deals" \u2014 with consistent column naming across agents.' }),
+        LI({ children: 'Prefer adding rows to existing tables over creating duplicate tables with slightly different schemas.' }),
+      ] }),
+      Tip({ children: 'If multiple agents are working on related data (e.g., sales prospecting + outreach), they will naturally converge on the same "Contacts" table, keeping your data unified.' }),
 
       H2({ children: 'CSV Auto-Import' }),
       P({ children: 'When you upload a CSV file (via drag-and-drop or the upload button), it is automatically imported as a new data table. The first row of the CSV becomes the column headers and all subsequent rows are imported as data. The table appears in the Data tab, not the Files panel.' }),
@@ -1121,6 +1169,7 @@ export const handler: SkillHandler = async (params) => {
       H2({ children: 'Related Pages' }),
       UL({ children: [
         LI({ children: A({ href: '/docs/tasks/workflows', children: 'Approval Workflows' }) }),
+        LI({ children: A({ href: '/docs/tasks/production-workflows', children: 'Production Workflows' }) }),
       ] }),
     ],
   },
@@ -1236,8 +1285,9 @@ export const handler: SkillHandler = async (params) => {
       Table({
         headers: ['Type', 'Model(s)'],
         rows: [
-          ['Image', 'Flux'],
-          ['Video', 'Kling, Wan'],
+          ['Image Generation', 'Nano Banana 2, Seedream 3.0, Flux'],
+          ['Image Editing', 'FireRed Image Edit'],
+          ['Video', 'Kling 3.0, Wan'],
           ['3D Model', 'Hunyuan'],
           ['Music', 'ACE-Step'],
           ['Sound FX', 'MireloSFX'],
@@ -1271,50 +1321,65 @@ export const handler: SkillHandler = async (params) => {
 
   'media/image': {
     slug: 'media/image',
-    title: 'Image Generation',
+    title: 'Image Generation & Editing',
     section: 'Media Generation',
-    description: 'Generate images with the Flux model.',
-    keywords: ['image', 'generation', 'flux', 'picture', 'art', 'illustration'],
+    description: 'Generate and edit images with Nano Banana 2, Seedream, Flux, and FireRed.',
+    keywords: ['image', 'generation', 'editing', 'nano banana', 'seedream', 'flux', 'firered', 'style reference', 'picture', 'art'],
     content: () => [
       H2({ children: 'Overview' }),
-      P({ children: 'The image generation skill uses the Flux model to create high-quality images from text prompts. Agents can generate images as part of their task work or in response to user requests in chat.' }),
+      P({ children: 'YokeBot supports multiple image generation models and a dedicated image editing model. Agents choose the best model for the task, or you can specify one explicitly. All models are powered by fal.ai.' }),
 
-      H2({ children: 'Parameters' }),
+      H2({ children: 'Generation Models' }),
+      Table({
+        headers: ['Model', 'Strengths', 'Credit Cost', 'Style Refs'],
+        rows: [
+          ['Nano Banana 2', 'Fast, versatile, great default choice. Supports style references.', '100', 'Yes (up to 6)'],
+          ['Seedream 3.0', 'Photorealistic, high detail, product imagery, portraits.', '100', 'No'],
+          ['Flux', 'Artistic styles, creative compositions, illustrations.', '100', 'No'],
+        ],
+      }),
+
+      H2({ children: 'Image Editing (FireRed)' }),
+      P({ children: 'The edit_image tool uses the FireRed Image Edit model to modify existing images based on text instructions. This is a separate tool from generate_image — use it when you need to change an existing image rather than create one from scratch.' }),
+      P({ children: 'Use cases:' }),
+      UL({ children: [
+        LI({ children: 'Change backgrounds ("Replace the background with a mountain landscape")' }),
+        LI({ children: 'Swap elements ("Change the red car to blue")' }),
+        LI({ children: 'Add or remove objects ("Add a coffee cup on the table")' }),
+        LI({ children: 'Style transfer ("Make this photo look like a watercolor painting")' }),
+      ] }),
+      CodeBlock({ language: 'text', children: 'Tool: edit_image\nParameters: prompt (required), image_url (required), aspect_ratio\nCredit cost: 150' }),
+
+      H2({ children: 'Style References' }),
+      P({ children: 'The generate_image tool supports style references via the image_urls parameter. Provide up to 6 existing images, and the model will use them to guide the visual style of the generated output while following your text prompt.' }),
+      P({ children: 'This is different from image editing — style references influence the overall aesthetic (color palette, composition style, visual mood) rather than modifying a specific image.' }),
+      CodeBlock({ language: 'text', children: `@design-agent Generate product photos for our new headphones.
+Use these brand photos as style references for consistent lighting and background.
+[attach 2-3 existing product photos]
+Prompt: "Wireless headphones on a minimalist desk, soft natural lighting"` }),
+
+      H2({ children: 'Parameters (generate_image)' }),
       Table({
         headers: ['Parameter', 'Type', 'Required', 'Default', 'Description'],
         rows: [
           ['prompt', 'string', 'Yes', '\u2014', 'The text description of the image to generate.'],
-          ['width', 'number', 'No', '1024', 'Image width in pixels.'],
-          ['height', 'number', 'No', '1024', 'Image height in pixels.'],
-          ['aspect_ratio', 'string', 'No', '1:1', 'Aspect ratio (e.g., "16:9", "4:3", "1:1"). Overrides width/height.'],
+          ['aspect_ratio', 'string', 'No', '1:1', 'Aspect ratio (e.g., "16:9", "4:3", "9:16", "1:1").'],
           ['num_images', 'number', 'No', '1', 'Number of images to generate (1\u20134).'],
-          ['seed', 'number', 'No', 'random', 'Reproducibility seed. Same seed + prompt = same output.'],
+          ['image_urls', 'string[]', 'No', '\u2014', 'Up to 6 image URLs to use as style references.'],
         ],
       }),
 
       H2({ children: 'Prompting Tips' }),
-      P({ children: 'The quality of generated images depends heavily on the prompt. Here are some tips:' }),
       UL({ children: [
         LI({ children: 'Be descriptive: "A cozy coffee shop interior with warm lighting, wooden tables, and plants hanging from the ceiling" works better than "coffee shop".' }),
         LI({ children: 'Specify style: "digital illustration", "photorealistic", "watercolor painting", "isometric 3D render".' }),
         LI({ children: 'Include composition details: "close-up", "wide angle", "birds eye view", "centered".' }),
         LI({ children: 'Mention lighting: "golden hour", "studio lighting", "dramatic shadows", "soft diffused light".' }),
+        LI({ children: 'For style references, describe what you want while letting the reference images handle the visual style.' }),
       ] }),
-
-      H2({ children: 'Example Usage' }),
-      P({ children: 'In a chat message, you might ask an agent:' }),
-      CodeBlock({ language: 'text', children: `@design-agent Generate a hero image for our landing page.
-It should show a team of diverse professionals collaborating around a futuristic holographic display.
-Style: clean, modern, corporate but not boring. Aspect ratio 16:9.` }),
 
       H2({ children: 'Output' }),
-      P({ children: 'Generated images are posted inline in the chat or task comment. Each image includes:' }),
-      UL({ children: [
-        LI({ children: 'A thumbnail preview.' }),
-        LI({ children: 'The prompt used to generate it.' }),
-        LI({ children: 'A download link for the full-resolution file.' }),
-        LI({ children: 'The seed value (useful for regenerating similar images).' }),
-      ] }),
+      P({ children: 'Generated images are saved to the workspace and posted inline in chat. Each image includes a thumbnail preview, the prompt used, and a download link. Files are automatically organized in the workspace file tree.' }),
 
       H2({ children: 'Batch Generation' }),
       P({ children: 'Agents can generate multiple variants by setting num_images to 2\u20134. This is useful when exploring creative directions. The agent can then present all variants and let a human choose the best one via an approval workflow.' }),
@@ -1331,10 +1396,10 @@ Style: clean, modern, corporate but not boring. Aspect ratio 16:9.` }),
       H2({ children: 'Overview' }),
       P({ children: 'YokeBot supports AI video generation through two models:' }),
       Table({
-        headers: ['Model', 'Strengths', 'Duration'],
+        headers: ['Model', 'Strengths', 'Duration', 'Credit Cost'],
         rows: [
-          ['Kling', 'High visual quality, complex scenes, consistent motion.', 'Up to 10 seconds'],
-          ['Wan', 'Fast generation, good for iterative exploration and simple animations.', 'Up to 5 seconds'],
+          ['Kling 3.0', 'Highest visual quality, complex scenes, consistent motion, cinematic output.', 'Up to 10 seconds', '3,000'],
+          ['Wan', 'Fast generation, good for iterative exploration and simple animations.', 'Up to 5 seconds', '1,000'],
         ],
       }),
 
@@ -1460,7 +1525,8 @@ Use the Kling model for best quality. Aspect ratio 16:9.` }),
       P({ children: 'Use the toggle switches next to each category to enable or disable In-App and Email delivery independently.' }),
 
       H2({ children: 'Per-File Notifications' }),
-      P({ children: 'The Files tab in the workspace shows a badge count for unread file updates. Additionally, individual files that have been updated since you last viewed them show a blue dot indicator next to their name. Opening a file marks it as read. These indicators update in real time via SSE \u2014 you will see the blue dot appear immediately when an agent writes to a file.' }),
+      P({ children: 'The Files tab in the workspace shows a badge count for unread file updates. Additionally, files that have been modified recently (within 24 hours) show an amber dot indicator next to their name, with relative timestamps on hover. Opening a file marks it as read, and you can click the "Mark all read" button to clear all file notifications at once.' }),
+      P({ children: 'These indicators update in real time via SSE \u2014 you will see the amber dot appear immediately when an agent writes to a file. The file tree also supports drag-and-drop organization, so you can move files between directories directly.' }),
 
       H2({ children: 'Unsubscribe' }),
       P({ children: 'Every email from YokeBot includes an unsubscribe link in the footer. Clicking it disables all email notifications for that team. You can re-enable emails at any time from Settings > Notifications.' }),
@@ -2031,6 +2097,211 @@ RateLimit-Reset: 30` }),
   },
 
   // ---------------------------------------------------------------------------
+  // PRODUCTION WORKFLOWS
+  // ---------------------------------------------------------------------------
+  'tasks/production-workflows': {
+    slug: 'tasks/production-workflows',
+    title: 'Production Workflows',
+    section: 'Tasks',
+    description: 'Multi-step workflow pipelines for image ads, video production, and more.',
+    keywords: ['workflow', 'pipeline', 'production', 'image ads', 'video', 'multi-step', 'automation'],
+    content: () => [
+      H2({ children: 'What Are Production Workflows?' }),
+      P({ children: 'Production Workflows are pre-built, multi-step pipelines that chain together agent tools, human review gates, and media generation into end-to-end creative production processes. Unlike approval workflows (which add a single review step), production workflows orchestrate entire projects from brief to final delivery.' }),
+
+      H2({ children: 'Built-in Workflows' }),
+      P({ children: 'YokeBot ships with two production workflows, automatically created for every new team:' }),
+
+      H3({ children: 'Rapid Image Ads (10 steps)' }),
+      P({ children: 'A complete pipeline for creating ad creative from a brief, powered by Nano Banana 2 (generation) and FireRed (editing):' }),
+      OL({ children: [
+        LI({ children: 'Ad Brief \u2014 Define the campaign objective, target audience, and visual direction.' }),
+        LI({ children: 'Upload Style References \u2014 Attach existing brand assets or inspiration images.' }),
+        LI({ children: 'Generate Hero Image \u2014 Agent generates the primary ad visual using style references.' }),
+        LI({ children: 'Review Hero Image \u2014 Human reviews and approves or requests revisions.' }),
+        LI({ children: 'Format Variations \u2014 Agent creates size variants (square, landscape, story).' }),
+        LI({ children: 'Review Variations \u2014 Human reviews all format variants.' }),
+        LI({ children: 'Text Correction \u2014 Agent applies text overlays and adjustments via FireRed editing.' }),
+        LI({ children: 'Final Review \u2014 Human gives final approval on all deliverables.' }),
+        LI({ children: 'Export \u2014 Agent exports all approved assets to workspace files.' }),
+        LI({ children: 'Campaign Notes \u2014 Agent generates a summary with asset list and campaign metadata.' }),
+      ] }),
+
+      H3({ children: 'Video Production Pipeline (14 steps)' }),
+      P({ children: 'A full content-to-video pipeline, powered by Nano Banana 2 (images), FireRed (editing), and Kling 3.0 (video):' }),
+      OL({ children: [
+        LI({ children: 'Content Brief \u2014 Define the video concept, tone, and target length.' }),
+        LI({ children: 'Script Draft \u2014 Agent writes the video script with scene breakdowns.' }),
+        LI({ children: 'Script Review \u2014 Human approves the script or requests changes.' }),
+        LI({ children: 'Upload Style References \u2014 Attach visual references for consistent branding.' }),
+        LI({ children: 'Draft Image Prompts \u2014 Agent creates detailed prompts for each scene.' }),
+        LI({ children: 'Generate Images \u2014 Agent generates scene images with Nano Banana 2 + style refs.' }),
+        LI({ children: 'Image Review \u2014 Human reviews generated scene images.' }),
+        LI({ children: 'Image Editing \u2014 Agent refines images using FireRed based on feedback.' }),
+        LI({ children: 'AI Video \u2014 Agent generates video clips from approved images using Kling 3.0.' }),
+        LI({ children: 'Video Review \u2014 Human reviews video clips.' }),
+        LI({ children: 'Music & SFX \u2014 Agent generates background music and sound effects.' }),
+        LI({ children: 'Audio Review \u2014 Human approves audio tracks.' }),
+        LI({ children: 'Final Assembly \u2014 Agent assembles all assets into the workspace.' }),
+        LI({ children: 'Final Review \u2014 Human gives final sign-off on the complete video project.' }),
+      ] }),
+
+      H2({ children: 'How Workflows Execute' }),
+      P({ children: 'Each workflow step has a type that determines how it runs:' }),
+      Table({
+        headers: ['Step Type', 'Description'],
+        rows: [
+          ['agent_action', 'Agent executes the step autonomously using its tools.'],
+          ['human_review', 'Workflow pauses and waits for human approval before continuing.'],
+          ['human_input', 'Workflow pauses for human to provide input (text, files, selections).'],
+        ],
+      }),
+      P({ children: 'Workflow progress is visible in the Workspace. Each step shows its status (pending, in_progress, completed, or blocked) and any outputs produced.' }),
+
+      H2({ children: 'Creating Custom Workflows' }),
+      P({ children: 'You can create custom workflows from the Workflows page in the dashboard. Define steps, assign step types, and specify which agent tools each step should use. Custom workflows are saved to your team and can be reused across projects.' }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // BROWSER AUTOMATION
+  // ---------------------------------------------------------------------------
+  'browser': {
+    slug: 'browser',
+    title: 'Browser Automation',
+    section: 'Browser Automation',
+    description: 'Agents can browse the web, fill forms, download files, and ask humans for help.',
+    keywords: ['browser', 'automation', 'playwright', 'web', 'browse', 'navigate', 'click', 'form'],
+    content: () => [
+      H2({ children: 'Overview' }),
+      P({ children: 'YokeBot agents have full browser automation capabilities powered by Playwright. Agents can navigate websites, fill forms, click buttons, download files, take screenshots, and complete multi-step online tasks \u2014 all autonomously. When they hit ambiguity, they ask the human team for guidance.' }),
+      P({ children: 'The browser is integrated directly into the Workspace as a tab alongside files, data tables, and the video editor. You can observe agent browsing in real-time or take control of the browser yourself.' }),
+
+      H2({ children: 'Two Modes' }),
+      Table({
+        headers: ['Mode', 'Who Drives', 'Use Case'],
+        rows: [
+          ['Agent Browser', 'Agent drives, human observes.', 'Watch agents complete online tasks autonomously.'],
+          ['Take Control', 'Human drives, agent observes.', 'Record a login, intervene mid-task, or browse manually.'],
+        ],
+      }),
+
+      H2({ children: 'Agent Browser Tools' }),
+      P({ children: 'Agents have access to 10+ browser tools during their heartbeat cycle:' }),
+      Table({
+        headers: ['Tool', 'Description'],
+        rows: [
+          ['browser_navigate', 'Go to a URL. Includes SSRF protection against private IPs and DNS rebinding.'],
+          ['browser_snapshot', 'Get an accessibility snapshot of the current page for understanding page structure.'],
+          ['browser_click', 'Click an element by CSS selector or pixel coordinates.'],
+          ['browser_type', 'Type text into the currently focused input field.'],
+          ['browser_press_key', 'Press a keyboard key (Enter, Tab, Escape, etc.).'],
+          ['browser_select_option', 'Select an option from a dropdown menu.'],
+          ['browser_screenshot', 'Capture a screenshot of the current page state.'],
+          ['browser_fill_form', 'Fill multiple form fields at once from a structured list.'],
+          ['browser_download_file', 'Download a file and save it to the team workspace.'],
+          ['browser_ask_human', 'Ask the human a question with optional multiple-choice answers.'],
+        ],
+      }),
+
+      H2({ children: 'Ask the Human' }),
+      P({ children: 'When an agent encounters ambiguity while browsing \u2014 a form field it cannot fill, a choice it cannot make, a CAPTCHA, or a decision that requires business context \u2014 it calls browser_ask_human. This:' }),
+      OL({ children: [
+        LI({ children: 'Captures a screenshot of the current browser state.' }),
+        LI({ children: 'Creates an approval request with the question, optional answer choices, and context.' }),
+        LI({ children: 'Posts a message in team chat with the screenshot and a link to respond.' }),
+        LI({ children: 'Keeps the browser session open (extended idle timeout) while waiting.' }),
+        LI({ children: 'When the human responds, returns the answer to the agent, which continues browsing.' }),
+      ] }),
+      CodeBlock({ language: 'text', children: `Agent: "Which shipping option should I select?"
+Options: Standard ($5.99), Express ($12.99), Overnight ($24.99)
+Context: "I'm on the checkout page at example.com ordering the widgets you requested."
+[screenshot attached]` }),
+
+      H2({ children: 'Form Filling' }),
+      P({ children: 'The browser_fill_form tool lets agents populate multiple form fields in a single action:' }),
+      CodeBlock({ language: 'json', children: `{
+  "fields": [
+    { "selector": "#name", "value": "Jane Smith" },
+    { "selector": "#email", "value": "jane@example.com" },
+    { "selector": "#company", "value": "Acme Corp" }
+  ],
+  "submit": false
+}` }),
+      P({ children: 'Set submit to true to automatically click the submit button after filling all fields.' }),
+
+      H2({ children: 'Live Viewing' }),
+      P({ children: 'When an agent is actively browsing, you can watch in real-time from the Workspace browser tab. Screenshots are streamed at ~2fps via SSE (Server-Sent Events). From the live view, you can:' }),
+      UL({ children: [
+        LI({ children: 'See exactly what the agent sees in the browser.' }),
+        LI({ children: 'Switch to Take Control mode to intervene or assist.' }),
+        LI({ children: 'Navigate to a different URL using the address bar.' }),
+        LI({ children: 'Save the current login state to the Session Vault.' }),
+      ] }),
+
+      H2({ children: 'Security' }),
+      P({ children: 'Browser sessions are secured with multiple layers:' }),
+      UL({ children: [
+        LI({ children: 'SSRF protection \u2014 dual-stack DNS resolution blocks navigation to private IPs, metadata endpoints, and DNS rebinding domains.' }),
+        LI({ children: 'Session isolation \u2014 each session runs in its own Chromium instance, scoped to a single team.' }),
+        LI({ children: 'Resource limits \u2014 max 2 concurrent sessions per team (~150MB per Chromium instance).' }),
+        LI({ children: 'Auto-cleanup \u2014 10-minute idle timeout and 30-minute maximum duration.' }),
+        LI({ children: 'Role-based access \u2014 only team members and admins can create browser sessions.' }),
+      ] }),
+
+      H2({ children: 'Related Pages' }),
+      UL({ children: [
+        LI({ children: A({ href: '/docs/browser/session-vault', children: 'Session Vault (Saved Logins)' }) }),
+        LI({ children: A({ href: '/docs/skills/built-in', children: 'Built-in Skills Reference' }) }),
+      ] }),
+    ],
+  },
+
+  'browser/session-vault': {
+    slug: 'browser/session-vault',
+    title: 'Session Vault (Saved Logins)',
+    section: 'Browser Automation',
+    description: 'Record and reuse authenticated browser sessions across agents.',
+    keywords: ['vault', 'session', 'login', 'auth', 'cookies', 'saved', 'recording', 'credentials'],
+    content: () => [
+      H2({ children: 'What is the Session Vault?' }),
+      P({ children: 'The Session Vault stores encrypted browser sessions \u2014 cookies, local storage, and authentication state \u2014 so agents can reuse saved logins without needing credentials. Record a login once, and any agent can pick up where you left off.' }),
+
+      H2({ children: 'How It Works' }),
+      OL({ children: [
+        LI({ children: 'Record \u2014 Open a browser session from the Workspace, navigate to a website, and log in manually.' }),
+        LI({ children: 'Save \u2014 Click "Save Login" and give it a label (e.g., "Stripe Dashboard", "LinkedIn").' }),
+        LI({ children: 'Reuse \u2014 When creating a new browser session, select a saved vault session to start already logged in.' }),
+        LI({ children: 'Agent Access \u2014 Agents can load vault sessions to access authenticated services autonomously.' }),
+      ] }),
+
+      H2({ children: 'Security' }),
+      UL({ children: [
+        LI({ children: 'AES-256-GCM encryption \u2014 all stored browser state is encrypted at rest with a team-specific key.' }),
+        LI({ children: 'Audit logging \u2014 every vault access (record, playback, delete) is logged with timestamp, user, and action.' }),
+        LI({ children: 'Team scoping \u2014 vault sessions are accessible only to members of the team that created them.' }),
+        LI({ children: 'No passwords stored \u2014 the vault stores browser cookies and session tokens, not plaintext credentials.' }),
+      ] }),
+
+      H2({ children: 'Managing Vault Sessions' }),
+      P({ children: 'From the Browser section in the Workspace sidebar, you can:' }),
+      UL({ children: [
+        LI({ children: 'View all saved sessions with domain, label, last used date, and use count.' }),
+        LI({ children: 'Delete sessions that are no longer needed.' }),
+        LI({ children: 'Re-record a session if the login has expired.' }),
+      ] }),
+
+      H2({ children: 'Best Practices' }),
+      UL({ children: [
+        LI({ children: 'Use descriptive labels \u2014 "Stripe Dashboard (Finance Team)" is better than "login1".' }),
+        LI({ children: 'Re-record sessions periodically \u2014 cookies and tokens expire, so refresh vault sessions before they go stale.' }),
+        LI({ children: 'Use service accounts when possible \u2014 record logins for dedicated bot/service accounts rather than personal accounts.' }),
+        LI({ children: 'Review the audit log \u2014 check which agents and users are accessing which saved sessions.' }),
+      ] }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
   // KEYBOARD SHORTCUTS
   // ---------------------------------------------------------------------------
   'keyboard-shortcuts': {
@@ -2057,6 +2328,7 @@ RateLimit-Reset: 30` }),
           ['Delete / Backspace', 'Delete the active file (with confirmation)'],
           ['Cmd+C / Ctrl+C', 'Copy file path (when a file row is focused)'],
           ['Right-click', 'Open context menu with Rename, Delete, Copy Path'],
+          ['Drag & Drop', 'Move files between directories by dragging and dropping in the file tree'],
         ],
       }),
 

@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router'
 
 const features = [
   { icon: 'smart_toy', title: 'AI Agents', route: '/features/agents', desc: 'Deploy digital workers that execute tasks autonomously.' },
+  { icon: 'public', title: 'Browser Automation', route: '/features/workspace', desc: 'Agents browse the web, fill forms, and complete tasks autonomously.' },
   { icon: 'task_alt', title: 'Task Management', route: '/features/tasks', desc: 'Timelines, approvals, and priority management.' },
   { icon: 'forum', title: 'Team Chat', route: '/features/team-chat', desc: 'Human-AI collaboration with persistent context.' },
-  { icon: 'flag', title: 'Goals & KPIs', route: '/features/goals', desc: 'Set targets and let agents plan the path.' },
-  { icon: 'folder_open', title: 'Workspace', route: '/features/workspace', desc: 'Data tables, documents, and knowledge — connected.' },
+  { icon: 'folder_open', title: 'Workspace', route: '/features/workspace', desc: 'Chat, tasks, files, data, browser, and activity log — all in one view.' },
   { icon: 'groups', title: 'Meetings', route: '/features/meetings', desc: 'Real-time voice collaboration with your AI team.' },
 ]
 

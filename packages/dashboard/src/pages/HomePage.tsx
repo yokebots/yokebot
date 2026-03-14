@@ -14,14 +14,29 @@ const agentCards = [
 ]
 
 const modelCards = [
-  { icon: 'psychology', color: 'purple', tag: 'Frontier', name: 'DeepSeek V3.2', desc: 'Gold-medal reasoning at budget price. Dual chat+reasoning in one model.', stars: { i: 5, p: 4, s: 5 }, credits: 8 },
+  // LLMs
+  { icon: 'memory', color: 'green', tag: 'Agentic', name: 'Nemotron-3-Super', desc: 'NVIDIA agentic powerhouse. 120B params, 12B active, 1M context. 5x faster tool calling.', stars: { i: 4, p: 5, s: 5 }, credits: 5 },
+  { icon: 'psychology', color: 'purple', tag: 'Frontier', name: 'DeepSeek V3.2', desc: 'Gold-medal reasoning at budget price. Dual chat+reasoning in one model.', stars: { i: 5, p: 4, s: 5 }, credits: 10 },
   { icon: 'hub', color: 'blue', tag: 'Orchestrator', name: 'MiniMax M2.5', desc: 'Excellent task breakdown and workflow orchestration with 1M context.', stars: { i: 4, p: 4, s: 3 }, credits: 25 },
   { icon: 'terminal', color: 'indigo', tag: 'Coding', name: 'Devstral 2 123B', desc: 'Senior-level code architecture. Beats Claude 3.5 on SWE-bench.', stars: { i: 5, p: 4, s: 3 }, credits: 40 },
   { icon: 'bolt', color: 'amber', tag: 'Budget', name: 'Gemma 3 27B', desc: 'Blazing fast for simple repetitive tasks at rock-bottom cost.', stars: { i: 2, p: 2, s: 5 }, credits: 5 },
   { icon: 'smart_toy', color: 'teal', tag: 'Frontier', name: 'GLM-5', desc: '200K context, MIT license, near-Opus benchmarks. Research powerhouse.', stars: { i: 5, p: 5, s: 3 }, credits: 40 },
-  { icon: 'speed', color: 'rose', tag: 'Fast', name: 'Grok 4 Fast', desc: 'Speed demon for real-time high-volume tasks from xAI.', stars: { i: 4, p: 3, s: 5 }, credits: 15 },
-  { icon: 'movie', color: 'rose', tag: 'Video Gen', name: 'Kling 3.0', desc: 'Create high-fidelity 4K 60fps video assets for marketing and social.', stars: { i: 0, p: 4, s: 2 }, credits: 1500 },
-  { icon: 'image', color: 'amber', tag: 'Image Gen', name: 'Nano Banana Pro', desc: 'Premium photorealistic image generation, up to 4K resolution.', stars: { i: 0, p: 5, s: 3 }, credits: 200 },
+{ icon: 'neurology', color: 'purple', tag: 'Ultimate', name: 'Qwen 3.5', desc: 'The ultimate brain for the hardest tasks. 1M context, top-tier reasoning.', stars: { i: 5, p: 5, s: 2 }, credits: 75 },
+  { icon: 'local_fire_department', color: 'amber', tag: 'Frontier', name: 'Llama 4 Maverick', desc: 'Versatile workhorse for creative content and analysis. 1M context window.', stars: { i: 4, p: 4, s: 4 }, credits: 15 },
+  { icon: 'search', color: 'teal', tag: 'Research', name: 'Kimi K2.5', desc: 'Deep thinker for research and long-document analysis.', stars: { i: 5, p: 4, s: 3 }, credits: 50 },
+  // Image Gen
+  { icon: 'image', color: 'amber', tag: 'Image Gen', name: 'Nano Banana 2', desc: 'Pro-quality image gen at flash speed. Excellent text rendering, native 4K.', stars: { i: 0, p: 5, s: 5 }, credits: 100 },
+  { icon: 'image', color: 'amber', tag: 'Image Gen', name: 'Nano Banana Pro', desc: 'Premium photorealistic image generation for brand content, up to 4K.', stars: { i: 0, p: 5, s: 3 }, credits: 200 },
+  { icon: 'image', color: 'green', tag: 'Image Gen', name: 'Seedream 4.5', desc: 'ByteDance mid-tier image gen with solid quality at a fair price.', stars: { i: 0, p: 4, s: 4 }, credits: 175 },
+  { icon: 'auto_fix_high', color: 'rose', tag: 'Image Edit', name: 'FireRed Image Edit', desc: 'Instruction-based image editing — style transfer, object removal, text overlay.', stars: { i: 0, p: 4, s: 3 }, credits: 150 },
+  { icon: 'view_in_ar', color: 'blue', tag: 'Multi-Angle', name: 'Qwen Multi-Angles', desc: 'Render any image from 96 camera angles. Perfect for product photography.', stars: { i: 0, p: 4, s: 3 }, credits: 150 },
+  // Video Gen
+  { icon: 'movie', color: 'rose', tag: 'Video Gen', name: 'Kling 3.0 Pro', desc: 'High-fidelity 5-second video clips with character consistency.', stars: { i: 0, p: 4, s: 2 }, credits: 2500 },
+{ icon: 'movie', color: 'blue', tag: 'Video Gen', name: 'Wan 2.6', desc: 'Open-source video gen with native audio. 15-second clips at budget price.', stars: { i: 0, p: 3, s: 4 }, credits: 2000 },
+  // 3D, Music, SFX
+  { icon: 'view_in_ar', color: 'teal', tag: '3D Gen', name: 'Hunyuan 3D v3.1', desc: 'High-quality 3D model generation with PBR materials from text prompts.', stars: { i: 0, p: 4, s: 2 }, credits: 1300 },
+  { icon: 'music_note', color: 'purple', tag: 'Music Gen', name: 'ACE-Step 1.5', desc: 'Full AI songs with lyrics in any genre. From lo-fi to orchestral.', stars: { i: 0, p: 4, s: 3 }, credits: 100 },
+  { icon: 'graphic_eq', color: 'indigo', tag: 'Sound FX', name: 'Mirelo SFX', desc: 'Premium sound effects and foley. 70% win rate in blind tests.', stars: { i: 0, p: 4, s: 4 }, credits: 120 },
 ]
 
 function StarRow({ stars }: { stars: { i: number; p: number; s: number } }) {
@@ -30,20 +45,20 @@ function StarRow({ stars }: { stars: { i: number; p: number; s: number } }) {
   ))
   return (
     <div className="flex gap-3 text-[10px]">
-      {stars.i > 0 && <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">I</span>{renderStars(stars.i)}</span>}
-      {stars.p > 0 && <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">P</span>{renderStars(stars.p)}</span>}
-      {stars.s > 0 && <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">S</span>{renderStars(stars.s)}</span>}
+      <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">I</span>{renderStars(stars.i)}</span>
+      <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">P</span>{renderStars(stars.p)}</span>
+      <span className="flex items-center gap-0.5"><span className="text-gray-400 mr-0.5">S</span>{renderStars(stars.s)}</span>
     </div>
   )
 }
 
 const faqItems = [
-  { q: 'What is YokeBot?', a: 'YokeBot is an AI agent workforce platform. You create agents, assign them tasks and goals, and they work autonomously on a heartbeat schedule — checking in, taking actions, and reporting back. Think of it as hiring tireless AI employees.' },
+  { q: 'What is YokeBot?', a: 'YokeBot is an AI agent workforce platform. You create agents, assign them tasks, and they work autonomously on a heartbeat schedule — browsing the web, generating media, managing data, and reporting back. Manage everything from one unified workspace. Think of it as hiring tireless AI employees.' },
   { q: 'What are credits?', a: 'Universal credits cover all usage on the platform: LLM heartbeats, media generation (images, video, 3D), and skill execution (web search, email, etc.). Your subscription includes monthly credits, and you can buy additional credit packs that never expire.' },
   { q: 'Can I self-host?', a: 'Yes! YokeBot is open-source (AGPLv3). You can self-host on your own hardware with your own API keys for free forever. The cloud version adds managed hosting, billing, and team features.' },
-  { q: 'What models are available?', a: 'We offer 12+ models ranging from budget (Gemma 3 at 5 credits/heartbeat) to frontier (Qwen 3.5 at 75 credits/heartbeat), plus image, video, and 3D generation models. Each model has star ratings for Intelligence, Power, and Speed to help you choose.' },
-  { q: 'How do agents work?', a: 'Each agent runs on a check-in cycle. Every check-in (configurable from 5 min to 1 hour), the agent reviews its tasks, goals, and messages, then takes autonomous action using its assigned tools and skills. All plans include 24/7 availability — your agents are always on, just like a real team member.' },
-  { q: 'Is my data safe?', a: 'Absolutely. With the self-hosted option, no data ever leaves your servers. On the cloud version, all data is encrypted in transit and at rest, and we never train on your data.' },
+  { q: 'What models are available?', a: 'We offer 12+ LLM models ranging from budget (Gemma 3 at 5 credits) to frontier (Qwen 3.5 at 75 credits), plus image generation (Nano Banana 2, Seedream, Flux), image editing (FireRed), video (Kling 3.0, Wan), 3D (Hunyuan), music (ACE-Step), and sound FX (MireloSFX). Each model has star ratings for Intelligence, Power, and Speed to help you choose.' },
+  { q: 'How do agents work?', a: 'Each agent runs on a heartbeat cycle (5 min to 1 hour). Every check-in, the agent reviews its tasks, messages, and goals, then takes action using its tools — web search, browser automation, media generation, data tables, and more. When an agent hits ambiguity while browsing, it asks you for guidance. All plans include 24/7 availability.' },
+  { q: 'Is my data safe?', a: 'Absolutely. With the self-hosted option, no data ever leaves your servers. On the cloud version, all data is encrypted in transit and at rest. The Session Vault encrypts saved browser logins with AES-256-GCM. We never train on your data.' },
   { q: 'Can I bring my own API keys?', a: 'Yes! BYOK (Bring Your Own Key) skills cost 0 credits — you pay your provider directly. Self-hosted users always use their own keys for everything.' },
 ]
 
@@ -187,9 +202,9 @@ export function HomePage() {
           <div className="mx-auto max-w-7xl px-6 py-12 xl:px-24 2xl:px-48">
             <div className="grid gap-8 md:grid-cols-3">
               {[
-                { icon: 'precision_manufacturing', color: 'text-accent-gold-dim', title: 'Heavy Lifting', desc: 'Offload the grind. Our agents handle 1000s of tasks simultaneously without breaking a sweat.' },
-                { icon: 'bolt', color: 'text-forest-green', title: 'Instant Deployment', desc: 'No complex coding. Choose a pre-built agent, connect your data, and set your workforce loose.' },
-                { icon: 'monitoring', color: 'text-blue-600', title: 'ROI Tracking', desc: 'Monitor performance in real-time. See exactly how much time and money your bots are saving.' },
+                { icon: 'public', color: 'text-accent-gold-dim', title: 'Browser Automation', desc: 'Agents browse the web, fill forms, submit orders, and download files — just like a human employee.' },
+                { icon: 'dashboard', color: 'text-forest-green', title: 'Single Workspace', desc: 'Manage your entire AI workforce from one unified view — chat, tasks, files, data, browser, and activity log.' },
+                { icon: 'account_tree', color: 'text-blue-600', title: 'Production Workflows', desc: 'End-to-end creative pipelines for image ads and video production with human review gates at every step.' },
               ].map((f) => (
                 <div key={f.title} className="flex items-start gap-4">
                   <div className={`rounded-lg border border-gray-200 bg-white p-3 shadow-sm ${f.color}`}>
@@ -210,7 +225,7 @@ export function HomePage() {
           <div className="organic-shader" />
           <div className="relative z-10 mx-auto mb-10 max-w-7xl px-6 text-center">
             <div className="mb-3 inline-flex items-center gap-2">
-              <span className="rounded-full border border-green-100 bg-green-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-forest-green">12+ Models</span>
+              <span className="rounded-full border border-green-100 bg-green-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-forest-green">25+ Models</span>
             </div>
             <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-4xl">The Engine Behind Your Workforce</h2>
             <p className="mx-auto max-w-2xl text-lg text-text-muted">
@@ -258,7 +273,7 @@ export function HomePage() {
                   </div>
                   <h3 className="mb-3 font-display text-2xl font-bold text-text-main">YokeBot Cloud</h3>
                   <p className="mb-2 text-sm font-medium text-forest-green">From $29/mo</p>
-                  <p className="mb-8 flex-grow text-text-muted">The fastest way to scale. Hosted by us, managed for you. Universal credits cover all usage — LLM, media, and skills.</p>
+                  <p className="mb-8 flex-grow text-text-muted">Instant access to 25+ models, 40+ pre-built agents, 100+ native skills, fully autonomous browser automation, and a unified workspace to manage everything. Fully managed &amp; ready to go.</p>
                   <button onClick={goToLogin} className="primary-btn flex w-full items-center justify-center gap-2 rounded-lg bg-forest-green py-3.5 font-bold text-white shadow-md transition-all hover:bg-forest-green-hover hover:shadow-lg">
                     Start Free
                     <span className="material-symbols-outlined text-sm">arrow_forward</span>
@@ -276,7 +291,7 @@ export function HomePage() {
                   </div>
                   <h3 className="mb-3 font-display text-2xl font-bold text-text-muted">YokeBot Open Source</h3>
                   <p className="mb-2 text-sm font-medium text-text-muted">Free forever</p>
-                  <p className="mb-8 flex-grow text-gray-500">Self-host on your own hardware. Full privacy, full control, bring your own API keys. Contribute to the core engine powering the future of work.</p>
+                  <p className="mb-8 flex-grow text-gray-500">For engineers who want to own their stack. Full source code, full privacy, zero vendor lock-in. Self-host the entire platform, bring your own API keys, and customize everything.</p>
                   <a href="https://github.com/yokebots/yokebot" target="_blank" rel="noopener noreferrer" className="flex w-full items-center justify-center gap-2 rounded-lg border border-transparent bg-gray-200 py-3.5 font-bold text-gray-600 transition-all hover:scale-105 hover:bg-gray-300">
                     View on GitHub
                     <span className="material-symbols-outlined text-sm">open_in_new</span>
@@ -470,7 +485,7 @@ export function HomePage() {
               </button>
             </div>
             <p className="mt-4 text-sm text-white/60">
-              Every new hosted account at yokebot.com gets 500 credits free to start.
+              Every new hosted account at yokebot.com gets 1,250 credits free to start.
             </p>
           </div>
         </section>

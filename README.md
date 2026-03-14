@@ -23,7 +23,7 @@
   <a href="https://yokebot.com">Website</a> &middot;
   <a href="https://yokebot.com/docs">Docs</a> &middot;
   <a href="https://discord.gg/kqfFr87KqV">Discord</a> &middot;
-  <a href="https://twitter.com/yokebots">Twitter</a>
+  <a href="https://x.com/yokebots">X</a>
 </p>
 
 ---
@@ -37,15 +37,21 @@ Think of it as hiring a team of AI employees that actually work together, share 
 ## Key Features
 
 - **40+ Pre-Built Agents** — Sales, marketing, engineering, HR, finance, legal, ops, and more — ready to deploy in seconds
+- **Single Workspace View** — Easily manage dozens of specialist agents from one unified workspace
+- **Browser Automation** — Agents browse the web autonomously and take actions just like humans. Fill forms, record data, submit orders, download files, and ask you when they need help
+- **Session Vault** — Record logins once with AES-256-GCM encryption, agents reuse them securely
+- **Production Workflows** — Multi-step pipelines for image ads and video production with human review gates
+- **Image Generation & Editing** — Generate images (Nano Banana 2, Seedream, Flux) with style references, edit existing images (FireRed)
+- **Video Generation** — Create video clips with Kling 3.0 and Wan models
+- **Knowledge Base** — Agents and humans can read, write, edit, and view shared files with RAG-powered semantic search
+- **Task Management** — Assign tasks to agents, track progress, set deadlines, with automatic retry and blocking
+- **Data Tables** — Structured CRM and data views with sorting, filtering, drag-and-drop organization, and export
+- **Activity Log** — Full audit trail of every agent action, file change, and system event
 - **Voice Meetings** — Real-time voice collaboration where agents speak (TTS) and you speak back (STT)
-- **Knowledge Base** — Upload documents and agents use them as context via semantic search
-- **Task Management** — Assign tasks to agents, track progress, set deadlines
-- **Workflows** — Chain agents together into automated multi-step pipelines
-- **Data Tables** — Structured data views with sorting, filtering, and export
-- **API Keys** — Programmatic access to your agents and data
-- **Real-Time Collaboration** — Raise your hand to cut the speaking queue during live meetings
-- **Self-Hosted** — Run the entire platform on your own infrastructure
-- **Bring Your Own Keys** — Use your own LLM API keys or let us handle it
+- **Real-Time Collaboration** — Watch agents work live, raise your hand in meetings, take control of browser sessions
+- **Self-Hosted** — Run the entire platform on your own infrastructure with Docker Compose in minutes
+- **Bring Your Own Keys** — Use your own LLM provider API keys for full control over costs and model selection
+- **API Keys** — Programmatic access to your agents and data with scoped permissions
 
 ## Quick Start (Cloud)
 
@@ -99,6 +105,8 @@ yokebot/
 | Backend | Express 5, TypeScript, Node.js |
 | Database | PostgreSQL 17 + pgvector |
 | Auth | Supabase (Google + GitHub OAuth) |
+| Media | fal.ai (Nano Banana 2, Seedream, Flux, FireRed, Kling 3.0, Wan, Hunyuan, ACE-Step, MireloSFX) |
+| Browser | Playwright (headless Chromium) |
 | Monorepo | pnpm workspaces |
 
 ## API
@@ -140,5 +148,5 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 - [GitHub Discussions](https://github.com/yokebots/yokebot/discussions) — Questions & ideas
 - [Discord](https://discord.gg/kqfFr87KqV) — Chat with the team
-- [Twitter](https://twitter.com/yokebots) — Updates & announcements
+- [X](https://x.com/yokebots) — Updates & announcements
 - [Issues](https://github.com/yokebots/yokebot/issues) — Bug reports & feature requests
