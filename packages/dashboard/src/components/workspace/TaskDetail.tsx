@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { PanelHeader } from './PanelHeader'
 import { MessageBubble } from './ThreadView'
+import { MentionInput } from '@/components/MentionInput'
 import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 import { useAgentProgress } from '@/hooks/useAgentProgress'
 import TagManager from '@/components/TagManager'
@@ -26,6 +27,7 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
   const [linkedFiles, setLinkedFiles] = useState<Array<{ path: string; name: string; size: number }>>([])
   const [actionLoading, setActionLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
+  const [completions, setCompletions] = useState<engine.MentionCompletionData | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Live tool streaming: show agent progress for this task
@@ -51,6 +53,11 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
   }, [taskId])
 
   useEffect(() => { loadAll() }, [loadAll])
+
+  // Fetch mention completions for the reply input
+  useEffect(() => {
+    engine.getMentionCompletions().then(setCompletions).catch(() => {})
+  }, [])
 
   const updateField = async (field: string, value: string) => {
     try {
@@ -354,25 +361,16 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
         </div>
       </div>
 
-      {/* Reply input */}
+      {/* Reply input — MentionInput with @mention support */}
       <div className="px-3 py-2 border-t border-border-subtle shrink-0">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
-            placeholder="Reply to task thread..."
-            className="flex-1 rounded-lg border border-border-subtle px-2.5 py-1.5 text-xs focus:border-forest-green focus:outline-none"
-          />
-          <button
-            onClick={sendReply}
-            disabled={!replyText.trim() || sending}
-            className="rounded-lg bg-forest-green px-3 py-1.5 text-xs text-white hover:bg-forest-green/90 disabled:opacity-50"
-          >
-            Send
-          </button>
-        </div>
+        <MentionInput
+          value={replyText}
+          onChange={setReplyText}
+          onSubmit={sendReply}
+          placeholder="Reply to task thread... (@mention an agent)"
+          completions={completions}
+          disabled={sending}
+        />
       </div>
     </div>
   )

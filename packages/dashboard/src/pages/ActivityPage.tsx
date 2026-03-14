@@ -194,7 +194,25 @@ export function ActivityPage() {
             // Determine if this entry can navigate somewhere
             const canNavigate = entry.agentId && ['file_written', 'file_renamed', 'file_moved', 'task_created', 'task_updated', 'table_created', 'row_added', 'row_updated', 'message_sent'].includes(entry.eventType)
             const handleClick = () => {
-              if (canNavigate) navigate('/workspace')
+              if (!canNavigate) return
+              // For file events, extract file path and pass as query param so workspace opens it
+              if (['file_written', 'file_renamed', 'file_moved'].includes(entry.eventType)) {
+                const match = entry.description.match(/(?:Wrote|Renamed|Moved) file: (.+)/)
+                if (match) {
+                  navigate(`/workspace?file=${encodeURIComponent(match[1])}`)
+                  return
+                }
+              }
+              // For task events, pass task ID if available
+              if (['task_created', 'task_updated'].includes(entry.eventType)) {
+                let taskIdMatch: string | null = null
+                try { taskIdMatch = entry.details ? JSON.parse(entry.details)?.taskId : null } catch { /* ignore */ }
+                if (taskIdMatch) {
+                  navigate(`/workspace?task=${encodeURIComponent(taskIdMatch)}`)
+                  return
+                }
+              }
+              navigate('/workspace')
             }
             return (
               <div

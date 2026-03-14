@@ -95,22 +95,36 @@ export function ActivityDropdown() {
             {entries.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-text-muted">No activity yet</div>
             ) : (
-              entries.map(entry => (
-                <div
-                  key={entry.id}
-                  className="flex items-start gap-2.5 px-4 py-2.5 hover:bg-light-surface-alt transition-colors border-b border-border-subtle/50 last:border-0"
-                >
-                  <span className="material-symbols-outlined text-[16px] text-text-muted mt-0.5 shrink-0">
-                    {EVENT_ICONS[entry.eventType] ?? 'circle'}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-text-main leading-relaxed">{sanitizeActivityDescription(entry.description)}</p>
-                    <p className="text-[10px] text-text-muted mt-0.5">
-                      {formatRelativeTime(entry.createdAt)}
-                    </p>
+              entries.map(entry => {
+                const isFileEvent = ['file_written', 'file_renamed', 'file_moved'].includes(entry.eventType)
+                const handleEntryClick = () => {
+                  if (isFileEvent) {
+                    const match = entry.description.match(/(?:Wrote|Renamed|Moved) file: (.+)/)
+                    if (match) {
+                      navigate(`/workspace?file=${encodeURIComponent(match[1])}`)
+                      setOpen(false)
+                      return
+                    }
+                  }
+                }
+                return (
+                  <div
+                    key={entry.id}
+                    onClick={handleEntryClick}
+                    className={`flex items-start gap-2.5 px-4 py-2.5 hover:bg-light-surface-alt transition-colors border-b border-border-subtle/50 last:border-0 ${isFileEvent ? 'cursor-pointer' : ''}`}
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-text-muted mt-0.5 shrink-0">
+                      {EVENT_ICONS[entry.eventType] ?? 'circle'}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-text-main leading-relaxed">{sanitizeActivityDescription(entry.description)}</p>
+                      <p className="text-[10px] text-text-muted mt-0.5">
+                        {formatRelativeTime(entry.createdAt)}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
 

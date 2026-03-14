@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router'
 import { ResizablePanel } from '@/components/workspace/ResizablePanel'
 import { FilesPanel } from '@/components/workspace/FilesPanel'
 import { ContextPane } from '@/components/workspace/ContextPane'
@@ -45,6 +46,7 @@ type MobileTab = typeof MOBILE_TABS[number]
 export function WorkspacePage() {
   const isMobile = useIsMobile()
   const { activeTeam } = useTeam()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [mobileTab, setMobileTab] = useState<MobileTab>('Chat')
 
   // Viewer tabs state
@@ -122,6 +124,23 @@ export function WorkspacePage() {
       return [...prev, tab]
     })
   }, [])
+
+  // Open file/task from URL search params (e.g. from activity log clicks)
+  useEffect(() => {
+    const filePath = searchParams.get('file')
+    const taskId = searchParams.get('task')
+    if (filePath) {
+      const name = filePath.split('/').pop() ?? filePath
+      const ext = name.split('.').pop()?.toLowerCase() ?? ''
+      const iconMap: Record<string, string> = { pdf: 'picture_as_pdf', png: 'image', jpg: 'image', jpeg: 'image', csv: 'table_chart' }
+      addViewerTab({ id: `file:${filePath}`, type: 'file', label: name, icon: iconMap[ext] ?? 'description', resourceId: filePath })
+      setSearchParams({}, { replace: true }) // clear param so it doesn't re-open on re-render
+    }
+    if (taskId) {
+      setSelectedTaskId(taskId)
+      setSearchParams({}, { replace: true })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- run once on mount
 
   const closeViewerTab = useCallback((tabId: string) => {
     setViewerTabs(prev => {
