@@ -728,7 +728,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           await onTaskCompleted(ctx.db, task.id)
         } catch { /* best-effort */ }
       }
-      await logActivity(ctx.db, 'task_updated', ctx.agentId, `Updated task: ${args.taskId as string}`, undefined, ctx.teamId)
+      await logActivity(ctx.db, 'task_updated', ctx.agentId, `Updated task: ${task.title}`, undefined, ctx.teamId)
       return `Task updated: "${task.title}" (status: ${task.status}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${task.assignedAgentId ? `, assigned: ${task.assignedAgentId}` : ''})`
     }
 

@@ -20,6 +20,18 @@ const EVENT_ICONS: Record<string, string> = {
   workflow_completed: 'done_all',
 }
 
+function sanitizeActivityDescription(text: string): string {
+  let clean = text
+  clean = clean.replace(/<[｜|]DSML[｜|][^>]*>/g, '')
+  clean = clean.replace(/<\/?(?:function_calls|invoke|parameter|tool_call|tool_result)[^>]*>/g, '')
+  clean = clean.replace(/<[^>]*(?:name=|string=|type=)[^>]*>/g, '')
+  clean = clean.replace(/\[([a-z_]+)\][\s\S]*?\[\/\1\]/g, '')
+  clean = clean.replace(/\[\/?[a-z_]+\]/g, '')
+  clean = clean.replace(/\n{2,}/g, ' ').trim()
+  if (!clean || clean.length < 3) clean = '(action completed)'
+  return clean
+}
+
 export function ActivityDropdown() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -92,7 +104,7 @@ export function ActivityDropdown() {
                     {EVENT_ICONS[entry.eventType] ?? 'circle'}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-text-main leading-relaxed">{entry.description}</p>
+                    <p className="text-xs text-text-main leading-relaxed">{sanitizeActivityDescription(entry.description)}</p>
                     <p className="text-[10px] text-text-muted mt-0.5">
                       {formatRelativeTime(entry.createdAt)}
                     </p>

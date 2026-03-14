@@ -91,6 +91,21 @@ export function WorkspacePage() {
     engine.getUnreadTaskIds().then(res => setUnreadTaskIds(new Set(res.taskIds))).catch(() => {})
   })
 
+  const handleMarkFileRead = useCallback((path: string) => {
+    engine.markFileRead(path).catch(() => {})
+    setUnreadFileIds(prev => {
+      const next = new Set(prev)
+      next.delete(path)
+      return next
+    })
+  }, [])
+
+  const handleMarkAllFilesRead = useCallback(() => {
+    // Mark each unread file as read on the server
+    unreadFileIds.forEach(path => engine.markFileRead(path).catch(() => {}))
+    setUnreadFileIds(new Set())
+  }, [unreadFileIds])
+
   const saveSplitRatio = useCallback((ratio: number) => {
     setSplitRatio(ratio)
     localStorage.setItem('workspace-split-ratio', String(ratio))
@@ -170,7 +185,7 @@ export function WorkspacePage() {
         {/* Active panel */}
         <div className="flex-1 overflow-hidden">
           {mobileTab === 'Files' && (
-            <FilesPanel workspace={workspaceState} unreadFileIds={unreadFileIds} />
+            <FilesPanel workspace={workspaceState} unreadFileIds={unreadFileIds} onMarkFileRead={handleMarkFileRead} onMarkAllFilesRead={handleMarkAllFilesRead} />
           )}
           {mobileTab === 'Chat' && (
             <TeamChat
@@ -201,7 +216,7 @@ export function WorkspacePage() {
         side="left"
         className="border-r border-border-subtle bg-light-surface overflow-hidden flex flex-col"
       >
-        <FilesPanel workspace={workspaceState} unreadFileIds={unreadFileIds} />
+        <FilesPanel workspace={workspaceState} unreadFileIds={unreadFileIds} onMarkFileRead={handleMarkFileRead} onMarkAllFilesRead={handleMarkAllFilesRead} />
       </ResizablePanel>
 
       {/* Center: Context Pane (viewer tabs + team chat) */}

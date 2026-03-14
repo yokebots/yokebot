@@ -27,6 +27,8 @@ interface TreeNode {
 interface FilesPanelProps {
   workspace: WorkspaceState
   unreadFileIds?: Set<string>
+  onMarkFileRead?: (path: string) => void
+  onMarkAllFilesRead?: () => void
 }
 
 /** Build a tree from flat file paths */
@@ -83,7 +85,7 @@ function buildTree(files: FlatFile[]): TreeNode[] {
   return root
 }
 
-export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
+export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAllFilesRead }: FilesPanelProps) {
   const [activePanel, setActivePanel] = useState<'files' | 'data'>('files')
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => {
@@ -307,6 +309,10 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
       resourceId: path,
     }
     workspace.addViewerTab(tab)
+    // Mark file as read when opened
+    if (unreadFileIds?.has(path)) {
+      onMarkFileRead?.(path)
+    }
   }
 
   const openTable = (table: engine.SorTable) => {
@@ -512,9 +518,20 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
           <span className="material-symbols-outlined text-[14px]">folder_open</span>
           Files
           {unreadFileIds && unreadFileIds.size > 0 && activePanel === 'files' && (
-            <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-forest-green px-1 text-[9px] font-bold text-white">
-              {unreadFileIds.size}
-            </span>
+            <>
+              <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-forest-green px-1 text-[9px] font-bold text-white">
+                {unreadFileIds.size}
+              </span>
+              {onMarkAllFilesRead && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onMarkAllFilesRead() }}
+                  className="ml-0.5 flex items-center rounded p-0.5 text-text-muted hover:bg-forest-green/10 hover:text-forest-green"
+                  title="Mark all files as read"
+                >
+                  <span className="material-symbols-outlined text-[12px]">done_all</span>
+                </button>
+              )}
+            </>
           )}
         </button>
         <button

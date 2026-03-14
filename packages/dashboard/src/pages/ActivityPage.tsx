@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router'
 import * as engine from '@/lib/engine'
 import type { ActivityLogEntry, EngineAgent } from '@/lib/engine'
 import { useRealtimeEvent } from '@/lib/use-realtime'
@@ -59,6 +60,27 @@ const EVENT_LABELS: Record<string, string> = {
   message_sent: 'Message Sent',
 }
 
+/**
+ * Sanitize activity descriptions — strip tool-call syntax that leaks from model outputs.
+ */
+function sanitizeDescription(text: string): string {
+  let clean = text
+  // Strip <｜DSML｜...> tags (DeepSeek tool syntax)
+  clean = clean.replace(/<[｜|]DSML[｜|][^>]*>/g, '')
+  // Strip XML-like tool tags
+  clean = clean.replace(/<\/?(?:function_calls|invoke|parameter|tool_call|tool_result)[^>]*>/g, '')
+  // Strip tags with name= or string= attributes
+  clean = clean.replace(/<[^>]*(?:name=|string=|type=)[^>]*>/g, '')
+  // Strip [tag]...[/tag] blocks
+  clean = clean.replace(/\[([a-z_]+)\][\s\S]*?\[\/\1\]/g, '')
+  clean = clean.replace(/\[\/?[a-z_]+\]/g, '')
+  // Clean up whitespace
+  clean = clean.replace(/\n{2,}/g, ' ').trim()
+  // If nothing meaningful remains, show a generic description
+  if (!clean || clean.length < 3) clean = '(action completed)'
+  return clean
+}
+
 function formatTime(iso: string): string {
   const d = new Date(iso)
   const now = new Date()
@@ -72,6 +94,7 @@ function formatTime(iso: string): string {
 }
 
 export function ActivityPage() {
+  const navigate = useNavigate()
   const [entries, setEntries] = useState<ActivityLogEntry[]>([])
   const [agents, setAgents] = useState<EngineAgent[]>([])
   const [filterAgent, setFilterAgent] = useState('')
@@ -168,8 +191,17 @@ export function ActivityPage() {
         <div className="space-y-1">
           {entries.map((entry) => {
             const config = EVENT_CONFIG[entry.eventType] ?? { icon: 'info', color: 'text-gray-600', bg: 'bg-gray-100' }
+            // Determine if this entry can navigate somewhere
+            const canNavigate = entry.agentId && ['file_written', 'file_renamed', 'file_moved', 'task_created', 'task_updated', 'table_created', 'row_added', 'row_updated', 'message_sent'].includes(entry.eventType)
+            const handleClick = () => {
+              if (canNavigate) navigate('/workspace')
+            }
             return (
-              <div key={entry.id} className="flex items-start gap-3 rounded-lg border border-border-subtle bg-white px-4 py-3">
+              <div
+                key={entry.id}
+                onClick={handleClick}
+                className={`flex items-start gap-3 rounded-lg border border-border-subtle bg-white px-4 py-3 ${canNavigate ? 'cursor-pointer hover:border-forest-green/30 hover:bg-forest-green/5 transition-colors' : ''}`}
+              >
                 <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${config.bg} ${config.color}`}>
                   <span className="material-symbols-outlined text-[18px]">{config.icon}</span>
                 </div>
@@ -181,7 +213,7 @@ export function ActivityPage() {
                     </span>
                     <span className="ml-auto text-xs text-text-muted">{formatTime(entry.createdAt)}</span>
                   </div>
-                  <p className="mt-0.5 text-sm text-text-muted line-clamp-2">{entry.description}</p>
+                  <p className="mt-0.5 text-sm text-text-muted line-clamp-2">{sanitizeDescription(entry.description)}</p>
                 </div>
               </div>
             )

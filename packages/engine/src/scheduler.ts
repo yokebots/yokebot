@@ -55,6 +55,12 @@ function stripToolSyntax(text: string): string {
   cleaned = cleaned.replace(/\[think\][\s\S]*?\[\/think\]/g, '')
   // Remove raw JSON tool-call arrays that weak models emit as text (e.g. [{"name":"think","parameters":{...}}])
   cleaned = cleaned.replace(/\[\s*\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"parameters"\s*:\s*\{[\s\S]*?\}\s*\}\s*\]/g, '')
+  // Remove <｜DSML｜...> style XML/function-call syntax that some models (DeepSeek etc.) emit as text
+  cleaned = cleaned.replace(/<[｜|]DSML[｜|][^>]*>/g, '')
+  // Remove generic XML-like tool call tags: <function_calls>, <invoke>, <parameter>, etc.
+  cleaned = cleaned.replace(/<\/?(?:function_calls|invoke|parameter|tool_call|tool_result)[^>]*>/g, '')
+  // Remove any remaining <...> tags that look like tool syntax (name="...", string="true", etc.)
+  cleaned = cleaned.replace(/<[^>]*(?:name=|string=|type=)[^>]*>/g, '')
   // Clean up excessive whitespace left behind
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim()
   return cleaned
