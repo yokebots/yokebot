@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { MentionCompletionData } from '@/lib/engine'
+import { filterCommands, type SlashCommand } from '@/lib/slash-commands'
 import data from '@emoji-mart/data'
 import Picker from '@emoji-mart/react'
 
@@ -43,9 +44,13 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
   const [gifQuery, setGifQuery] = useState('')
   const [gifResults, setGifResults] = useState<Array<{ id: string; url: string; title: string }>>([])
   const [gifLoading, setGifLoading] = useState(false)
+  const [showSlashDropdown, setShowSlashDropdown] = useState(false)
+  const [slashQuery, setSlashQuery] = useState('')
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const pendingCursorRef = useRef<number | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const slashDropdownRef = useRef<HTMLDivElement>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
   const gifPickerRef = useRef<HTMLDivElement>(null)
   const gifSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -93,6 +98,9 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
     ? allOptions.filter((opt) => opt.label.toLowerCase().includes(mentionQuery.toLowerCase()))
     : allOptions
 
+  // Slash command filtering
+  const filteredSlashCommands = filterCommands(slashQuery)
+
   // Clamp selected index
   useEffect(() => {
     if (selectedIndex >= filteredOptions.length) {
@@ -100,12 +108,20 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
     }
   }, [filteredOptions.length, selectedIndex])
 
+  // Clamp slash selected index
+  useEffect(() => {
+    if (slashSelectedIndex >= filteredSlashCommands.length) {
+      setSlashSelectedIndex(Math.max(0, filteredSlashCommands.length - 1))
+    }
+  }, [filteredSlashCommands.length, slashSelectedIndex])
+
   // Scroll selected item into view
   useEffect(() => {
-    if (!dropdownRef.current) return
-    const selected = dropdownRef.current.querySelector('[data-selected="true"]')
+    const ref = showSlashDropdown ? slashDropdownRef.current : dropdownRef.current
+    if (!ref) return
+    const selected = ref.querySelector('[data-selected="true"]')
     if (selected) selected.scrollIntoView({ block: 'nearest' })
-  }, [selectedIndex])
+  }, [selectedIndex, slashSelectedIndex, showSlashDropdown])
 
   // Restore cursor after mention insertion
   useEffect(() => {
@@ -117,6 +133,21 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
       pendingCursorRef.current = null
     }
   }, [value])
+
+  const selectSlashCommand = useCallback((cmd: SlashCommand) => {
+    onChange(`/${cmd.name} `)
+    setShowSlashDropdown(false)
+    setSlashQuery('')
+    setSlashSelectedIndex(0)
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        const pos = cmd.name.length + 2
+        inputRef.current.selectionStart = pos
+        inputRef.current.selectionEnd = pos
+        inputRef.current.focus()
+      }
+    })
+  }, [onChange])
 
   const insertMention = useCallback((option: MentionOption) => {
     const before = displayText.slice(0, mentionStart)
@@ -148,6 +179,19 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
 
     onChange(resolveText(newDisplayValue))
 
+    // Detect if we're in a slash command context (/ at start of input)
+    if (newDisplayValue.startsWith('/') && !newDisplayValue.includes(' ')) {
+      const query = newDisplayValue.slice(1)
+      setSlashQuery(query)
+      setShowSlashDropdown(true)
+      setSlashSelectedIndex(0)
+      setShowDropdown(false)
+      return
+    } else {
+      setShowSlashDropdown(false)
+      setSlashQuery('')
+    }
+
     // Detect if we're in a mention context
     const textBeforeCursor = newDisplayValue.slice(0, cursorPos)
     const atIndex = textBeforeCursor.lastIndexOf('@')
@@ -174,6 +218,30 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash command dropdown navigation
+    if (showSlashDropdown && filteredSlashCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashSelectedIndex((i) => (i + 1) % filteredSlashCommands.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashSelectedIndex((i) => (i - 1 + filteredSlashCommands.length) % filteredSlashCommands.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        selectSlashCommand(filteredSlashCommands[slashSelectedIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowSlashDropdown(false)
+        return
+      }
+    }
+
     if (showDropdown && filteredOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -385,6 +453,45 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
           <div className="border-t border-border-subtle px-2 py-1">
             <p className="text-[9px] text-text-muted text-right">Powered by GIPHY</p>
           </div>
+        </div>
+      )}
+
+      {/* Slash Command Dropdown */}
+      {showSlashDropdown && filteredSlashCommands.length > 0 && (
+        <div
+          ref={slashDropdownRef}
+          className="absolute bottom-full left-0 right-0 mb-1 max-h-60 overflow-y-auto rounded-xl border border-border-subtle bg-white shadow-lg z-50 py-1"
+        >
+          <div className="px-3 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+            Commands
+          </div>
+          {filteredSlashCommands.map((cmd, i) => (
+            <button
+              key={cmd.name}
+              data-selected={i === slashSelectedIndex}
+              onClick={() => selectSlashCommand(cmd)}
+              className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-sm transition-colors ${
+                i === slashSelectedIndex
+                  ? 'bg-forest-green/10'
+                  : 'hover:bg-light-surface-alt'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px] shrink-0 text-forest-green">terminal</span>
+              <div className="flex-1 min-w-0 text-left">
+                <span className={`font-medium ${i === slashSelectedIndex ? 'text-forest-green' : 'text-text-main'}`}>
+                  /{cmd.name}
+                </span>
+                <span className="ml-2 text-[11px] text-text-muted">{cmd.description}</span>
+              </div>
+              <span className="ml-auto text-[10px] text-text-muted/60 font-mono shrink-0">{cmd.usage}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showSlashDropdown && filteredSlashCommands.length === 0 && slashQuery && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl border border-border-subtle bg-white shadow-lg z-50 px-3 py-3 text-sm text-text-muted">
+          No commands matching "/{slashQuery}"
         </div>
       )}
 

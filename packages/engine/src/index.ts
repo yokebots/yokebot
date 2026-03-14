@@ -2306,6 +2306,12 @@ async function main() {
     } catch (err) {
       console.error('[engine] Failed to seed Rapid Image Ads workflow:', (err as Error).message)
     }
+    try {
+      const { seedSalesCrmWorkflow } = await import('./crm-workflow-seed.ts')
+      await seedSalesCrmWorkflow(db, team.id)
+    } catch (err) {
+      console.error('[engine] Failed to seed Sales CRM workflow:', (err as Error).message)
+    }
 
     await logActivity(db, 'team_created', null, `Team "${name}" created`)
     res.status(201).json(team)

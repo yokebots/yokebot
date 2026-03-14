@@ -9,14 +9,6 @@ interface AgentProgressPanelProps {
   inline?: boolean
 }
 
-const stepIcons: Record<AgentProgressEvent['type'], string> = {
-  thinking: 'psychology',
-  tool_start: 'build',
-  tool_result: 'check_circle',
-  responding: 'chat',
-  idle: 'pause_circle',
-}
-
 const stepColors: Record<AgentProgressEvent['type'], string> = {
   thinking: 'text-blue-500',
   tool_start: 'text-amber-500',
@@ -26,16 +18,17 @@ const stepColors: Record<AgentProgressEvent['type'], string> = {
 }
 
 function StepRow({ step, isLatest }: { step: AgentProgressEvent; isLatest: boolean }) {
-  const [detailExpanded, setDetailExpanded] = useState(false)
+  const [showMore, setShowMore] = useState(false)
   const hasDetail = !!step.detail?.trim()
   const isThinking = step.type === 'thinking'
+  const isToolStart = step.type === 'tool_start'
+  const isToolResult = step.type === 'tool_result'
+  const isResponding = step.type === 'responding'
 
   return (
-    <div className="group">
-      <button
-        onClick={() => hasDetail && setDetailExpanded(!detailExpanded)}
-        className={`flex w-full items-start gap-2 py-1 text-left ${hasDetail ? 'cursor-pointer hover:bg-gray-100/50 -mx-1 px-1 rounded' : 'cursor-default'}`}
-      >
+    <div className="py-0.5">
+      <div className="flex items-start gap-2">
+        {/* Icon only on latest active step */}
         <div className="mt-0.5 shrink-0 flex items-center justify-center w-4 h-4">
           {isLatest && (step.type === 'thinking' || step.type === 'tool_start') ? (
             <span className="relative flex h-4 w-4 items-center justify-center">
@@ -43,47 +36,65 @@ function StepRow({ step, isLatest }: { step: AgentProgressEvent; isLatest: boole
               <span className="relative h-2 w-2 rounded-full bg-accent-green" />
             </span>
           ) : (
-            <span className={`material-symbols-outlined text-[14px] ${stepColors[step.type]}`}>
-              {stepIcons[step.type]}
-            </span>
+            <span className="w-4" />
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className={`text-xs font-medium ${isLatest && step.type !== 'tool_result' ? 'text-text-main' : 'text-text-muted'}`}>
+          <div className="flex items-baseline gap-1.5">
+            {isToolStart && <span className="text-[11px]">🔧</span>}
+            {isToolResult && <span className="text-[11px] text-accent-green">✓</span>}
+            {isResponding && <span className="text-[11px]">💬</span>}
+            <span className={`text-xs ${isLatest && step.type !== 'tool_result' ? 'font-medium text-text-main' : 'text-text-muted'} ${isThinking ? stepColors.thinking : ''}`}>
               {step.label}
             </span>
-            {hasDetail && !detailExpanded && (
-              <span className="material-symbols-outlined text-[12px] text-text-muted/40 opacity-0 group-hover:opacity-100 transition-opacity">
-                expand_more
-              </span>
-            )}
           </div>
-          {/* Show first line of detail as preview when collapsed */}
-          {hasDetail && !detailExpanded && !isThinking && (
+          {/* Thinking detail shown inline */}
+          {hasDetail && isThinking && (
+            <div className="mt-0.5">
+              <p className={`text-[11px] leading-relaxed text-text-muted/70 ${showMore ? '' : 'line-clamp-4'}`}>
+                {step.detail}
+              </p>
+              {step.detail!.length > 300 && (
+                <button
+                  onClick={() => setShowMore(!showMore)}
+                  className="text-[10px] text-blue-500 hover:text-blue-600 mt-0.5"
+                >
+                  {showMore ? 'show less' : 'show more'}
+                </button>
+              )}
+            </div>
+          )}
+          {/* Tool detail shown as compact subtitle */}
+          {hasDetail && !isThinking && (
             <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted/60 truncate">
               {step.detail!.split('\n')[0].slice(0, 120)}
             </p>
           )}
-          {/* Thinking steps: always show preview text */}
-          {hasDetail && !detailExpanded && isThinking && (
-            <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted/70 line-clamp-2">
-              {step.detail!.slice(0, 200)}
-            </p>
-          )}
         </div>
-      </button>
-
-      {/* Expanded detail */}
-      {hasDetail && detailExpanded && (
-        <div className="ml-6 mt-1 mb-2 rounded-md bg-surface-secondary/80 border border-border-subtle px-3 py-2">
-          <p className="text-[11px] font-mono leading-relaxed text-text-secondary whitespace-pre-wrap">
-            {step.detail}
-          </p>
-        </div>
-      )}
+      </div>
     </div>
   )
+}
+
+/** Deduplicate steps: remove empty 'Reasoning...' placeholders when followed by actual reasoning */
+function deduplicateSteps(steps: AgentProgressEvent[]): AgentProgressEvent[] {
+  const meaningful = steps.filter(s => s.type !== 'idle')
+  const result: AgentProgressEvent[] = []
+  for (let i = 0; i < meaningful.length; i++) {
+    const step = meaningful[i]
+    const next = meaningful[i + 1]
+    // Skip 'Reasoning...' placeholder if the next event is thinking with actual content
+    if (
+      step.type === 'thinking' &&
+      (!step.detail || step.detail.trim() === '') &&
+      next?.type === 'thinking' &&
+      next.detail?.trim()
+    ) {
+      continue
+    }
+    result.push(step)
+  }
+  return result
 }
 
 export function AgentProgressPanel({ steps, defaultExpanded = false, inline = false }: AgentProgressPanelProps) {
@@ -114,8 +125,7 @@ export function AgentProgressPanel({ steps, defaultExpanded = false, inline = fa
     )
   }
 
-  // Count meaningful steps (exclude duplicate thinking events)
-  const meaningfulSteps = steps.filter(s => s.type !== 'idle')
+  const meaningfulSteps = deduplicateSteps(steps)
   const toolCalls = steps.filter(s => s.type === 'tool_start').length
 
   return (
@@ -141,11 +151,11 @@ export function AgentProgressPanel({ steps, defaultExpanded = false, inline = fa
         </span>
       </button>
 
-      {/* Expanded reasoning trace — Gemini-style */}
+      {/* Expanded reasoning trace — clean single-thread view */}
       {expanded && (
         <div
           ref={scrollRef}
-          className="max-h-96 overflow-y-auto border-t border-border-subtle px-3 py-2 space-y-0.5"
+          className="max-h-96 overflow-y-auto border-t border-border-subtle px-3 py-2 space-y-0"
         >
           {meaningfulSteps.map((step, idx) => (
             <StepRow key={idx} step={step} isLatest={idx === meaningfulSteps.length - 1} />

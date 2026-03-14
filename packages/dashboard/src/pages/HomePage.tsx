@@ -53,17 +53,17 @@ function StarRow({ stars }: { stars: { i: number; p: number; s: number } }) {
 }
 
 const faqItems = [
-  { q: 'What is YokeBot?', a: 'YokeBot is an AI agent workforce platform. You create agents, assign them tasks, and they work autonomously on a heartbeat schedule — browsing the web, generating media, managing data, and reporting back. Manage everything from one unified workspace. Think of it as hiring tireless AI employees.' },
+  { q: 'What is YokeBot?', a: 'YokeBot is an AI agent workforce platform. You create agents, assign them tasks, and they work autonomously on a heartbeat schedule. They browse the web, generate media, manage data, and report back. Manage everything from one unified workspace. Think of it as hiring tireless AI employees.' },
   { q: 'What are credits?', a: 'Universal credits cover all usage on the platform: LLM heartbeats, media generation (images, video, 3D), and skill execution (web search, email, etc.). Your subscription includes monthly credits, and you can buy additional credit packs that never expire.' },
   { q: 'Can I self-host?', a: 'Yes! YokeBot is open-source (AGPLv3). You can self-host on your own hardware with your own API keys for free forever. The cloud version adds managed hosting, billing, and team features.' },
   { q: 'What models are available?', a: 'We offer 12+ LLM models ranging from budget (Gemma 3 at 5 credits) to frontier (Qwen 3.5 at 75 credits), plus image generation (Nano Banana 2, Seedream, Flux), image editing (FireRed), video (Kling 3.0, Wan), 3D (Hunyuan), music (ACE-Step), and sound FX (MireloSFX). Each model has star ratings for Intelligence, Power, and Speed to help you choose.' },
-  { q: 'How do agents work?', a: 'Each agent runs on a heartbeat cycle (5 min to 1 hour). Every check-in, the agent reviews its tasks, messages, and goals, then takes action using its tools — web search, browser automation, media generation, data tables, and more. When an agent hits ambiguity while browsing, it asks you for guidance. All plans include 24/7 availability.' },
+  { q: 'How do agents work?', a: 'Each agent runs on a heartbeat cycle (5 min to 1 hour). Every check-in, the agent reviews its tasks, messages, and goals, then takes action using its tools: web search, browser automation, media generation, data tables, and more. When an agent hits ambiguity while browsing, it asks you for guidance. All plans include 24/7 availability.' },
   { q: 'Is my data safe?', a: 'Absolutely. With the self-hosted option, no data ever leaves your servers. On the cloud version, all data is encrypted in transit and at rest. The Session Vault encrypts saved browser logins with AES-256-GCM. We never train on your data.' },
-  { q: 'Can I bring my own API keys?', a: 'Yes! BYOK (Bring Your Own Key) skills cost 0 credits — you pay your provider directly. Self-hosted users always use their own keys for everything.' },
+  { q: 'Can I bring my own API keys?', a: 'Yes! BYOK (Bring Your Own Key) skills cost 0 credits. You pay your provider directly. Self-hosted users always use their own keys for everything.' },
 ]
 
 export function HomePage() {
-  useSEO({ title: 'YokeBot — AI Agent Workforce Platform', description: 'Deploy a team of AI agents that plan, collaborate, and execute autonomously. Manage your entire AI workforce from one unified dashboard with chat, tasks, and files side by side.', path: '/' })
+  useSEO({ title: 'YokeBot | AI Agent Workforce Platform', description: 'Deploy a team of AI agents that plan, collaborate, and execute autonomously. Manage your entire AI workforce from one unified dashboard with chat, tasks, and files side by side.', path: '/' })
   const navigate = useNavigate()
   const goToLogin = () => navigate('/login')
   const [openFaq, setOpenFaq] = useState<number | null>(null)
@@ -202,8 +202,8 @@ export function HomePage() {
           <div className="mx-auto max-w-7xl px-6 py-12 xl:px-24 2xl:px-48">
             <div className="grid gap-8 md:grid-cols-3">
               {[
-                { icon: 'public', color: 'text-accent-gold-dim', title: 'Browser Automation', desc: 'Agents browse the web, fill forms, submit orders, and download files — just like a human employee.' },
-                { icon: 'dashboard', color: 'text-forest-green', title: 'Single Workspace', desc: 'Manage your entire AI workforce from one unified view — chat, tasks, files, data, browser, and activity log.' },
+                { icon: 'public', color: 'text-accent-gold-dim', title: 'Browser Automation', desc: 'Agents browse the web, fill forms, submit orders, and download files. Just like a human employee.' },
+                { icon: 'dashboard', color: 'text-forest-green', title: 'Single Workspace', desc: 'Manage your entire AI workforce from one unified view: chat, tasks, files, data, browser, and activity log.' },
                 { icon: 'account_tree', color: 'text-blue-600', title: 'Production Workflows', desc: 'End-to-end creative pipelines for image ads and video production with human review gates at every step.' },
               ].map((f) => (
                 <div key={f.title} className="flex items-start gap-4">
@@ -273,7 +273,7 @@ export function HomePage() {
                   </div>
                   <h3 className="mb-3 font-display text-2xl font-bold text-text-main">YokeBot Cloud</h3>
                   <p className="mb-2 text-sm font-medium text-forest-green">From $29/mo</p>
-                  <p className="mb-8 flex-grow text-text-muted">Instant access to 25+ models, 40+ pre-built agents, 100+ native skills, fully autonomous browser automation, and a unified workspace to manage everything. Fully managed &amp; ready to go.</p>
+                  <p className="mb-8 flex-grow text-text-muted">Instant access to 25+ models, 40+ pre-built agents, 75+ native skills, fully autonomous browser automation, and a unified workspace to manage everything. Fully managed &amp; ready to go.</p>
                   <button onClick={goToLogin} className="primary-btn flex w-full items-center justify-center gap-2 rounded-lg bg-forest-green py-3.5 font-bold text-white shadow-md transition-all hover:bg-forest-green-hover hover:shadow-lg">
                     Start Free
                     <span className="material-symbols-outlined text-sm">arrow_forward</span>
@@ -422,11 +422,11 @@ export function HomePage() {
           <div className="relative mx-auto max-w-4xl text-center">
             <span className="pointer-events-none absolute -left-10 -top-10 -z-10 select-none font-display text-[120px] leading-none text-gray-200 opacity-60">"</span>
             <h2 className="relative z-10 mb-8 font-display text-2xl font-bold leading-tight text-text-main md:text-3xl">
-              "Humans scope their vision. AdvisorBot runs point on OPS. Agent Specialists collab with each other in Team Chat and Task Manager. They create &amp; assign tasks, conduct meetings if needed, set deadlines, and accomplish goals 24/7."
+              "Humans scope their vision. AdvisorBot runs point on OPS. Agent Specialists collab with each other in a unified Workspace. They create &amp; assign tasks, conduct meetings if needed, set deadlines, and accomplish goals 24/7."
             </h2>
             <div className="flex items-center justify-center gap-4">
               <div className="relative h-14 w-14 overflow-hidden rounded-full border-2 border-forest-green bg-gray-100 shadow-lg">
-                <div className="flex h-full w-full items-center justify-center bg-forest-green/10 font-display text-lg font-bold text-forest-green">JW</div>
+                <img src="/james-wolf.jpg" alt="James Wolf" className="h-full w-full object-cover" />
               </div>
               <div className="text-left">
                 <div className="font-display text-lg font-bold text-text-main">James Wolf</div>
@@ -473,7 +473,7 @@ export function HomePage() {
               Meet Your New Team Members
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-white/80">
-              Deploy an entire AI workforce in under 5 minutes. No credit card required — just results.
+              Deploy an entire AI workforce in under 5 minutes. No credit card required, just results.
             </p>
             <div className="mt-8">
               <button

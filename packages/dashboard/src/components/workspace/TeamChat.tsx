@@ -7,6 +7,7 @@ import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 import { MentionInput } from '@/components/MentionInput'
 import { useRealtimeEvent } from '@/lib/use-realtime'
 import { useAuth } from '@/lib/auth'
+import { parseSlashCommand, type CommandContext } from '@/lib/slash-commands'
 import * as engine from '@/lib/engine'
 
 interface TeamChatProps {
@@ -127,9 +128,56 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick }: TeamChatPr
     }
   }, [teamChannelId, messages.length])
 
+  // Get team ID from the first message's channel or from listTeams
+  const teamIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    engine.listTeams().then(teams => {
+      if (teams.length > 0) teamIdRef.current = teams[0].id
+    }).catch(() => {})
+  }, [])
+
+  const addLocalMessage = useCallback((content: string) => {
+    // Handle /clear special case
+    if (content === '__clear__') {
+      setMessages([])
+      return
+    }
+    // Add a local-only system message
+    const localMsg: engine.ChatMessage = {
+      id: Date.now(),
+      channelId: teamChannelId ?? '',
+      senderType: 'system',
+      senderId: 'system',
+      content,
+      attachments: [],
+      audioKey: null,
+      audioDurationMs: null,
+      taskId: null,
+      parentMessageId: null,
+      replyCount: 0,
+      latestReplyAt: null,
+      createdAt: new Date().toISOString(),
+    }
+    setMessages(prev => [...prev, localMsg])
+  }, [teamChannelId])
+
   const sendMessage = async () => {
     const text = messageText.trim()
     if (!text || !teamChannelId || sending) return
+
+    // Intercept slash commands
+    const parsed = parseSlashCommand(text)
+    if (parsed) {
+      setMessageText('')
+      const ctx: CommandContext = {
+        teamId: teamIdRef.current ?? '',
+        channelId: teamChannelId,
+        addLocalMessage,
+      }
+      await parsed.command.execute(parsed.args, ctx)
+      return
+    }
+
     setSending(true)
     try {
       const msg = await engine.sendMessage(teamChannelId, {
