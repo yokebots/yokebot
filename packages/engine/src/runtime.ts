@@ -87,6 +87,61 @@ function trimMessagesToFit(messages: ChatMessage[], maxTokens: number, toolsToke
   return [systemMsg, ...middle, ...tail]
 }
 
+// ---- Observation Masking ----
+// Keep only the last N tool results in full; replace older ones with one-line summaries.
+// Research shows this is 52% cheaper AND improves agent performance.
+const OBSERVATION_WINDOW = 10
+const MASK_SKIP_TOOLS = new Set(['think', 'respond', 'update_task', 'update_scratchpad'])
+
+function maskOldObservations(messages: ChatMessage[]): ChatMessage[] {
+  const toolIndices: number[] = []
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === 'tool') toolIndices.push(i)
+  }
+  if (toolIndices.length <= OBSERVATION_WINDOW) return messages
+
+  const toMask = toolIndices.slice(0, -OBSERVATION_WINDOW)
+  const result = [...messages]
+  for (const idx of toMask) {
+    const msg = result[idx]
+    const content = msg.content ?? ''
+    // Find tool name from preceding assistant message
+    let toolName = 'tool'
+    for (let j = idx - 1; j >= 0; j--) {
+      if (result[j].role === 'assistant' && result[j].tool_calls) {
+        const match = result[j].tool_calls!.find(tc => tc.id === msg.tool_call_id)
+        if (match) { toolName = match.function.name; break }
+      }
+    }
+    if (MASK_SKIP_TOOLS.has(toolName)) continue
+    const preview = content.replace(/\n/g, ' ').slice(0, 100)
+    result[idx] = { ...msg, content: `[Previous: ${toolName} — ${preview}${content.length > 100 ? '...' : ''}]` }
+  }
+  return result
+}
+
+// ---- Tool Result Offloading ----
+// When a tool returns >2KB, save to workspace file and return a reference + preview.
+const OFFLOAD_THRESHOLD = 2000
+const OFFLOAD_SKIP = new Set(['think', 'respond', 'update_task', 'update_scratchpad', 'send_chat_message'])
+
+async function maybeOffloadResult(result: string, toolName: string, ctx: ToolContext): Promise<string> {
+  if (result.length <= OFFLOAD_THRESHOLD) return result
+  if (OFFLOAD_SKIP.has(toolName)) return result
+  if (result.startsWith('Error:') || result.startsWith('⚠️')) return result
+
+  const filePath = `tool-results/${toolName}_${Date.now()}.txt`
+  try {
+    const wr = await writeFile(ctx.db, ctx.teamId, filePath, result, ctx.agentId, ctx.currentTaskId)
+    if (!wr.success) return result
+  } catch {
+    return result // write failed — fall back to full result
+  }
+
+  const preview = result.slice(0, 500)
+  return `Result saved to workspace: ${filePath} (${result.length} chars)\n\nPreview:\n${preview}\n...\n\nUse read_workspace_file to see full result.`
+}
+
 export type ToolCategory = 'core' | 'workspace' | 'tasks' | 'chat' | 'approvals' | 'data' | 'media' | 'browser' | 'workflows' | 'team' | 'skills'
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
@@ -1249,6 +1304,8 @@ Credits are real money. Treat them like a company budget — be smart about spen
 - When you have multiple tasks, work on the highest-priority one first.
 - If a task is blocked or unclear, ask for clarification via the respond tool.
 - If an action could have significant consequences, use request_approval to get human sign-off first.
+- **For complex tasks requiring many steps, break the work into subtasks using add_subtask.** Each subtask gets its own fresh sprint with full context. This is more effective than trying to do everything in one long session.
+- **If you created subtasks, do NOT mark the parent as "done"** until all subtasks are complete. Check their status first.
 - When you need guidance, direction, or collaboration, @mention the relevant agent in a group channel. Do NOT message the human directly unless they specifically asked you something.
 - All your communication should happen in group channels or task threads — never send direct messages proactively.
 - If you're unsure what to do, ask your team lead or AdvisorBot via @mention in a group channel.
@@ -1409,8 +1466,9 @@ export async function runReactLoop(
       }
     }
 
-    // Re-trim before each LLM call (tool results accumulate mid-loop)
-    trimmedMessages = trimMessagesToFit(messages, maxInputTokens, toolsTokens)
+    // Mask old tool results, then re-trim before each LLM call
+    const maskedMessages = maskOldObservations(messages)
+    trimmedMessages = trimMessagesToFit(maskedMessages, maxInputTokens, toolsTokens)
 
     emitProgress('thinking', `Reasoning...`, i + 1)
     let completion: CompletionResponse
@@ -1466,6 +1524,8 @@ export async function runReactLoop(
         } catch (err) {
           result = `Error: ${err instanceof Error ? err.message : 'Tool execution failed'}`
         }
+        // Offload large results to workspace files
+        result = await maybeOffloadResult(result, toolCall.function.name, toolCtx)
         toolCallLog.push({ name: toolCall.function.name, result })
 
         // Broadcast tool_result

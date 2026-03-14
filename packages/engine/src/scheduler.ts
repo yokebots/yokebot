@@ -623,6 +623,8 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string): Promi
     `4. If you're blocked and need human input, use request_approval and explain why.`,
     `5. Post a brief progress update summarizing what you accomplished.`,
     `6. Before finishing your work, use update_scratchpad to save notes about what you tried, what worked/failed, and what to do next time.`,
+    `7. For complex tasks requiring many steps, break the work into subtasks using add_subtask. Each subtask gets its own fresh sprint with full context — this is more effective than trying to do everything in one long session.`,
+    `8. If you created subtasks, do NOT mark the parent as "done" until all subtasks are complete. Check their status first.`,
   ].join('\n')
 }
 
@@ -837,6 +839,84 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           if (result.taskBlocked) continue
           // Task not done yet — continue to next task with remaining budget
           continue
+        }
+
+        // Pick up newly-created subtasks from this sprint (if budget allows)
+        const postSprintBudget = reservedIterations - iterationsUsed
+        if (postSprintBudget >= 4) {
+          const freshTasks = await getAgentAssignedTasks(db, agent.id, agent.teamId)
+          const newTasks = freshTasks.filter(t =>
+            !assignedTasks.some(at => at.id === t.id) &&
+            (t.status === 'todo' || t.status === 'in_progress')
+          )
+          if (newTasks.length > 0) {
+            console.log(`[scheduler] "${agent.name}" — ${newTasks.length} new subtask(s), continuing with ${postSprintBudget} iterations`)
+            for (const task of newTasks) {
+              const remainingBudget = reservedIterations - iterationsUsed
+              if (remainingBudget < 2) break
+
+              const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId)
+              const taskBoosts = detectTaskCategories(task.title, task.description)
+              const runtimeConfig = {
+                maxIterations: remainingBudget,
+                taskFocused: true,
+                currentTaskId: task.id,
+                onFileWritten: broadcastFileWritten,
+                skipCredits: HOSTED_MODE && costPerIteration > 0,
+                extraToolCategories: taskBoosts.length > 0 ? taskBoosts : undefined,
+              }
+
+              const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
+              const result = await runReactLoop(
+                db, agent.id, agent.teamId, taskPrompt, modelConfig, systemPrompt,
+                state.workspaceConfig!, state.skillsDir, runtimeConfig, logicalModelId,
+                taskDmChannel?.id,
+              )
+              iterationsUsed += result.iterations
+
+              if (result.taskCompleted) {
+                await db.run(`UPDATE tasks SET sprint_count = 0, scratchpad = NULL WHERE id = $1`, [task.id])
+              } else {
+                const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
+                await db.run(`UPDATE tasks SET sprint_count = sprint_count + 1, last_sprint_at = ${now} WHERE id = $1`, [task.id])
+              }
+
+              if (result.taskBlocked) {
+                const latestApproval = await db.queryOne<{ id: string }>(
+                  `SELECT id FROM approvals WHERE agent_id = $1 AND team_id = $2 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
+                  [agent.id, agent.teamId],
+                )
+                await blockTask(db, task.id, 'approval_pending', latestApproval?.id)
+              }
+
+              const cleanResponse = result.response ? stripToolSyntax(result.response) : null
+              const isNoOpResponse = !cleanResponse || cleanResponse.includes('[no-op]') || cleanResponse.trim() === 'no-op' || cleanResponse.trim().length === 0
+              const looksLikeJsonDump = cleanResponse && (cleanResponse.trim().startsWith('{') || cleanResponse.trim().startsWith('```')) && cleanResponse.includes('"assessment"')
+
+              try {
+                const thread = await getTaskThread(db, task.id, agent.teamId)
+                if (!isNoOpResponse && !looksLikeJsonDump) {
+                  await sendMessage(db, thread.id, 'agent', agent.id, cleanResponse!, task.id, agent.teamId)
+                }
+              } catch { /* best-effort */ }
+
+              if (!isNoOpResponse && !looksLikeJsonDump) {
+                try {
+                  const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'
+                  const teamSummary = `@[${task.title}](task:${task.id}) — ${statusLabel} (${result.iterations} iterations)${cleanResponse ? `\n${cleanResponse}` : ''}`
+                  const teamChannel = await getTeamChannel(db, agent.teamId)
+                  const existingMsg = await findLatestTaskMessage(db, teamChannel.id, task.id)
+                  const parentId = existingMsg?.id ? Number(existingMsg.id) : undefined
+                  await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, task.id, agent.teamId, undefined, undefined, undefined, parentId)
+                } catch { /* best-effort */ }
+              }
+
+              await logActivity(db, 'task_sprint', agent.id,
+                `Subtask sprint on "${task.title}" — ${result.iterations} iters, ${result.taskCompleted ? 'DONE' : result.taskBlocked ? 'BLOCKED' : 'continuing'}`,
+                undefined, agent.teamId)
+              console.log(`[scheduler] "${agent.name}" sprinted on subtask "${task.title}" — ${result.iterations} iters`)
+            }
+          }
         }
 
         // Release unused reserved credits
