@@ -530,15 +530,21 @@ async function main() {
       }
     }
 
+    // Resolve model config from modelId (or explicit endpoint/name, or default to deepseek-v3.2)
+    const resolvedModelId = body.modelId || 'deepseek-v3.2'
+    let modelConfig = body.modelEndpoint && body.modelName
+      ? { endpoint: body.modelEndpoint, model: body.modelName }
+      : await resolveModelConfig(db, resolvedModelId)
+    if (!modelConfig) {
+      modelConfig = { endpoint: 'ollama', model: 'llama3.2' }
+    }
+
     const agent = await createAgent(db, teamId, {
       name: body.name,
       department: body.department,
       systemPrompt: body.systemPrompt,
-      modelId: body.modelId,
-      modelConfig: {
-        endpoint: body.modelEndpoint ?? 'ollama',
-        model: body.modelName ?? 'llama3.2',
-      },
+      modelId: resolvedModelId,
+      modelConfig,
       proactive: body.proactive,
       heartbeatSeconds: body.heartbeatSeconds,
       templateId,
