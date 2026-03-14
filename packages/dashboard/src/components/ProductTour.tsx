@@ -191,7 +191,7 @@ export function ProductTour({ forceStart, onComplete }: ProductTourProps) {
         />
       </svg>
 
-      {/* Highlight ring + click target — clicking the highlighted element advances the tour */}
+      {/* Highlight ring + click target — clicking the highlighted element navigates and advances */}
       {highlightRect && (
         <div
           className="absolute rounded-lg ring-2 ring-forest-green ring-offset-2 cursor-pointer"
@@ -202,7 +202,13 @@ export function ProductTour({ forceStart, onComplete }: ProductTourProps) {
             height: highlightRect.height + 8,
             zIndex: 10000,
           }}
-          onClick={next}
+          onClick={() => {
+            // Click the actual element underneath so navigation/actions happen
+            const el = document.querySelector(step.target) as HTMLElement | null
+            el?.click()
+            // Small delay to let navigation render before repositioning tooltip
+            setTimeout(next, 300)
+          }}
         />
       )}
 
