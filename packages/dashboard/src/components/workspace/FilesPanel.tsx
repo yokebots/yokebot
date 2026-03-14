@@ -91,6 +91,77 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
     return saved ? new Set(JSON.parse(saved)) : new Set<string>()
   })
   const [search, setSearch] = useState('')
+
+  // Browser sessions state
+  const [browserSessions, setBrowserSessions] = useState<Array<{ id: string; currentUrl: string; mode: string; createdAt: string }>>([])
+  const [browserExpanded, setBrowserExpanded] = useState(true)
+  const [creatingBrowser, setCreatingBrowser] = useState(false)
+  const [vaultSessions, setVaultSessions] = useState<engine.VaultSessionInfo[]>([])
+
+  const loadBrowserSessions = useCallback(async () => {
+    try {
+      const [active, vault] = await Promise.all([
+        engine.listBrowserSessions(),
+        engine.listVaultSessions(),
+      ])
+      setBrowserSessions(active)
+      setVaultSessions(vault)
+    } catch { /* offline */ }
+  }, [])
+
+  useEffect(() => { loadBrowserSessions() }, [loadBrowserSessions])
+  // Refresh browser sessions periodically
+  useEffect(() => {
+    const interval = setInterval(loadBrowserSessions, 10000)
+    return () => clearInterval(interval)
+  }, [loadBrowserSessions])
+
+  const handleNewBrowser = useCallback(async () => {
+    setCreatingBrowser(true)
+    try {
+      const result = await engine.createBrowserSession()
+      workspace.addViewerTab({
+        id: `browser:${result.sessionId}`,
+        type: 'browser',
+        label: 'Browser',
+        icon: 'language',
+        resourceId: result.sessionId,
+      })
+      loadBrowserSessions()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to create browser session')
+    }
+    setCreatingBrowser(false)
+  }, [workspace, loadBrowserSessions])
+
+  const openBrowserSession = useCallback((sessionId: string, url: string) => {
+    const domain = url ? (() => { try { return new URL(url).hostname } catch { return 'Browser' } })() : 'Browser'
+    workspace.addViewerTab({
+      id: `browser:${sessionId}`,
+      type: 'browser',
+      label: domain,
+      icon: 'language',
+      resourceId: sessionId,
+    })
+  }, [workspace])
+
+  const openVaultSession = useCallback(async (vaultSessionId: string, label: string) => {
+    setCreatingBrowser(true)
+    try {
+      const result = await engine.createBrowserSession({ vaultSessionId })
+      workspace.addViewerTab({
+        id: `browser:${result.sessionId}`,
+        type: 'browser',
+        label,
+        icon: 'language',
+        resourceId: result.sessionId,
+      })
+      loadBrowserSessions()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to open session')
+    }
+    setCreatingBrowser(false)
+  }, [workspace, loadBrowserSessions])
   const [allFiles, setAllFiles] = useState<FlatFile[]>([])
 
   // Data tables state
@@ -568,6 +639,67 @@ export function FilesPanel({ workspace, unreadFileIds }: FilesPanelProps) {
             exporting={exporting}
             onExport={handleExportAllTables}
           />
+        )}
+      </div>
+
+      {/* Browser Sessions Section */}
+      <div className="border-t border-border-subtle shrink-0">
+        <button
+          onClick={() => setBrowserExpanded(!browserExpanded)}
+          className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold text-text-muted hover:bg-light-surface-alt transition-colors"
+        >
+          <span className="material-symbols-outlined text-[14px] transition-transform" style={{ transform: browserExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+            chevron_right
+          </span>
+          <span className="material-symbols-outlined text-[14px]">language</span>
+          Browser
+          {browserSessions.length > 0 && (
+            <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-blue-100 px-1 text-[9px] font-bold text-blue-700">
+              {browserSessions.length}
+            </span>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); handleNewBrowser() }}
+            disabled={creatingBrowser}
+            className="ml-auto flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-forest-green hover:bg-forest-green/10 disabled:opacity-40"
+            title="New browser session"
+          >
+            <span className="material-symbols-outlined text-[12px]">add</span>
+          </button>
+        </button>
+        {browserExpanded && (
+          <div className="px-2 pb-2 max-h-40 overflow-y-auto">
+            {browserSessions.length === 0 && vaultSessions.length === 0 && (
+              <p className="px-2 py-2 text-center text-[10px] text-text-muted">No active sessions</p>
+            )}
+            {/* Active sessions */}
+            {browserSessions.map(session => {
+              const domain = (() => { try { return new URL(session.currentUrl).hostname } catch { return 'about:blank' } })()
+              return (
+                <button
+                  key={session.id}
+                  onClick={() => openBrowserSession(session.id, session.currentUrl)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-xs text-text-main hover:bg-light-surface-alt transition-colors"
+                >
+                  <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
+                  <span className="truncate flex-1 text-left">{domain}</span>
+                  <span className="text-[10px] text-text-muted">{session.mode === 'agent_browser' ? 'Agent' : 'Live'}</span>
+                </button>
+              )
+            })}
+            {/* Saved vault sessions */}
+            {vaultSessions.filter(v => v.status === 'active').slice(0, 5).map(vault => (
+              <button
+                key={vault.id}
+                onClick={() => openVaultSession(vault.id, vault.serviceLabel)}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-xs text-text-muted hover:bg-light-surface-alt transition-colors"
+              >
+                <span className="material-symbols-outlined text-[12px]">security</span>
+                <span className="truncate flex-1 text-left">{vault.serviceLabel}</span>
+                <span className="text-[10px]">{vault.domain}</span>
+              </button>
+            ))}
+          </div>
         )}
       </div>
 

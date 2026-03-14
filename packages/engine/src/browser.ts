@@ -226,14 +226,55 @@ export async function restartWithStorageState(agentId: string, storageStatePath:
   await startBrowserSession(agentId, storageStatePath)
 }
 
+// Broadcast callback — set by index.ts to push browser_frame SSE events
+let broadcastFn: ((teamId: string, event: string, data: unknown) => void) | null = null
+
+export function setBrowserBroadcast(fn: (teamId: string, event: string, data: unknown) => void): void {
+  broadcastFn = fn
+}
+
+/**
+ * Capture a screenshot from an agent's active MCP browser session.
+ * Returns base64 PNG or null if no active session.
+ */
+export async function captureAgentScreenshot(agentId: string): Promise<{ screenshot: string; url: string } | null> {
+  const session = sessions.get(agentId)
+  if (!session || session.process.exitCode !== null) return null
+
+  try {
+    const snap = await sendRequest(session, 'tools/call', {
+      name: 'browser_take_screenshot',
+      arguments: {},
+    }) as { content?: Array<{ type: string; data?: string; text?: string }> }
+    const frameData = snap?.content?.find((c) => c.type === 'image')?.data
+    // Try to extract URL from a snapshot call
+    let url = ''
+    try {
+      const navSnap = await sendRequest(session, 'tools/call', {
+        name: 'browser_snapshot',
+        arguments: {},
+      }) as { content?: Array<{ type: string; text?: string }> }
+      const text = navSnap?.content?.find(c => c.type === 'text')?.text ?? ''
+      const urlMatch = text.match(/- url: (https?:\/\/\S+)/)
+      if (urlMatch) url = urlMatch[1]
+    } catch { /* ignore */ }
+    if (frameData) return { screenshot: frameData, url }
+    return null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Execute a browser tool call for an agent.
  * Returns the result string or null if the tool name is not a browser tool.
+ * If teamId is provided, broadcasts a browser_frame SSE event after each action.
  */
 export async function executeBrowserTool(
   agentId: string,
   toolName: string,
   args: Record<string, unknown>,
+  teamId?: string,
 ): Promise<string | null> {
   // Map YokeBot tool names to Playwright MCP tool names
   const toolMap: Record<string, string> = {
@@ -262,6 +303,64 @@ export async function executeBrowserTool(
     session.recording = undefined
     if (frames.length === 0) return 'Recording stopped — no frames were captured.'
     return `Recording stopped. ${frames.length} frame(s) captured to "${saveTo}". Use the knowledge base to view them.`
+  }
+
+  // browser_ask_human — handled by runtime.ts (needs db/approval access), return a marker
+  if (toolName === 'browser_ask_human') {
+    return '__browser_ask_human__'
+  }
+
+  // browser_fill_form — fill multiple fields via MCP click/type
+  if (toolName === 'browser_fill_form') {
+    const fields = args.fields as Array<{ selector: string; value: string }> | undefined
+    if (!fields?.length) return 'No fields to fill.'
+    const session = await getSession(agentId)
+    const results: string[] = []
+    for (const field of fields) {
+      try {
+        // Click the field first
+        await sendRequest(session, 'tools/call', {
+          name: 'browser_click',
+          arguments: { ref: field.selector },
+        })
+        // Clear and type the value
+        await sendRequest(session, 'tools/call', {
+          name: 'browser_type',
+          arguments: { ref: field.selector, text: field.value },
+        })
+        results.push(`✓ ${field.selector}: "${field.value}"`)
+      } catch (err) {
+        results.push(`✗ ${field.selector}: ${(err as Error).message}`)
+      }
+    }
+    if (args.submit) {
+      try {
+        await sendRequest(session, 'tools/call', {
+          name: 'browser_press_key',
+          arguments: { key: 'Enter' },
+        })
+        results.push('✓ Form submitted')
+      } catch (err) {
+        results.push(`✗ Submit failed: ${(err as Error).message}`)
+      }
+    }
+    // Broadcast frame after form fill
+    if (broadcastFn && teamId) {
+      try {
+        const snap = await sendRequest(session, 'tools/call', {
+          name: 'browser_take_screenshot', arguments: {},
+        }) as { content?: Array<{ type: string; data?: string }> }
+        const frameData = snap?.content?.find(c => c.type === 'image')?.data
+        if (frameData) broadcastFn(teamId, 'browser_frame', { agentId, screenshot: frameData, tool: 'browser_fill_form' })
+      } catch { /* silent */ }
+    }
+    return `Form fill results:\n${results.join('\n')}`
+  }
+
+  // browser_download_file — wait for download event (placeholder — MCP doesn't expose download events)
+  if (toolName === 'browser_download_file') {
+    const description = (args.description as string) || 'unknown file'
+    return `Download initiated: "${description}". Note: file downloads via MCP browser are captured automatically. Check the workspace files panel.`
   }
 
   const mcpToolName = toolMap[toolName]
@@ -320,6 +419,20 @@ export async function executeBrowserTool(
         const frameData = snap?.content?.find((c) => c.type === 'image')?.data
         if (frameData) session.recording.frames.push(frameData)
       } catch { /* silent — recording frames are best-effort */ }
+    }
+
+    // Broadcast screenshot for live viewers (best-effort)
+    if (broadcastFn && teamId && toolName !== 'browser_screenshot') {
+      try {
+        const snap = await sendRequest(session, 'tools/call', {
+          name: 'browser_take_screenshot',
+          arguments: {},
+        }) as { content?: Array<{ type: string; data?: string }> }
+        const frameData = snap?.content?.find((c) => c.type === 'image')?.data
+        if (frameData) {
+          broadcastFn(teamId, 'browser_frame', { agentId, screenshot: frameData, tool: toolName })
+        }
+      } catch { /* silent — viewer frames are best-effort */ }
     }
 
     return output || 'Action completed.'

@@ -588,20 +588,27 @@ registerHandler('embed_text', async (args) => {
   return `Generated ${data.data.length} embedding(s), ${dims} dimensions each.\nTokens used: ${data.usage?.total_tokens ?? 'unknown'}\n\nEmbeddings stored in context for similarity operations.`
 })
 
-// ---- Render Video (Remotion — server-side rendering) ----
+// ---- Render Video (Canvas + FFmpeg — lightweight server-side rendering) ----
 registerHandler('render_video', async (args, _creds, ctx) => {
-  const code = args.compositionCode as string
-  if (!code || code.trim().length === 0) return 'Error: compositionCode is required'
+  const scenesRaw = args.scenes
+  if (!scenesRaw) return 'Error: scenes array is required'
 
-  const durationInFrames = (args.durationInFrames as number) || 150
+  let scenes: Array<Record<string, unknown>>
+  try {
+    scenes = typeof scenesRaw === 'string' ? JSON.parse(scenesRaw) : scenesRaw as Array<Record<string, unknown>>
+  } catch {
+    return 'Error: scenes must be a valid JSON array'
+  }
+
+  if (!Array.isArray(scenes) || scenes.length === 0) return 'Error: scenes must be a non-empty array'
+
+  const width = (args.width as number) || 1280
+  const height = (args.height as number) || 720
   const fps = (args.fps as number) || 30
-  const width = (args.width as number) || 1920
-  const height = (args.height as number) || 1080
-  const inputProps = (args.inputProps as Record<string, unknown>) || {}
 
   try {
-    const { renderComposition } = await import('./remotion.js')
-    const result = await renderComposition({ compositionCode: code, durationInFrames, fps, width, height, inputProps })
+    const { renderVideo } = await import('./video-render.js')
+    const result = await renderVideo({ scenes: scenes as any, width, height, fps })
 
     // Save to workspace
     const { writeBinaryFile } = await import('./workspace.js')

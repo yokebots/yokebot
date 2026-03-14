@@ -1470,6 +1470,122 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 35,
+    name: 'add_video_projects',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS video_projects (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            workflow_run_id TEXT REFERENCES workflow_runs(id) ON DELETE SET NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            settings TEXT NOT NULL DEFAULT '{}',
+            created_by TEXT DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_video_projects_team ON video_projects(team_id)`)
+        await db.exec(`ALTER TABLE video_projects ENABLE ROW LEVEL SECURITY`)
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS video_scenes (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES video_projects(id) ON DELETE CASCADE,
+            scene_order INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL DEFAULT '',
+            script_text TEXT DEFAULT '',
+            image_prompt TEXT DEFAULT '',
+            duration_ms INTEGER NOT NULL DEFAULT 5000,
+            transition TEXT DEFAULT 'cut',
+            scene_data TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_video_scenes_project ON video_scenes(project_id)`)
+        await db.exec(`ALTER TABLE video_scenes ENABLE ROW LEVEL SECURITY`)
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS video_assets (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES video_projects(id) ON DELETE CASCADE,
+            scene_id TEXT REFERENCES video_scenes(id) ON DELETE SET NULL,
+            type TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'generated',
+            file_path TEXT NOT NULL,
+            filename TEXT DEFAULT '',
+            duration_ms INTEGER,
+            mime_type TEXT DEFAULT '',
+            metadata TEXT NOT NULL DEFAULT '{}',
+            track TEXT DEFAULT 'main',
+            start_ms INTEGER DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_video_assets_project ON video_assets(project_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_video_assets_scene ON video_assets(scene_id)`)
+        await db.exec(`ALTER TABLE video_assets ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS video_projects (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            workflow_run_id TEXT REFERENCES workflow_runs(id) ON DELETE SET NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            settings TEXT NOT NULL DEFAULT '{}',
+            created_by TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_video_projects_team ON video_projects(team_id)`)
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS video_scenes (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES video_projects(id) ON DELETE CASCADE,
+            scene_order INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL DEFAULT '',
+            script_text TEXT DEFAULT '',
+            image_prompt TEXT DEFAULT '',
+            duration_ms INTEGER NOT NULL DEFAULT 5000,
+            transition TEXT DEFAULT 'cut',
+            scene_data TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_video_scenes_project ON video_scenes(project_id)`)
+
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS video_assets (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES video_projects(id) ON DELETE CASCADE,
+            scene_id TEXT REFERENCES video_scenes(id) ON DELETE SET NULL,
+            type TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'generated',
+            file_path TEXT NOT NULL,
+            filename TEXT DEFAULT '',
+            duration_ms INTEGER,
+            mime_type TEXT DEFAULT '',
+            metadata TEXT NOT NULL DEFAULT '{}',
+            track TEXT DEFAULT 'main',
+            start_ms INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_video_assets_project ON video_assets(project_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_video_assets_scene ON video_assets(scene_id)`)
+      }
+    },
+  },
 ]
 
 /**

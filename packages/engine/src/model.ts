@@ -251,17 +251,9 @@ export const MODEL_CATALOG: LogicalModel[] = [
 
   // ---- Video Generation (via fal.ai) ----
   {
-    id: 'kling-o3',
-    name: 'Kling O3',
-    description: 'Omni video — editing, references, multi-shot + native audio & voice control',
-    type: 'video',
-    category: 'video',
-    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/kling-video/o3/standard/image-to-video', priority: 1 }],
-  },
-  {
     id: 'kling-3.0',
     name: 'Kling 3.0 Pro',
-    description: 'Multi-shot cinematic sequences (up to 6 shots), character consistency',
+    description: 'Multi-shot cinematic sequences (up to 6 shots), character consistency — premium quality',
     type: 'video',
     category: 'video',
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/kling-video/v3.0/pro/text-to-video', priority: 1 }],
@@ -269,18 +261,10 @@ export const MODEL_CATALOG: LogicalModel[] = [
   {
     id: 'wan-2.6',
     name: 'Wan 2.6',
-    description: 'Alibaba open-source video gen — cheapest quality option, 15s clips, native audio',
+    description: 'Alibaba open-source video gen — budget option, 15s clips, native audio',
     type: 'video',
     category: 'video',
     backends: [{ providerId: 'fal', providerModelId: 'fal-ai/wan/v2.6/image-to-video', priority: 1 }],
-  },
-  {
-    id: 'seedance-2.0',
-    name: 'Seedance 2.0',
-    description: 'ByteDance video generation with native audio',
-    type: 'video',
-    category: 'video',
-    backends: [{ providerId: 'fal', providerModelId: 'fal-ai/bytedance/seedance/v2.0/pro/text-to-video', priority: 1 }],
   },
 
   // ---- 3D Generation (via fal.ai) ----

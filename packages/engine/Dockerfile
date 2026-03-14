@@ -3,8 +3,10 @@ FROM node:20-slim AS base
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Install build tools for native deps (better-sqlite3)
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+# Install build tools for native deps (better-sqlite3, canvas)
+RUN apt-get update && apt-get install -y python3 make g++ \
+    libcairo2-dev libjpeg-dev libpango1.0-dev libgif-dev librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -36,9 +38,11 @@ FROM node:20-slim
 RUN corepack enable && corepack prepare pnpm@latest --activate
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
-# Install system deps for browser-use (Chromium) and render-video (FFmpeg)
+# System deps: Chromium (browser-use/Playwright), FFmpeg (video render), Cairo/Pango (node-canvas)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium ffmpeg \
+    libcairo2 libjpeg62-turbo libpango-1.0-0 libpangocairo-1.0-0 \
+    libgif7 librsvg2-2 libfontconfig1 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -58,7 +62,6 @@ ENV YOKEBOT_PORT=3001
 ENV YOKEBOT_SKILLS_DIR=/app/skills
 ENV YOKEBOT_DATA_DIR=/app/data
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-ENV REMOTION_CHROME_EXECUTABLE=/usr/bin/chromium
 
 # Create non-root user and data directory
 RUN groupadd -r yokebot && useradd -r -g yokebot -m yokebot \

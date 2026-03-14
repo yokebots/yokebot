@@ -1485,6 +1485,116 @@ export const approveWorkflowRunStep = (runStepId: string) =>
 export const captureWorkflow = (name: string, taskIds: string[]) =>
   request<Workflow>('/api/workflows/capture', { method: 'POST', body: JSON.stringify({ name, taskIds }) })
 
+// ===== Video Projects =====
+
+export interface VideoProject {
+  id: string
+  teamId: string
+  name: string
+  description: string
+  workflowRunId: string | null
+  status: 'draft' | 'in_progress' | 'completed' | 'archived'
+  settings: string
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VideoScene {
+  id: string
+  projectId: string
+  sceneOrder: number
+  title: string
+  scriptText: string
+  imagePrompt: string
+  durationMs: number
+  transition: string
+  sceneData: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VideoAsset {
+  id: string
+  projectId: string
+  sceneId: string | null
+  type: 'image' | 'video' | 'audio' | 'voiceover' | 'music' | 'sfx'
+  source: 'generated' | 'uploaded' | 'stock'
+  filePath: string
+  filename: string
+  durationMs: number | null
+  mimeType: string
+  metadata: string
+  track: string
+  startMs: number
+  createdAt: string
+}
+
+export interface VideoProjectWithDetails extends VideoProject {
+  scenes: VideoScene[]
+  assets: VideoAsset[]
+}
+
+export const listVideoProjects = (status?: string) => {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  const qs = params.toString()
+  return request<VideoProject[]>(`/api/video-projects${qs ? `?${qs}` : ''}`)
+}
+
+export const createVideoProject = (data: {
+  name: string; description?: string; workflowRunId?: string; settings?: string
+}) =>
+  request<VideoProject>('/api/video-projects', { method: 'POST', body: JSON.stringify(data) })
+
+export const getVideoProject = (id: string) =>
+  request<VideoProjectWithDetails>(`/api/video-projects/${id}`)
+
+export const updateVideoProject = (id: string, data: Record<string, unknown>) =>
+  request<VideoProject>(`/api/video-projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deleteVideoProject = (id: string) =>
+  request<void>(`/api/video-projects/${id}`, { method: 'DELETE' })
+
+export const addVideoScene = (projectId: string, data: { title: string; scriptText?: string; imagePrompt?: string; durationMs?: number; transition?: string; sceneData?: string; sceneOrder?: number }) =>
+  request<VideoScene>(`/api/video-projects/${projectId}/scenes`, { method: 'POST', body: JSON.stringify(data) })
+
+export const updateVideoScene = (projectId: string, sceneId: string, data: Record<string, unknown>) =>
+  request<VideoScene>(`/api/video-projects/${projectId}/scenes/${sceneId}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deleteVideoScene = (projectId: string, sceneId: string) =>
+  request<void>(`/api/video-projects/${projectId}/scenes/${sceneId}`, { method: 'DELETE' })
+
+export const reorderVideoScenes = (projectId: string, sceneIds: string[]) =>
+  request<{ reordered: boolean }>(`/api/video-projects/${projectId}/scenes/reorder`, { method: 'PUT', body: JSON.stringify({ sceneIds }) })
+
+export const addVideoAsset = (projectId: string, data: { type: string; filePath: string; sceneId?: string; source?: string; filename?: string; durationMs?: number; mimeType?: string; metadata?: string; track?: string; startMs?: number }) =>
+  request<VideoAsset>(`/api/video-projects/${projectId}/assets`, { method: 'POST', body: JSON.stringify(data) })
+
+export const updateVideoAsset = (projectId: string, assetId: string, data: Record<string, unknown>) =>
+  request<VideoAsset>(`/api/video-projects/${projectId}/assets/${assetId}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deleteVideoAsset = (projectId: string, assetId: string) =>
+  request<void>(`/api/video-projects/${projectId}/assets/${assetId}`, { method: 'DELETE' })
+
+export const transcribeVideoAsset = (projectId: string, assetId: string) =>
+  request<VideoAsset>(`/api/video-projects/${projectId}/assets/${assetId}/transcribe`, { method: 'POST' })
+
+export const updateTranscription = (projectId: string, assetId: string, data: {
+  segments?: { start: number; end: number; text: string }[];
+  words?: { word: string; start: number; end: number }[];
+  deletedRanges?: { startMs: number; endMs: number }[];
+}) =>
+  request<VideoAsset>(`/api/video-projects/${projectId}/assets/${assetId}/transcription`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const applyTranscriptEdits = (projectId: string, assetId: string, edits: {
+  type: 'delete' | 'split';
+  startMs?: number;
+  endMs?: number;
+  atMs?: number;
+}[]) =>
+  request<VideoAsset>(`/api/video-projects/${projectId}/assets/${assetId}/apply-edits`, { method: 'POST', body: JSON.stringify({ edits }) })
+
 // ===== Server-Sent Events (SSE) — real-time updates =====
 
 export type SseEventType =
@@ -1502,6 +1612,7 @@ export type SseEventType =
   | 'task_completed'
   | 'agent_typing'
   | 'agent_progress'
+  | 'browser_frame'
 
 type SseListener = (data: unknown) => void
 
@@ -1777,4 +1888,41 @@ export async function finishVaultRecording(recordingId: string, label?: string):
 
 export async function cancelVaultRecording(recordingId: string): Promise<{ success: boolean }> {
   return request(`/api/vault/record/${recordingId}/cancel`, { method: 'POST' })
+}
+
+// ===== Browser Sessions (workspace browser panel) =====
+
+export async function createBrowserSession(options?: { vaultSessionId?: string; startUrl?: string }): Promise<{ sessionId: string; screenshot: string; url: string }> {
+  return request('/api/browser-sessions', { method: 'POST', body: JSON.stringify(options ?? {}) })
+}
+
+export async function listBrowserSessions(): Promise<Array<{ id: string; currentUrl: string; mode: string; createdAt: string }>> {
+  return request('/api/browser-sessions')
+}
+
+export async function sendBrowserInteraction(
+  sessionId: string,
+  action: { type: string; x?: number; y?: number; text?: string; key?: string; deltaX?: number; deltaY?: number },
+): Promise<{ screenshot: string; url: string }> {
+  return request(`/api/browser-sessions/${sessionId}/interact`, { method: 'POST', body: JSON.stringify(action) })
+}
+
+export async function navigateBrowser(sessionId: string, url: string): Promise<{ screenshot: string; url: string }> {
+  return request(`/api/browser-sessions/${sessionId}/navigate`, { method: 'POST', body: JSON.stringify({ url }) })
+}
+
+export async function getBrowserScreenshot(sessionId: string): Promise<{ screenshot: string; url: string }> {
+  return request(`/api/browser-sessions/${sessionId}/screenshot`)
+}
+
+export async function closeBrowserSession(sessionId: string): Promise<void> {
+  return request(`/api/browser-sessions/${sessionId}/close`, { method: 'POST' })
+}
+
+export async function saveBrowserToVault(sessionId: string, label: string): Promise<{ session: { id: string; domain: string; serviceLabel: string } }> {
+  return request(`/api/browser-sessions/${sessionId}/save-to-vault`, { method: 'POST', body: JSON.stringify({ label }) })
+}
+
+export async function getAgentBrowserScreenshot(agentId: string): Promise<{ screenshot: string; url: string }> {
+  return request(`/api/agents/${agentId}/browser/screenshot`)
 }

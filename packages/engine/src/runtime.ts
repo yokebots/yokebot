@@ -16,7 +16,8 @@ import { listFiles, readFile, writeFile, renameFile, deleteFile } from './worksp
 import { createTask, listTasks, updateTask } from './tasks.ts'
 import { applyTagsByName } from './tags.ts'
 import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel, broadcastAgentProgress, type AgentProgressEvent } from './chat.ts'
-import { createApproval } from './approval.ts'
+import { createApproval, getApproval } from './approval.ts'
+import { sendMessage as sendChatMsg, getTeamChannel } from './chat.ts'
 import { listSorTables, listSorRows, addSorRow, updateSorRow, getSorTableByName, checkSorPermission, createSorTable, addSorColumn, setSorPermission, importCsvAsTable } from './sor.ts'
 import { getAgentSkills, getSkillTools, loadSkillsFromDir, installSkill } from './skills.ts'
 import { executeSkillHandler } from './skill-handlers.ts'
@@ -189,6 +190,9 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   browser_start_recording: 'browser',
   browser_stop_recording: 'browser',
   browser_close: 'browser',
+  browser_ask_human: 'browser',
+  browser_fill_form: 'browser',
+  browser_download_file: 'browser',
 }
 
 export const ALL_CATEGORIES: ToolCategory[] = ['core', 'workspace', 'tasks', 'chat', 'approvals', 'data', 'media', 'browser', 'workflows', 'team', 'skills']
@@ -251,6 +255,9 @@ const TOOL_LABELS: Record<string, string> = {
   browser_click: 'Interacting with page',
   browser_type: 'Typing on page',
   browser_snapshot: 'Taking screenshot',
+  browser_ask_human: 'Asking human for input',
+  browser_fill_form: 'Filling form',
+  browser_download_file: 'Downloading file',
   query_source_of_record: 'Querying data',
   update_source_of_record: 'Updating data',
   send_email: 'Sending email',
@@ -420,19 +427,24 @@ function getBuiltinTools(): ToolDef[] {
       modelId: { type: 'string', description: 'Image model to use. Options (cheapest first): "flux-2-klein" (50 credits, fast/cheap), "qwen-image-2.0" (150 credits, good quality), "seedream-4.5" (175 credits, solid mid-tier), "flux-2-dev" (50 credits, LoRA support), "seedream-5.0-lite" (150 credits, web search), "nano-banana-pro" (600 credits, premium 4K). NO DEFAULT — you must choose or ask the human.' },
     }, ['prompt', 'modelId']),
 
-    toolDef('generate_video', 'Generate a SHORT AI video clip from a text prompt using AI models (Wan, Kling). For programmatic/animated videos with code, use render_video instead. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
+    toolDef('generate_video', 'Generate a SHORT AI video clip from a text prompt using AI models (Wan, Kling). For programmatic/animated videos with code, use render_video instead. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one. Supports image-to-video with imageUrl for frame continuation.', {
       prompt: { type: 'string', description: 'Text description of the video to generate' },
-      modelId: { type: 'string', description: 'Video model to use. Options: "wan-2.6" (3000 credits, budget), "kling-2.6-pro" (3000 credits, long-form), "kling-3.0" (3000 credits, high-fidelity), "kling-o3" (3000 credits, omni/editing). NO DEFAULT — you must choose or ask the human.' },
+      modelId: { type: 'string', description: 'Video model to use. Options: "wan-2.6" (3000 credits, budget), "kling-3.0" (3000 credits, high-fidelity). NO DEFAULT — you must choose or ask the human.' },
+      imageUrl: { type: 'string', description: 'Optional start frame image URL for image-to-video mode. Enables frame continuation for seamless multi-clip sequences.' },
+      endImageUrl: { type: 'string', description: 'Optional end frame image URL for steering the video toward a target frame (Kling 3.0 only).' },
+      duration: { type: 'number', description: 'Requested duration in seconds (default 5). Model-dependent max.' },
     }, ['prompt', 'modelId']),
 
-    toolDef('render_video', 'Render a programmatic animated video using Remotion (React-based). YOU write the composition code (React components with useCurrentFrame, interpolate, Sequence, AbsoluteFill) and this tool renders it to MP4. 50 credits. Use this for: promo videos, explainers, motion graphics, branded content, data visualizations. This is MUCH CHEAPER than generate_video and gives you full creative control.', {
-      compositionCode: { type: 'string', description: 'React/Remotion component code as a string. Must export a default component using Remotion APIs (useCurrentFrame, interpolate, Sequence, AbsoluteFill, spring, etc.)' },
-      durationInFrames: { type: 'number', description: 'Video duration in frames (default: 150 = 5 seconds at 30fps)' },
+    toolDef('render_video', 'Render a programmatic animated video from a JSON scene description. 50 credits. Each scene has a duration, background, and elements (text, rect, circle, image) with animations (fadeIn, slideUp, typewriter, scaleIn, etc.). Use this for: promo videos, explainers, motion graphics, branded content. MUCH CHEAPER than generate_video.', {
+      scenes: {
+        type: 'array',
+        description: `Array of scene objects. Each scene: { duration: seconds, background: "#hex", backgroundGradient?: { type: "linear"|"radial", angle?: degrees, stops: [[0,"#color"],[1,"#color"]] }, transition?: "fade"|"none", transitionDuration?: seconds, elements: [{ type: "text"|"rect"|"circle"|"image", x: 0-1 (fraction) or pixels, y: 0-1 or pixels, text?: "string", fontSize?: number, fontWeight?: "bold"|"normal", color?: "#hex", textAlign?: "center"|"left"|"right", maxWidth?: number, fill?: "#hex", stroke?: "#hex", cornerRadius?: number, radius?: number (circle), width?: number, height?: number, src?: "url" (image), opacity?: 0-1, animation?: { type: "fadeIn"|"fadeOut"|"slideUp"|"slideDown"|"slideLeft"|"slideRight"|"scaleIn"|"typewriter"|"pulse"|"none", delay?: seconds, duration?: seconds, easing?: "easeOut"|"easeIn"|"easeInOut"|"bounce"|"linear" } }] }`,
+        items: { type: 'object' },
+      },
+      width: { type: 'number', description: 'Video width in pixels (default: 1280)' },
+      height: { type: 'number', description: 'Video height in pixels (default: 720)' },
       fps: { type: 'number', description: 'Frames per second (default: 30)' },
-      width: { type: 'number', description: 'Video width in pixels (default: 1920)' },
-      height: { type: 'number', description: 'Video height in pixels (default: 1080)' },
-      inputProps: { type: 'object', description: 'Props to pass to the composition (title, colors, data, etc.)' },
-    }, ['compositionCode']),
+    }, ['scenes']),
 
     toolDef('generate_3d', 'Generate a 3D model from an image. Returns the URL of the .glb file. IMPORTANT: You MUST confirm the model choice with the human before generating, unless they already specified one.', {
       imageUrl: { type: 'string', description: 'URL of the input image to convert to 3D' },
@@ -517,6 +529,21 @@ function getBuiltinTools(): ToolDef[] {
     toolDef('browser_stop_recording', 'Stop recording and save all captured frames to the knowledge base.', {}, []),
 
     toolDef('browser_close', 'Close the browser session and free resources.', {}, []),
+
+    toolDef('browser_ask_human', 'Ask the human a question when you encounter ambiguity while browsing (e.g. which option to select, what info to enter, CAPTCHA help). The question will be sent to team chat with a screenshot for the human to review and respond. Your browser session stays open while waiting.', {
+      question: { type: 'string', description: 'The question to ask the human' },
+      options: { type: 'array', items: { type: 'string' }, description: 'Optional list of choices for the human to pick from' },
+      context: { type: 'string', description: 'Brief context about what you were doing when you hit this ambiguity' },
+    }, ['question']),
+
+    toolDef('browser_fill_form', 'Fill multiple form fields at once. More efficient than clicking and typing each field individually.', {
+      fields: { type: 'array', items: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } } }, description: 'Array of { selector, value } pairs to fill' },
+      submit: { type: 'boolean', description: 'If true, click the submit button after filling (default: false)' },
+    }, ['fields']),
+
+    toolDef('browser_download_file', 'Wait for and save a file download from the current page. Call this right before or after clicking a download link.', {
+      description: { type: 'string', description: 'Brief description of the file being downloaded (e.g. "Q4 revenue report from Stripe")' },
+    }, ['description']),
 
   ]
 }
@@ -902,7 +929,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'generate_video': {
       const modelId = args.modelId as string
-      if (!modelId) return 'Error: modelId is required. Ask the human which model to use. Options: wan-2.6 (3000 credits, budget), kling-2.6-pro (3000 credits), kling-3.0 (3000 credits), kling-o3 (3000 credits, omni).'
+      if (!modelId) return 'Error: modelId is required. Ask the human which model to use. Options: wan-2.6 (3000 credits, budget), kling-3.0 (3000 credits, high-fidelity).'
       const logical = getLogicalModel(modelId)
       if (!logical || logical.type !== 'video') return `Unknown video model: ${modelId}`
       const falModelId = logical.backends[0]?.providerModelId
@@ -913,7 +940,11 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         if (!success) return `Insufficient credits. Video generation costs ${cost} credits but your team has ${balance}. Purchase more credits in Settings → Billing.`
       }
       try {
-        const result = await falGenerate(ctx.db, falModelId, { prompt: args.prompt as string })
+        const falInput: Record<string, unknown> = { prompt: args.prompt as string }
+        if (args.imageUrl) falInput.image_url = args.imageUrl as string
+        if (args.endImageUrl) falInput.end_image_url = args.endImageUrl as string
+        if (args.duration) falInput.duration = args.duration as number
+        const result = await falGenerate(ctx.db, falModelId, falInput)
         const video = result.video
         if (!video) return 'Video generation completed but no video was returned.'
 
@@ -1136,7 +1167,47 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
       // Try browser tools first (browser_navigate, browser_snapshot, etc.)
       if (isBrowserTool(toolCall.function.name)) {
-        const browserResult = await executeBrowserTool(ctx.agentId, toolCall.function.name, args)
+        const browserResult = await executeBrowserTool(ctx.agentId, toolCall.function.name, args, ctx.teamId)
+        // browser_ask_human returns a marker — handle it here where we have db/approval access
+        if (browserResult === '__browser_ask_human__') {
+          const question = (args.question as string) || 'Need your input'
+          const options = args.options as string[] | undefined
+          const askContext = (args.context as string) || ''
+          // Capture screenshot for the approval panel
+          let screenshotData: string | undefined
+          try {
+            const { captureAgentScreenshot } = await import('./browser.ts')
+            const snap = await captureAgentScreenshot(ctx.agentId)
+            if (snap) screenshotData = snap.screenshot
+          } catch { /* ignore */ }
+          // Create approval request
+          const actionDetail = JSON.stringify({
+            question, options, context: askContext,
+            screenshot: screenshotData?.slice(0, 50000), // cap size for DB storage
+          })
+          const approval = await createApproval(ctx.db, ctx.teamId, ctx.agentId,
+            'browser_question', actionDetail, 'low')
+          // Send chat message to team channel
+          const optionsText = options?.length ? `\nOptions: ${options.join(' | ')}` : ''
+          const teamChannel = await getTeamChannel(ctx.db, ctx.teamId)
+          await sendChatMsg(ctx.db, teamChannel.id, 'agent', ctx.agentId,
+            `🌐 **Browser Question**: ${question}${optionsText}\n\n_${askContext}_\n\n[Review and respond in Approvals]`,
+            undefined, ctx.teamId)
+          // Wait for approval resolution (poll with timeout)
+          const maxWait = 10 * 60 * 1000 // 10 min
+          const pollInterval = 3000
+          const startTime = Date.now()
+          while (Date.now() - startTime < maxWait) {
+            const updated = await getApproval(ctx.db, approval.id)
+            if (updated && updated.status !== 'pending') {
+              return updated.status === 'approved'
+                ? `Human approved. Continue with the task.`
+                : `Human rejected: the request was denied. Adjust your approach.`
+            }
+            await new Promise(r => setTimeout(r, pollInterval))
+          }
+          return 'Timed out waiting for human response (10 min). Try a different approach or ask again.'
+        }
         if (browserResult !== null) return browserResult
       }
 
@@ -1296,9 +1367,9 @@ Credits are real money. Treat them like a company budget — be smart about spen
 
 ## Using Skills & Tools Effectively
 
-- **Check your installed skills FIRST.** You may have specialized tools from installed skills (like render_video for Remotion). Use list_available_skills to see what you have.
-- **Skill tools are different from built-in tools.** For example: \`generate_video\` (built-in) creates AI video clips from prompts. \`render_video\` (skill) renders programmatic Remotion compositions. They are NOT the same — choose the right one for the job.
-- **When a task mentions a specific technology** (Remotion, Puppeteer, etc.), use the skill tool designed for that technology, not a generic built-in tool.
+- **Check your installed skills FIRST.** You may have specialized tools from installed skills (like render_video for animated videos). Use list_available_skills to see what you have.
+- **Skill tools are different from built-in tools.** For example: \`generate_video\` (built-in) creates AI video clips from prompts using AI models. \`render_video\` (skill) renders programmatic animated videos from JSON scene descriptions — text, shapes, animations, transitions. They are NOT the same — choose the right one for the job.
+- **render_video is for deterministic content** — promo videos, explainers, branded content, data visualizations. \`generate_video\` is for AI-generated creative content.
 - **If you have the right skill installed, USE IT.** Don't talk about using it — call the tool. Don't plan to use it — call the tool. Don't say you need more credits for a different tool — check if the skill tool is cheaper and use that instead.
 
 ## Guidelines

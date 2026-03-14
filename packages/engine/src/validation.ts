@@ -285,6 +285,120 @@ export const CreateApiKeySchema = z.object({
   ).optional(),
 })
 
+// ---- Video Projects ----
+
+export const CreateVideoProjectSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(5000).optional(),
+  workflowRunId: z.string().max(200).optional(),
+  settings: z.string().max(10000).optional(),
+})
+
+export const UpdateVideoProjectSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(5000).optional(),
+  workflowRunId: z.string().max(200).nullable().optional(),
+  status: z.enum(['draft', 'in_progress', 'completed', 'archived']).optional(),
+  settings: z.string().max(10000).optional(),
+})
+
+export const AddVideoSceneSchema = z.object({
+  title: z.string().min(1).max(500),
+  scriptText: z.string().max(10000).optional(),
+  imagePrompt: z.string().max(5000).optional(),
+  durationMs: z.number().int().min(100).max(600000).optional(),
+  transition: z.enum(['cut', 'fade', 'dissolve', 'wipe', 'slide', 'zoom', 'blur', 'push']).optional(),
+  sceneData: z.string().max(50000).optional(),
+  sceneOrder: z.number().int().min(0).optional(),
+})
+
+export const UpdateVideoSceneSchema = z.object({
+  title: z.string().min(1).max(500).optional(),
+  scriptText: z.string().max(10000).optional(),
+  imagePrompt: z.string().max(5000).optional(),
+  durationMs: z.number().int().min(100).max(600000).optional(),
+  transition: z.enum(['cut', 'fade', 'dissolve', 'wipe', 'slide', 'zoom', 'blur', 'push']).optional(),
+  sceneData: z.string().max(50000).optional(),
+})
+
+export const ReorderVideoScenesSchema = z.object({
+  sceneIds: z.array(z.string().max(200)).min(1).max(200),
+})
+
+export const AddVideoAssetSchema = z.object({
+  type: z.enum(['image', 'video', 'audio', 'voiceover', 'music', 'sfx']),
+  filePath: z.string().min(1).max(1000),
+  sceneId: z.string().max(200).optional(),
+  source: z.enum(['generated', 'uploaded', 'stock']).optional(),
+  filename: z.string().max(500).optional(),
+  durationMs: z.number().int().min(0).optional(),
+  mimeType: z.string().max(200).optional(),
+  metadata: z.string().max(50000).optional(),
+  track: z.enum(['main', 'overlay', 'caption', 'voiceover', 'music', 'sfx']).optional(),
+  startMs: z.number().int().min(0).optional(),
+})
+
+export const UpdateVideoAssetSchema = z.object({
+  sceneId: z.string().max(200).nullable().optional(),
+  track: z.enum(['main', 'overlay', 'caption', 'voiceover', 'music', 'sfx']).optional(),
+  startMs: z.number().int().min(0).optional(),
+  durationMs: z.number().int().min(0).nullable().optional(),
+  metadata: z.string().max(50000).optional(),
+})
+
+// ---- Transcript Editing ----
+
+export const ApplyTranscriptEditsSchema = z.object({
+  edits: z.array(z.object({
+    type: z.enum(['delete', 'split']),
+    startMs: z.number().int().min(0).optional(),
+    endMs: z.number().int().min(0).optional(),
+    atMs: z.number().int().min(0).optional(),
+  })).min(1).max(500),
+})
+
+export const UpdateTranscriptionSchema = z.object({
+  segments: z.array(z.object({
+    start: z.number().min(0),
+    end: z.number().min(0),
+    text: z.string(),
+  })).optional(),
+  words: z.array(z.object({
+    word: z.string(),
+    start: z.number().min(0),
+    end: z.number().min(0),
+  })).optional(),
+  deletedRanges: z.array(z.object({
+    startMs: z.number().int().min(0),
+    endMs: z.number().int().min(0),
+  })).optional(),
+})
+
+// ---- Browser Sessions ----
+
+export const CreateBrowserSessionSchema = z.object({
+  vaultSessionId: z.string().max(200).optional(),
+  startUrl: z.string().max(2000).optional(),
+})
+
+export const BrowserInteractSchema = z.object({
+  type: z.enum(['click', 'type', 'press', 'scroll']),
+  x: z.number().int().min(0).optional(),
+  y: z.number().int().min(0).optional(),
+  text: z.string().max(5000).optional(),
+  key: z.string().max(50).optional(),
+  deltaX: z.number().int().optional(),
+  deltaY: z.number().int().optional(),
+})
+
+export const BrowserNavigateSchema = z.object({
+  url: z.string().min(1).max(2000),
+})
+
+export const SaveBrowserToVaultSchema = z.object({
+  label: z.string().min(1).max(200),
+})
+
 // ---- Validation helper ----
 
 export function validate<T>(schema: z.ZodType<T>, data: unknown): T {

@@ -34,8 +34,9 @@ import { createTeamMiddleware, requireRole } from './team-middleware.ts'
 import { listNotifications, countUnread, markRead, markAllRead, listPreferences, setPreference, notifyTeam, listAlertPreferences, setBulkAlertPreferences } from './notifications.ts'
 import { createGoal, getGoal, listGoals, updateGoal, deleteGoal, linkTask, unlinkTask, getGoalTasks, type GoalStatus } from './goals.ts'
 import { createKpiGoal, getKpiGoal, listKpiGoals, updateKpiGoal, deleteKpiGoal, type KpiGoalStatus } from './kpi-goals.ts'
-import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema, CreateWorkflowSchema, UpdateWorkflowSchema, CaptureWorkflowSchema, AddWorkflowStepSchema, UpdateWorkflowStepSchema, ReorderWorkflowStepsSchema, CreateTagSchema, UpdateTagSchema, TagResourceSchema, BulkSetTagsSchema, CreateApiKeySchema } from './validation.ts'
+import { validate, CreateAgentSchema, UpdateAgentSchema, ChatWithAgentSchema, CreateTaskSchema, UpdateTaskSchema, CreateChannelSchema, SendChatMessageSchema, CreateApprovalSchema, ResolveApprovalSchema, CreateSorTableSchema, UpdateSorPermissionSchema, WriteFileSchema, UpdateProviderSchema, InstallSkillSchema, CreateTeamSchema, UpdateTeamSchema, AddMemberSchema, UpdateRoleSchema, SetCredentialSchema, UploadKbDocumentSchema, SearchKbSchema, CreateWorkflowSchema, UpdateWorkflowSchema, CaptureWorkflowSchema, AddWorkflowStepSchema, UpdateWorkflowStepSchema, ReorderWorkflowStepsSchema, CreateTagSchema, UpdateTagSchema, TagResourceSchema, BulkSetTagsSchema, CreateApiKeySchema, CreateVideoProjectSchema, UpdateVideoProjectSchema, AddVideoSceneSchema, UpdateVideoSceneSchema, ReorderVideoScenesSchema, AddVideoAssetSchema, UpdateVideoAssetSchema, ApplyTranscriptEditsSchema, UpdateTranscriptionSchema, CreateBrowserSessionSchema, BrowserInteractSchema, BrowserNavigateSchema, SaveBrowserToVaultSchema } from './validation.ts'
 import { createWorkflow, getWorkflow, listWorkflows, updateWorkflow, deleteWorkflow, addStep, updateStep, deleteStep, listSteps, reorderSteps, startRun, getRun, listRuns, cancelRun, listRunSteps, captureWorkflow, findWorkflowsByTableTrigger } from './workflows.ts'
+import { createVideoProject, getVideoProject, listVideoProjects, updateVideoProject, deleteVideoProject, addScene, getScene, listScenes, updateScene, deleteScene, reorderScenes, addAsset, getAsset, listAssets, updateAsset, deleteAsset, transcribeAsset } from './video-projects.ts'
 import { advanceWorkflow, onTaskCompleted, approveWorkflowStep } from './workflow-executor.ts'
 import { uploadDocument, listDocuments, getDocument, deleteDocument, getDocumentChunks, searchKb } from './knowledge-base.ts'
 import { listCredentials, setCredential, deleteCredential } from './credentials.ts'
@@ -48,6 +49,13 @@ import {
   cancelRecording, hasActiveRecording, getRecordingSession,
   type InteractionAction,
 } from './vault-browser.ts'
+import {
+  createBrowserSession, interactWithSession, getSessionScreenshot,
+  navigateSession, saveSessionToVault, closeBrowserSession as closeBrowserSess,
+  listActiveSessions, getSessionInfo,
+  type InteractionAction as BrowserInteractionAction,
+} from './browser-sessions.ts'
+import { captureAgentScreenshot, setBrowserBroadcast } from './browser.ts'
 import { listServices } from './services.ts'
 import { listTemplates, getTemplate } from './templates.ts'
 import { listMcpServers, addMcpServer, removeMcpServer, connectMcpServer } from './mcp-client.ts'
@@ -307,7 +315,7 @@ async function main() {
 
   // ===== Ownership verification helper =====
   // Prevents IDOR: verifies an object belongs to the requesting user's team
-  const OWNERSHIP_TABLES = new Set(['agents', 'tasks', 'goals', 'kpi_goals', 'approvals', 'chat_channels', 'sor_tables', 'kb_documents', 'workflows', 'workflow_runs'])
+  const OWNERSHIP_TABLES = new Set(['agents', 'tasks', 'goals', 'kpi_goals', 'approvals', 'chat_channels', 'sor_tables', 'kb_documents', 'workflows', 'workflow_runs', 'video_projects'])
   async function verifyOwnership(table: string, id: string, teamId: string): Promise<boolean> {
     if (!OWNERSHIP_TABLES.has(table)) throw new Error(`verifyOwnership: unknown table "${table}"`)
     const row = await db.queryOne<{ team_id: string }>(`SELECT team_id FROM ${table} WHERE id = $1`, [id])
@@ -425,6 +433,11 @@ async function main() {
     const { setCreditBroadcast } = await import('./billing.ts')
     setCreditBroadcast((teamId, credits) => {
       broadcastToTeam(teamId, 'credits', { credits })
+    })
+
+    // Wire browser broadcast so MCP browser tool calls push screenshots to viewers
+    setBrowserBroadcast((teamId, event, data) => {
+      broadcastToTeam(teamId, event, data)
     })
   }
 
@@ -2024,6 +2037,114 @@ async function main() {
     res.json({ success: true })
   })
 
+  // ===== Browser Sessions (workspace browser panel) =====
+
+  app.post('/api/browser-sessions', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const body = validate(CreateBrowserSessionSchema, req.body ?? {})
+    try {
+      const result = await createBrowserSession(teamId, req.user!.id, {
+        vaultSessionId: body.vaultSessionId,
+        startUrl: body.startUrl,
+        db,
+      })
+      res.status(201).json(result)
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/browser-sessions', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    res.json(listActiveSessions(teamId))
+  })
+
+  app.get('/api/browser-sessions/:id/screenshot', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const session = getSessionInfo(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Browser session not found' })
+    if (session.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+    try {
+      const result = await getSessionScreenshot(req.params.id)
+      res.json(result)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/browser-sessions/:id/interact', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const session = getSessionInfo(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Browser session not found' })
+    if (session.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+    const action = validate(BrowserInteractSchema, req.body)
+    try {
+      const result = await interactWithSession(req.params.id, action as BrowserInteractionAction)
+      res.json(result)
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/browser-sessions/:id/navigate', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const session = getSessionInfo(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Browser session not found' })
+    if (session.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+    const body = validate(BrowserNavigateSchema, req.body)
+    try {
+      const result = await navigateSession(req.params.id, body.url)
+      res.json(result)
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/browser-sessions/:id/close', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const session = getSessionInfo(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Browser session not found' })
+    if (session.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+    await closeBrowserSess(req.params.id)
+    res.json({ success: true })
+  })
+
+  app.post('/api/browser-sessions/:id/save-to-vault', async (req, res) => {
+    if (!requireRole(req, res, 'admin')) return
+    const teamId = req.user!.activeTeamId!
+    const session = getSessionInfo(req.params.id)
+    if (!session) return res.status(404).json({ error: 'Browser session not found' })
+    if (session.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+    const body = validate(SaveBrowserToVaultSchema, req.body)
+    try {
+      const result = await saveSessionToVault(req.params.id, db, teamId, body.label)
+      await logActivity(db, 'vault_session_saved', null, `Saved browser session as "${body.label}"`, undefined, teamId)
+      res.json(result)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/agents/:id/browser/screenshot', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const agent = await getAgent(db, req.params.id)
+    if (!agent) return res.status(404).json({ error: 'Agent not found' })
+    // Verify agent belongs to this team
+    const teamAgentIds = await getTeamAgentIds(db, teamId)
+    if (!teamAgentIds.includes(agent.id)) return res.status(403).json({ error: 'Forbidden' })
+    try {
+      const result = await captureAgentScreenshot(agent.id)
+      if (!result) return res.status(404).json({ error: 'Agent has no active browser session' })
+      res.json(result)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
   // ===== Services (available integrations) =====
 
   app.get('/api/services', async (req, res) => {
@@ -2153,6 +2274,14 @@ async function main() {
           console.error('[engine] Failed to enroll in drip series:', (dripErr as Error).message)
         }
       }
+    }
+
+    // Seed default workflow templates
+    try {
+      const { seedVideoProductionWorkflow } = await import('./video-workflow-seed.ts')
+      await seedVideoProductionWorkflow(db, team.id)
+    } catch (err) {
+      console.error('[engine] Failed to seed Video Production workflow:', (err as Error).message)
     }
 
     await logActivity(db, 'team_created', null, `Team "${name}" created`)
@@ -3448,6 +3577,214 @@ ${truncated}`,
     const body = validate(CaptureWorkflowSchema, req.body)
     const workflow = await captureWorkflow(db, teamId, body.name, body.taskIds)
     res.status(201).json(workflow)
+  })
+
+  // ===== Video Projects =====
+
+  app.get('/api/video-projects', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const status = req.query.status as 'draft' | 'in_progress' | 'completed' | 'archived' | undefined
+    res.json(await listVideoProjects(db, teamId, status))
+  })
+
+  app.post('/api/video-projects', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const body = validate(CreateVideoProjectSchema, req.body)
+    const project = await createVideoProject(db, teamId, body.name, {
+      description: body.description,
+      workflowRunId: body.workflowRunId,
+      settings: body.settings,
+      createdBy: req.user!.id,
+    })
+    await logActivity(db, 'video_project_created', null, `Video project "${project.name}" created`, undefined, teamId)
+    res.status(201).json(project)
+  })
+
+  app.get('/api/video-projects/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const project = await getVideoProject(db, req.params.id)
+    if (!project) return res.status(404).json({ error: 'Video project not found' })
+    const scenes = await listScenes(db, project.id)
+    const assets = await listAssets(db, project.id)
+    res.json({ ...project, scenes, assets })
+  })
+
+  app.patch('/api/video-projects/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const body = validate(UpdateVideoProjectSchema, req.body)
+    const project = await updateVideoProject(db, req.params.id, body as Record<string, unknown>)
+    if (!project) return res.status(404).json({ error: 'Video project not found' })
+    await logActivity(db, 'video_project_updated', null, `Video project "${project.name}" updated`, undefined, teamId)
+    res.json(project)
+  })
+
+  app.delete('/api/video-projects/:id', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const projectToDelete = await getVideoProject(db, req.params.id)
+    await deleteVideoProject(db, req.params.id)
+    await logActivity(db, 'video_project_deleted', null, `Video project "${projectToDelete?.name ?? req.params.id}" deleted`, undefined, teamId)
+    res.status(204).end()
+  })
+
+  // ---- Video Scenes ----
+
+  app.post('/api/video-projects/:id/scenes', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const body = validate(AddVideoSceneSchema, req.body)
+    const scene = await addScene(db, req.params.id, body.title, body)
+    res.status(201).json(scene)
+  })
+
+  app.patch('/api/video-projects/:id/scenes/:sceneId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const body = validate(UpdateVideoSceneSchema, req.body)
+    const scene = await updateScene(db, req.params.sceneId, body as Record<string, unknown>)
+    if (!scene) return res.status(404).json({ error: 'Scene not found' })
+    res.json(scene)
+  })
+
+  app.delete('/api/video-projects/:id/scenes/:sceneId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    await deleteScene(db, req.params.sceneId)
+    res.status(204).end()
+  })
+
+  app.put('/api/video-projects/:id/scenes/reorder', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const body = validate(ReorderVideoScenesSchema, req.body)
+    await reorderScenes(db, req.params.id, body.sceneIds)
+    res.json({ reordered: true })
+  })
+
+  // ---- Video Assets ----
+
+  app.post('/api/video-projects/:id/assets', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const body = validate(AddVideoAssetSchema, req.body)
+    const asset = await addAsset(db, req.params.id, body.type, body.filePath, body)
+    res.status(201).json(asset)
+  })
+
+  app.patch('/api/video-projects/:id/assets/:assetId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const body = validate(UpdateVideoAssetSchema, req.body)
+    const asset = await updateAsset(db, req.params.assetId, body as Record<string, unknown>)
+    if (!asset) return res.status(404).json({ error: 'Asset not found' })
+    res.json(asset)
+  })
+
+  app.delete('/api/video-projects/:id/assets/:assetId', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    await deleteAsset(db, req.params.assetId)
+    res.status(204).end()
+  })
+
+  // ---- Video Transcription ----
+
+  app.post('/api/video-projects/:id/assets/:assetId/transcribe', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const asset = await getAsset(db, req.params.assetId)
+    if (!asset || asset.projectId !== req.params.id) return res.status(404).json({ error: 'Asset not found' })
+    if (!['audio', 'voiceover'].includes(asset.type)) return res.status(400).json({ error: 'Only audio/voiceover assets can be transcribed' })
+
+    // Read the audio file from workspace
+    const audioBuffer = await readBinaryFile(db, teamId, asset.filePath)
+    if (!audioBuffer) return res.status(404).json({ error: 'Audio file not found in workspace' })
+
+    try {
+      const updated = await transcribeAsset(db, req.params.assetId, audioBuffer, asset.filename || 'audio.mp3')
+      if (!updated) return res.status(404).json({ error: 'Asset not found' })
+      await logActivity(db, 'asset_transcribed', null, `Transcribed asset "${asset.filename || asset.filePath}"`, undefined, teamId)
+      res.json(updated)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.patch('/api/video-projects/:id/assets/:assetId/transcription', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const asset = await getAsset(db, req.params.assetId)
+    if (!asset || asset.projectId !== req.params.id) return res.status(404).json({ error: 'Asset not found' })
+
+    const body = validate(UpdateTranscriptionSchema, req.body)
+
+    // Merge updates into existing transcription metadata
+    let meta: Record<string, unknown> = {}
+    try { meta = JSON.parse(asset.metadata) } catch { /* */ }
+    const transcription = (meta.transcription ?? {}) as Record<string, unknown>
+
+    if (body.segments) transcription.segments = body.segments
+    if (body.words) transcription.words = body.words
+    if (body.deletedRanges) transcription.deletedRanges = body.deletedRanges
+    meta.transcription = transcription
+
+    const updated = await updateAsset(db, req.params.assetId, { metadata: JSON.stringify(meta) })
+    if (!updated) return res.status(404).json({ error: 'Asset not found' })
+    res.json(updated)
+  })
+
+  app.post('/api/video-projects/:id/assets/:assetId/apply-edits', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    if (!(await verifyOwnership('video_projects', req.params.id, teamId))) return res.status(404).json({ error: 'Video project not found' })
+    const asset = await getAsset(db, req.params.assetId)
+    if (!asset || asset.projectId !== req.params.id) return res.status(404).json({ error: 'Asset not found' })
+
+    const body = validate(ApplyTranscriptEditsSchema, req.body)
+
+    // Read original audio file
+    const audioBuffer = await readBinaryFile(db, teamId, asset.filePath)
+    if (!audioBuffer) return res.status(404).json({ error: 'Audio file not found in workspace' })
+
+    try {
+      const { applyTranscriptEdits } = await import('./video-render.ts')
+      const result = await applyTranscriptEdits(audioBuffer, body.edits, asset.durationMs ?? 0)
+
+      // Save working copy to workspace
+      const workingFilename = `edited_${asset.filename || 'audio'}_${Date.now()}.mp3`
+      const workingPath = `media/working/${workingFilename}`
+      await writeBinaryFile(db, teamId, workingPath, result.buffer, 'audio/mpeg', req.user!.id)
+
+      // Update asset metadata with edit history
+      let meta: Record<string, unknown> = {}
+      try { meta = JSON.parse(asset.metadata) } catch { /* */ }
+      meta.originalPath = meta.originalPath ?? asset.filePath
+      meta.editHistory = [...((meta.editHistory as unknown[]) ?? []), { edits: body.edits, appliedAt: new Date().toISOString() }]
+
+      const updated = await updateAsset(db, req.params.assetId, {
+        metadata: JSON.stringify(meta),
+        durationMs: result.durationMs,
+      })
+
+      await logActivity(db, 'asset_edited', null, `Applied ${body.edits.length} transcript edit(s) to "${asset.filename || asset.filePath}"`, undefined, teamId)
+      res.json({ ...updated, workingPath })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
   })
 
   // ===== Global Error Handler =====

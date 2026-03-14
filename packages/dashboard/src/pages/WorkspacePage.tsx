@@ -3,6 +3,7 @@ import { ResizablePanel } from '@/components/workspace/ResizablePanel'
 import { FilesPanel } from '@/components/workspace/FilesPanel'
 import { ContextPane } from '@/components/workspace/ContextPane'
 import { TasksPanel } from '@/components/workspace/TasksPanel'
+import { WorkflowsPanel } from '@/components/workspace/WorkflowsPanel'
 import { TeamChat } from '@/components/workspace/TeamChat'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { useRealtimeEvent } from '@/lib/use-realtime'
@@ -11,7 +12,7 @@ import * as engine from '@/lib/engine'
 
 // ---- Tab types for the context pane viewer ----
 
-export type ViewerTabType = 'file' | 'data-table' | 'browser'
+export type ViewerTabType = 'file' | 'data-table' | 'browser' | 'workflow' | 'workflow-run' | 'video-editor'
 
 export interface ViewerTab {
   id: string
@@ -38,7 +39,7 @@ export interface WorkspaceState {
 
 // ---- Mobile tab names ----
 
-const MOBILE_TABS = ['Files', 'Chat', 'Tasks'] as const
+const MOBILE_TABS = ['Files', 'Chat', 'Tasks', 'Workflows'] as const
 type MobileTab = typeof MOBILE_TABS[number]
 
 export function WorkspacePage() {
@@ -47,6 +48,7 @@ export function WorkspacePage() {
   const [mobileTab, setMobileTab] = useState<MobileTab>('Chat')
 
   // Viewer tabs state
+  const [rightPanelTab, setRightPanelTab] = useState<'tasks' | 'workflows'>('tasks')
   const [viewerTabs, setViewerTabs] = useState<ViewerTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -179,6 +181,9 @@ export function WorkspacePage() {
           {mobileTab === 'Tasks' && (
             <TasksPanel workspace={workspaceState} unreadTaskIds={unreadTaskIds} agents={agents} />
           )}
+          {mobileTab === 'Workflows' && (
+            <WorkflowsPanel workspace={workspaceState} />
+          )}
         </div>
       </div>
     )
@@ -209,7 +214,7 @@ export function WorkspacePage() {
         />
       </div>
 
-      {/* Right: Tasks */}
+      {/* Right: Tasks / Workflows */}
       <ResizablePanel
         defaultWidth={320}
         minWidth={240}
@@ -218,7 +223,41 @@ export function WorkspacePage() {
         side="right"
         className="border-l border-border-subtle bg-light-surface overflow-hidden flex flex-col"
       >
-        <TasksPanel workspace={workspaceState} unreadTaskIds={unreadTaskIds} agents={agents} />
+        <div className="flex flex-col h-full">
+          {/* Sub-tab toggle */}
+          <div className="flex items-center gap-1 px-2 py-2 border-b border-border-subtle shrink-0">
+            <button
+              onClick={() => setRightPanelTab('tasks')}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                rightPanelTab === 'tasks'
+                  ? 'bg-forest-green/10 text-forest-green'
+                  : 'text-text-muted hover:bg-light-surface-alt hover:text-text-main'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[14px]">task_alt</span>
+              Tasks
+              {unreadTaskIds.size > 0 && (
+                <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-forest-green px-1 text-[9px] font-bold text-white">
+                  {unreadTaskIds.size}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setRightPanelTab('workflows')}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                rightPanelTab === 'workflows'
+                  ? 'bg-forest-green/10 text-forest-green'
+                  : 'text-text-muted hover:bg-light-surface-alt hover:text-text-main'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[14px]">account_tree</span>
+              Workflows
+            </button>
+          </div>
+          {/* Active panel */}
+          {rightPanelTab === 'tasks' && <TasksPanel workspace={workspaceState} unreadTaskIds={unreadTaskIds} agents={agents} />}
+          {rightPanelTab === 'workflows' && <WorkflowsPanel workspace={workspaceState} />}
+        </div>
       </ResizablePanel>
     </div>
   )

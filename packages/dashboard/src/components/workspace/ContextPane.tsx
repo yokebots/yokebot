@@ -3,6 +3,10 @@ import { HorizontalDivider } from './ResizablePanel'
 import { FileViewer } from './FileViewer'
 import { TeamChat } from './TeamChat'
 import { FileContextMenu } from './FileContextMenu'
+import { WorkflowViewer } from './WorkflowViewer'
+import { WorkflowRunViewer } from './WorkflowRunViewer'
+import { VideoEditorPanel } from './VideoEditorPanel'
+import { BrowserPanel } from './BrowserPanel'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 import type { SorTable, SorRow } from '@/lib/engine'
@@ -98,7 +102,16 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
                 <DataTableViewer tableId={activeTab.resourceId} />
               )}
               {activeTab?.type === 'browser' && (
-                <BrowserPlaceholder sessionId={activeTab.resourceId} />
+                <BrowserPanel sessionId={activeTab.resourceId} />
+              )}
+              {activeTab?.type === 'workflow' && (
+                <WorkflowViewer workflowId={activeTab.resourceId} workspace={workspace} />
+              )}
+              {activeTab?.type === 'workflow-run' && (
+                <WorkflowRunViewer runId={activeTab.resourceId} workspace={workspace} />
+              )}
+              {activeTab?.type === 'video-editor' && (
+                <VideoEditorPanel projectId={activeTab.resourceId} />
               )}
               {!activeTab && (
                 <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
@@ -489,19 +502,6 @@ function TableExportDropdown({ table, rows, dataColumns }: { table: SorTable; ro
           </button>
         </div>
       )}
-    </div>
-  )
-}
-
-/** Placeholder for browser use viewer — Firecrawl live view */
-function BrowserPlaceholder({ sessionId }: { sessionId: string }) {
-  return (
-    <div className="flex-1 flex items-center justify-center text-text-muted text-sm p-4">
-      <div className="text-center">
-        <span className="material-symbols-outlined text-3xl block mb-2 text-text-muted/50">language</span>
-        <p>Browser Session: {sessionId}</p>
-        <p className="text-xs mt-1">Firecrawl browser preview coming soon</p>
-      </div>
     </div>
   )
 }
