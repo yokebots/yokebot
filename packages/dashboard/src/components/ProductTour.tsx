@@ -188,7 +188,6 @@ export function ProductTour({ forceStart, onComplete }: ProductTourProps) {
           fill="rgba(0,0,0,0.5)"
           mask="url(#tour-mask)"
           style={{ pointerEvents: 'all' }}
-          onClick={skip}
         />
       </svg>
 
