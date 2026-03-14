@@ -2319,7 +2319,7 @@ async function main() {
       console.error('[engine] Failed to seed Sales CRM workflow:', (err as Error).message)
     }
 
-    await logActivity(db, 'team_created', null, `Team "${name}" created`)
+    await logActivity(db, 'team_created', null, `Team "${name}" created`, undefined, team.id)
     res.status(201).json(team)
   })
 
@@ -2379,7 +2379,7 @@ async function main() {
       // When the user signs up with this email, auth middleware + team creation will resolve it
     }
     const member = await addMember(db, team.id, resolvedUserId, email, role)
-    await logActivity(db, 'member_added', null, `${email} added to team "${team.name}"`)
+    await logActivity(db, 'member_added', null, `${email} added to team "${team.name}"`, undefined, team.id)
     res.status(201).json(member)
   })
 

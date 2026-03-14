@@ -146,7 +146,7 @@ export function OnboardingPage() {
   const [advisorFailed, setAdvisorFailed] = useState(false)
 
   // Meet-and-greet state
-  const [meetingId, setMeetingId] = useState<string | null>(null)
+  const [meetingId] = useState<string | null>(null)
   const [meetingMessages, setMeetingMessages] = useState<Array<{
     id: string
     type: 'agent' | 'human'
@@ -381,16 +381,19 @@ export function OnboardingPage() {
         }
       }
 
-      startWordTimer(0, allWords.length, audioDurationMs, screens)
-
-      setNarrationPlaying(true)
       audio.onended = () => {
         setNarrationPlaying(false)
         setHighlightedWord(allWords.length - 1)
         setCurrentScreen(screens.length - 1)
         if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
       }
-      audio.play().catch(() => {
+
+      // Only start captions once audio actually begins playing
+      audio.play().then(() => {
+        setNarrationPlaying(true)
+        startWordTimer(0, allWords.length, audioDurationMs, screens)
+      }).catch(() => {
+        // Audio blocked — show all captions immediately (no animation)
         setNarrationPlaying(false)
         setHighlightedWord(allWords.length - 1)
         setCurrentScreen(screens.length - 1)
@@ -1758,15 +1761,23 @@ export function OnboardingPage() {
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest-green shadow-sm">
                           <span className="material-symbols-outlined text-[18px] text-white animate-pulse">psychology</span>
                         </div>
-                        <div className="rounded-2xl rounded-bl-md bg-white border border-gray-100 px-4 py-3 shadow-sm">
-                          <div className="flex items-center gap-2">
+                        <div className="rounded-2xl rounded-bl-md bg-white border border-gray-100 px-4 py-3 shadow-sm min-w-[260px]">
+                          <div className="flex items-center gap-2 mb-2">
                             <div className="flex gap-0.5">
                               <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '0ms' }} />
                               <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '150ms' }} />
                               <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '300ms' }} />
                             </div>
+                            <span className="text-xs font-semibold text-forest-green">Thinking...</span>
                           </div>
-                          <p className="mt-1.5 text-sm text-text-muted italic transition-all duration-300">{thinkingPhrase}</p>
+                          {/* Progress bar */}
+                          <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden mb-2">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-forest-green to-green-400 transition-all duration-[2500ms] ease-linear"
+                              style={{ width: `${Math.min(95, (THINKING_PHRASES.indexOf(thinkingPhrase) + 1) / THINKING_PHRASES.length * 100)}%` }}
+                            />
+                          </div>
+                          <p className="text-sm text-text-muted italic transition-all duration-300">{thinkingPhrase}</p>
                         </div>
                       </div>
                     )}
@@ -1837,40 +1848,8 @@ export function OnboardingPage() {
                       await sendAdvisorMessage('Yes, deploy all of the recommended agents for me now.')
                       setDeploying(false)
                       setAgentsDeployed(true)
-                      // Start meet-and-greet after agents are deployed
-                      if (activeTeam) {
-                        let retries = 0
-                        const tryStart = async (): Promise<void> => {
-                          try {
-                            const { meetingId: mid } = await engine.startMeetAndGreet(activeTeam.id)
-                            setMeetingId(mid)
-                            setMeetingActive(true)
-                          } catch (err) {
-                            const errMsg = err instanceof Error ? err.message : String(err)
-                            console.error(`[onboarding] Meet-and-greet start failed (attempt ${retries + 1}):`, err)
-                            // Meeting limit reached — show the server message directly, don't retry
-                            if (errMsg.includes('plan includes')) {
-                              setMessages(prev => [...prev, {
-                                role: 'agent',
-                                content: `${errMsg} Your agents are deployed and ready — head to the dashboard to chat with them!`,
-                                upgradeLink: true,
-                              }])
-                              return
-                            }
-                            if (retries < 2) {
-                              retries++
-                              await new Promise(r => setTimeout(r, 2000))
-                              return tryStart()
-                            }
-                            // After 3 failures, show error in chat
-                            setMessages(prev => [...prev, {
-                              role: 'agent',
-                              content: "I had trouble starting the team meeting. Don't worry — your agents are deployed! Head to the dashboard to meet them there.",
-                            }])
-                          }
-                        }
-                        await tryStart()
-                      }
+                      // Skip straight to completion — no meeting step
+                      setStep(4)
                     }}
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
                   >

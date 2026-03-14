@@ -34,11 +34,14 @@ export async function listActivity(
   db: Db,
   filters?: { agentId?: string; eventType?: string; limit?: number; before?: number; teamId?: string },
 ): Promise<ActivityEntry[]> {
+  // SECURITY: always require teamId to prevent cross-team data leaks
+  if (!filters?.teamId) return []
+
   const clauses: string[] = []
   const params: unknown[] = []
   let paramIdx = 1
 
-  if (filters?.teamId) { clauses.push(`team_id = $${paramIdx++}`); params.push(filters.teamId) }
+  clauses.push(`team_id = $${paramIdx++}`); params.push(filters.teamId)
   if (filters?.agentId) { clauses.push(`agent_id = $${paramIdx++}`); params.push(filters.agentId) }
   if (filters?.eventType) { clauses.push(`event_type = $${paramIdx++}`); params.push(filters.eventType) }
   if (filters?.before) { clauses.push(`id < $${paramIdx++}`); params.push(filters.before) }
@@ -63,10 +66,11 @@ export async function listActivity(
 }
 
 export async function countActivity(db: Db, agentId?: string, teamId?: string): Promise<number> {
-  let sql = 'SELECT COUNT(*) as count FROM activity_log WHERE 1=1'
-  const params: unknown[] = []
-  let paramIdx = 1
-  if (teamId) { sql += ` AND team_id = $${paramIdx++}`; params.push(teamId) }
+  // SECURITY: always require teamId to prevent cross-team data leaks
+  if (!teamId) return 0
+  let sql = 'SELECT COUNT(*) as count FROM activity_log WHERE team_id = $1'
+  const params: unknown[] = [teamId]
+  let paramIdx = 2
   if (agentId) { sql += ` AND agent_id = $${paramIdx++}`; params.push(agentId) }
   const row = await db.queryOne<{ count: number }>(sql, params)
   return row?.count ?? 0

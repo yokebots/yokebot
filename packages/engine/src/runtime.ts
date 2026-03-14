@@ -1735,7 +1735,7 @@ export async function runReactLoop(
           await logActivity(db, 'tool_executed', agentId, `${toolCall.function.name}: ${result.slice(0, 200)}`, {
             tool: toolCall.function.name,
             resultPreview: result.slice(0, 500),
-          })
+          }, teamId)
         }
 
         // If this is a "respond" call, capture the response
