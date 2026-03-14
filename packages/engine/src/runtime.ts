@@ -348,6 +348,7 @@ function getBuiltinTools(): ToolDef[] {
       assignedAgentId: { type: 'string', description: 'Agent ID to reassign the task to' },
       assignedUserId: { type: 'string', description: 'Human team member user ID to assign the task to. Use list_team_members to look up IDs.' },
       deadline: { type: 'string', description: 'New deadline in ISO 8601 format (e.g. 2026-03-15)' },
+      estimatedCredits: { type: 'number', description: 'Estimated total credits this task will cost to complete' },
     }, ['taskId']),
 
     toolDef('delete_task', 'Request deletion of a task. Requires human approval — the task will NOT be deleted until a human approves.', {
@@ -673,6 +674,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       }
       if (args.assignedUserId) updates.assignedUserId = args.assignedUserId
       if (args.deadline) updates.deadline = args.deadline
+      if (args.estimatedCredits != null) updates.estimatedCredits = args.estimatedCredits as number
       const task = await updateTask(ctx.db, args.taskId as string, updates)
       if (!task) return `Task not found: ${args.taskId as string}`
       // Workflow step chaining: if task is done, advance linked workflow
@@ -1280,6 +1282,7 @@ Credits are real money. Treat them like a company budget — be smart about spen
 - **Fail gracefully.** If a tool call fails, save what you have, report the issue to the human, and move on. Do not retry the same failing action in a loop.
 - **Prioritize cheap actions first.** Read existing files, check task status, list what's available — these are free. Do your homework before spending credits on generation or search.
 - **One iteration, one meaningful action.** Each iteration costs credits. Make every iteration count — don't waste an iteration just to think without acting, or to post a status update nobody asked for.
+- **Estimate before executing.** When starting a task, estimate total credits needed and set estimatedCredits on the task via update_task. If you're in Plan Mode, use request_approval with a cost breakdown (e.g. "~7 iterations × 20 + render_video 50 = ~190 credits") before doing expensive work.
 
 ## Honesty & Error Handling — CRITICAL
 

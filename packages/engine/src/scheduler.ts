@@ -579,7 +579,7 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
 }
 
 /** Build a task-focused user prompt with full context (subtasks, thread). */
-async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string): Promise<string> {
+async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMode = true): Promise<string> {
   const subtasks = await getSubtasks(db, task.id)
   const subtaskLines = subtasks.length > 0
     ? subtasks.map(s => `  - [${s.status}] ${s.title} (${s.id})`).join('\n')
@@ -625,6 +625,9 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string): Promi
     `6. Before finishing your work, use update_scratchpad to save notes about what you tried, what worked/failed, and what to do next time.`,
     `7. For complex tasks requiring many steps, break the work into subtasks using add_subtask. Each subtask gets its own fresh sprint with full context — this is more effective than trying to do everything in one long session.`,
     `8. If you created subtasks, do NOT mark the parent as "done" until all subtasks are complete. Check their status first.`,
+    ...(planMode ? [
+      `9. **PLAN MODE is ON.** Before doing any work, estimate the total credit cost and set it on this task using update_task with estimatedCredits. Then use request_approval with a cost breakdown (e.g. "~7 iterations × 20 credits + render_video 50 credits = ~190 credits") so the human can approve before you spend credits. Do NOT proceed with expensive work until approved.`,
+    ] : []),
   ].join('\n')
 }
 
@@ -716,6 +719,17 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   let costPerIteration = 0
   let iterationsUsed = 0
 
+  // Resolve effective plan mode: agent override > team default > true
+  let effectivePlanMode = true
+  if (agent.planMode !== null) {
+    effectivePlanMode = agent.planMode
+  } else {
+    const teamProfile = await db.queryOne<{ plan_mode_default: boolean | number | null }>(
+      'SELECT plan_mode_default FROM team_profiles WHERE team_id = $1', [agent.teamId],
+    )
+    effectivePlanMode = teamProfile?.plan_mode_default == null ? true : teamProfile.plan_mode_default === true || teamProfile.plan_mode_default === 1
+  }
+
   if (!isAdvisor) {
     try {
       const assignedTasks = await getAgentAssignedTasks(db, agent.id, agent.teamId)
@@ -755,7 +769,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           const remainingBudget = reservedIterations - iterationsUsed
           if (remainingBudget < 2) break // need at least 2 iterations for meaningful work
 
-          const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId)
+          const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode)
           const taskBoosts = detectTaskCategories(task.title, task.description)
           const runtimeConfig = {
             maxIterations: remainingBudget,
@@ -855,7 +869,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               const remainingBudget = reservedIterations - iterationsUsed
               if (remainingBudget < 2) break
 
-              const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId)
+              const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode)
               const taskBoosts = detectTaskCategories(task.title, task.description)
               const runtimeConfig = {
                 maxIterations: remainingBudget,

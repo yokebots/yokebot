@@ -27,6 +27,7 @@ export function AgentDetailPage() {
   const [editHeartbeat, setEditHeartbeat] = useState(1800)
   const [editHoursStart, setEditHoursStart] = useState(6)
   const [editHoursEnd, setEditHoursEnd] = useState(22)
+  const [editPlanMode, setEditPlanMode] = useState<boolean | null>(null)
   const [models, setModels] = useState<LogicalModel[]>([])
   const [modelCatalog, setModelCatalog] = useState<ModelCreditCost[]>([])
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null)
@@ -53,6 +54,7 @@ export function AgentDetailPage() {
       setEditHeartbeat(a.heartbeatSeconds)
       setEditHoursStart(a.activeHoursStart)
       setEditHoursEnd(a.activeHoursEnd)
+      setEditPlanMode(a.planMode ?? true)
       setModels(m)
       setModelCatalog(catalog)
       setBillingStatus(billing)
@@ -89,6 +91,7 @@ export function AgentDetailPage() {
         heartbeatSeconds: editHeartbeat,
         activeHoursStart: editHoursStart,
         activeHoursEnd: editHoursEnd,
+        planMode: editPlanMode,
       })
       await loadData()
       setSaveSuccess(true)
@@ -287,6 +290,37 @@ export function AgentDetailPage() {
                 {editModelId && !models.find((m) => m.id === editModelId) && (
                   <p className="mt-2 text-xs text-amber-600">Current model "{editModelId}" is not available. Select a new model.</p>
                 )}
+              </div>
+
+              {/* Plan Mode Override */}
+              <div className="rounded-lg border border-border-subtle bg-white p-4">
+                <h3 className="text-sm font-bold text-text-main mb-2">Plan Mode</h3>
+                <div className="flex gap-2">
+                  {([
+                    { value: null, label: 'Team Default' },
+                    { value: true, label: 'Plan Mode' },
+                    { value: false, label: 'Auto Approve' },
+                  ] as const).map((opt) => (
+                    <button
+                      key={String(opt.value)}
+                      onClick={() => setEditPlanMode(opt.value as boolean | null)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                        editPlanMode === opt.value
+                          ? 'bg-forest-green text-white'
+                          : 'bg-surface-secondary text-text-secondary hover:bg-surface-secondary/80'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-text-muted mt-2">
+                  {editPlanMode === null
+                    ? 'Uses the team-wide setting from Settings'
+                    : editPlanMode
+                      ? 'Agent estimates cost and requests approval before expensive tasks'
+                      : 'Agent executes immediately without approval (good for overnight work)'}
+                </p>
               </div>
 
               {/* Heartbeat & Work Shift */}

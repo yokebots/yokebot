@@ -39,6 +39,7 @@ export interface Agent {
   heartbeatSeconds: number
   activeHoursStart: number
   activeHoursEnd: number
+  planMode: boolean | null  // null = use team default
   templateId: string | null
   createdAt: string
   updatedAt: string
@@ -85,7 +86,7 @@ export async function listAgents(db: Db, teamId?: string): Promise<Agent[]> {
 export async function updateAgent(
   db: Db,
   id: string,
-  updates: Partial<Pick<AgentConfig, 'name' | 'department' | 'systemPrompt' | 'proactive' | 'heartbeatSeconds' | 'activeHoursStart' | 'activeHoursEnd'>> & { modelId?: string; modelEndpoint?: string; modelName?: string; iconName?: string; iconColor?: string },
+  updates: Partial<Pick<AgentConfig, 'name' | 'department' | 'systemPrompt' | 'proactive' | 'heartbeatSeconds' | 'activeHoursStart' | 'activeHoursEnd'>> & { modelId?: string; modelEndpoint?: string; modelName?: string; iconName?: string; iconColor?: string; planMode?: boolean | null },
 ): Promise<Agent | null> {
   const fields: string[] = []
   const values: unknown[] = []
@@ -103,6 +104,7 @@ export async function updateAgent(
   if (updates.activeHoursEnd !== undefined) { fields.push(`active_hours_end = $${paramIdx++}`); values.push(updates.activeHoursEnd) }
   if (updates.iconName !== undefined) { fields.push(`icon_name = $${paramIdx++}`); values.push(updates.iconName) }
   if (updates.iconColor !== undefined) { fields.push(`icon_color = $${paramIdx++}`); values.push(updates.iconColor) }
+  if (updates.planMode !== undefined) { fields.push(`plan_mode = $${paramIdx++}`); values.push(updates.planMode === null ? null : updates.planMode ? 1 : 0) }
 
   if (fields.length === 0) return getAgent(db, id)
 
@@ -154,6 +156,7 @@ function rowToAgent(row: Record<string, unknown>): Agent {
     modelName: row.model_name as string,
     systemPrompt: row.system_prompt as string | null,
     proactive: row.proactive === 1,
+    planMode: row.plan_mode == null ? null : row.plan_mode === true || row.plan_mode === 1,
     heartbeatSeconds: row.heartbeat_seconds as number,
     activeHoursStart: row.active_hours_start as number,
     activeHoursEnd: row.active_hours_end as number,

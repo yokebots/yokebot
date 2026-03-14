@@ -58,6 +58,7 @@ ENV YOKEBOT_PORT=3001
 ENV YOKEBOT_SKILLS_DIR=/app/skills
 ENV YOKEBOT_DATA_DIR=/app/data
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+ENV REMOTION_CHROME_EXECUTABLE=/usr/bin/chromium
 
 # Create non-root user and data directory
 RUN groupadd -r yokebot && useradd -r -g yokebot -m yokebot \

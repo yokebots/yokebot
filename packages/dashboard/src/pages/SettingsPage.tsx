@@ -43,6 +43,7 @@ export function SettingsPage() {
     targetMarket: '', primaryGoal: '', businessSummary: '',
   })
   const [additionalContext, setAdditionalContext] = useState('')
+  const [planModeDefault, setPlanModeDefault] = useState(true)
   const [savingTeam, setSavingTeam] = useState(false)
   const [teamSaved, setTeamSaved] = useState(false)
 
@@ -100,6 +101,7 @@ export function SettingsPage() {
         businessSummary: profile.businessSummary ?? '',
       })
       setAdditionalContext(profile.additionalContext ?? '')
+      setPlanModeDefault(profile.planModeDefault ?? true)
     } catch { /* no profile yet */ }
   }, [activeTeam?.id, activeTeam?.name])
 
@@ -274,6 +276,33 @@ export function SettingsPage() {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* Plan Mode Default */}
+          <div className="rounded-lg border border-border-subtle bg-white p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-text-main">Plan Mode</h3>
+                <p className="text-xs text-text-muted mt-0.5">
+                  {planModeDefault
+                    ? 'Agents estimate cost and request approval before expensive tasks'
+                    : 'Agents execute immediately without approval (Auto Approve)'}
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  const newVal = !planModeDefault
+                  setPlanModeDefault(newVal)
+                  if (activeTeam) {
+                    await engine.updateTeamProfile(activeTeam.id, { planModeDefault: newVal } as Parameters<typeof engine.updateTeamProfile>[1])
+                  }
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${planModeDefault ? 'bg-forest-green' : 'bg-gray-300'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${planModeDefault ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+            <p className="text-[11px] text-text-muted mt-2">This is the default for all agents. Individual agents can override this in their settings.</p>
           </div>
 
           {/* Business Context */}

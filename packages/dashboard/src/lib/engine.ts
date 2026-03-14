@@ -13,6 +13,10 @@ const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 let _activeTeamId: string | null = null
 
 export function setActiveTeamId(teamId: string | null) {
+  if (_activeTeamId && teamId && _activeTeamId !== teamId) {
+    // Clear API cache when switching teams so stale data doesn't leak across teams
+    invalidateCache()
+  }
   _activeTeamId = teamId
 }
 
@@ -120,6 +124,7 @@ export interface EngineAgent {
   heartbeatSeconds: number
   activeHoursStart: number
   activeHoursEnd: number
+  planMode: boolean | null  // null = use team default
   templateId: string | null
   createdAt: string
   updatedAt: string
@@ -149,6 +154,7 @@ export interface EngineTask {
   blockedApprovalId: string | null
   blockedReasonText: string | null
   scratchpad: string | null
+  estimatedCredits: number | null
   sprintCount: number
   createdAt: string
   updatedAt: string
@@ -968,6 +974,7 @@ export interface TeamProfile {
   onboardedAt: string | null
   additionalContext: string | null
   timezone: string | null
+  planModeDefault: boolean
 }
 
 export interface WebsiteScanResult {

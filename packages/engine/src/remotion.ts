@@ -15,6 +15,11 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 
+// Tell Remotion to use system Chromium instead of downloading its own.
+// The Docker image has chromium installed at /usr/bin/chromium but the
+// non-root yokebot user can't write to node_modules/.remotion (EACCES).
+const SYSTEM_CHROMIUM = process.env.REMOTION_CHROME_EXECUTABLE ?? process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+
 export interface RenderOptions {
   compositionCode: string
   durationInFrames?: number
@@ -57,12 +62,16 @@ export async function renderComposition(opts: RenderOptions): Promise<RenderResu
     const { bundle } = await import('@remotion/bundler')
     const { renderMedia, selectComposition, ensureBrowser } = await import('@remotion/renderer')
 
-    // Download Chromium on first render (cached after that)
+    // Use system Chromium if available, otherwise download on first render
     if (!browserReady) {
-      console.log('[remotion] Downloading browser for first render...')
-      await ensureBrowser()
+      if (SYSTEM_CHROMIUM) {
+        console.log(`[remotion] Using system browser: ${SYSTEM_CHROMIUM}`)
+      } else {
+        console.log('[remotion] Downloading browser for first render...')
+        await ensureBrowser()
+        console.log('[remotion] Browser ready')
+      }
       browserReady = true
-      console.log('[remotion] Browser ready')
     }
 
     // Write the user's composition component
@@ -105,6 +114,7 @@ registerRoot(Root);
       serveUrl: bundleLocation,
       id: 'Main',
       inputProps,
+      ...(SYSTEM_CHROMIUM ? { browserExecutable: SYSTEM_CHROMIUM } : {}),
     })
 
     // Render to MP4
@@ -116,6 +126,7 @@ registerRoot(Root);
         serveUrl: bundleLocation,
         codec: 'h264',
         outputLocation: outputPath,
+        ...(SYSTEM_CHROMIUM ? { browserExecutable: SYSTEM_CHROMIUM } : {}),
         chromiumOptions: {
           enableMultiProcessOnLinux: true,
         },

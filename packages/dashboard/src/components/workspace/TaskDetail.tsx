@@ -297,6 +297,16 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
               </div>
             </div>
           )}
+          {/* Credit Estimate */}
+          {task.estimatedCredits != null && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted w-14">Est.</span>
+              <div className="flex items-center gap-1">
+                <span className="material-symbols-outlined text-[14px] text-amber-500">toll</span>
+                <span className="text-xs text-text-main">{task.estimatedCredits.toLocaleString()} credits</span>
+              </div>
+            </div>
+          )}
           {/* Description */}
           {task.description && (
             <p className="text-xs text-text-secondary leading-relaxed">{task.description}</p>

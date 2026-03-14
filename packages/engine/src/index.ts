@@ -2259,7 +2259,7 @@ async function main() {
       'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
     )
     if (!profile) {
-      return res.json({ teamId: req.params.id, companyName: null, companyUrl: null, industry: null, companySize: null, businessSummary: null, targetMarket: null, primaryGoal: null, onboardedAt: null, timezone: null })
+      return res.json({ teamId: req.params.id, companyName: null, companyUrl: null, industry: null, companySize: null, businessSummary: null, targetMarket: null, primaryGoal: null, onboardedAt: null, timezone: null, planModeDefault: true })
     }
     res.json({
       teamId: profile.team_id,
@@ -2272,6 +2272,7 @@ async function main() {
       primaryGoal: profile.primary_goal,
       onboardedAt: profile.onboarded_at,
       timezone: profile.timezone ?? null,
+      planModeDefault: profile.plan_mode_default == null ? true : profile.plan_mode_default === true || profile.plan_mode_default === 1,
     })
   })
 
@@ -2282,18 +2283,19 @@ async function main() {
     const caller = members.find((m) => m.userId === req.user!.id)
     if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
 
-    const body = req.body as Record<string, string | null | undefined>
+    const body = req.body as Record<string, unknown>
     // Coerce undefined to null — Postgres driver rejects undefined values
-    const companyName = body.companyName ?? null
-    const companyUrl = body.companyUrl ?? null
-    const industry = body.industry ?? null
-    const companySize = body.companySize ?? null
-    const businessSummary = body.businessSummary ?? null
-    const targetMarket = body.targetMarket ?? null
-    const primaryGoal = body.primaryGoal ?? null
+    const companyName = (body.companyName as string) ?? null
+    const companyUrl = (body.companyUrl as string) ?? null
+    const industry = (body.industry as string) ?? null
+    const companySize = (body.companySize as string) ?? null
+    const businessSummary = (body.businessSummary as string) ?? null
+    const targetMarket = (body.targetMarket as string) ?? null
+    const primaryGoal = (body.primaryGoal as string) ?? null
     const onboardedAt = body.onboardedAt ?? null
     const additionalContext = body.additionalContext ?? null
     const timezone = body.timezone ?? null
+    const planModeDefault = body.planModeDefault !== undefined ? (body.planModeDefault ? 1 : 0) : null
 
     const existing = await db.queryOne<Record<string, unknown>>(
       'SELECT * FROM team_profiles WHERE team_id = $1', [req.params.id],
@@ -2312,15 +2314,16 @@ async function main() {
           onboarded_at = COALESCE($8, onboarded_at),
           additional_context = COALESCE($9, additional_context),
           timezone = COALESCE($10, timezone),
+          plan_mode_default = COALESCE($11, plan_mode_default),
           updated_at = ${db.now()}
-        WHERE team_id = $11`,
-        [companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext, timezone, req.params.id],
+        WHERE team_id = $12`,
+        [companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext, timezone, planModeDefault, req.params.id],
       )
     } else {
       await db.run(
-        `INSERT INTO team_profiles (team_id, company_name, company_url, industry, company_size, business_summary, target_market, primary_goal, onboarded_at, additional_context, timezone)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [req.params.id, companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext, timezone],
+        `INSERT INTO team_profiles (team_id, company_name, company_url, industry, company_size, business_summary, target_market, primary_goal, onboarded_at, additional_context, timezone, plan_mode_default)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [req.params.id, companyName, companyUrl, industry, companySize, businessSummary, targetMarket, primaryGoal, onboardedAt, additionalContext, timezone, planModeDefault ?? 1],
       )
     }
     res.json({ success: true })

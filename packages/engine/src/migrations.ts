@@ -1446,6 +1446,30 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 34,
+    name: 'add_plan_mode_and_estimated_credits',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS estimated_credits INTEGER`)
+        await db.run(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS plan_mode BOOLEAN`) // null = use team default
+        await db.run(`ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS plan_mode_default BOOLEAN DEFAULT true`)
+      } else {
+        const taskCols = await db.query<{ name: string }>(`PRAGMA table_info(tasks)`)
+        if (!taskCols.some(c => c.name === 'estimated_credits')) {
+          await db.run(`ALTER TABLE tasks ADD COLUMN estimated_credits INTEGER`)
+        }
+        const agentCols = await db.query<{ name: string }>(`PRAGMA table_info(agents)`)
+        if (!agentCols.some(c => c.name === 'plan_mode')) {
+          await db.run(`ALTER TABLE agents ADD COLUMN plan_mode INTEGER`) // null = use team default
+        }
+        const profileCols = await db.query<{ name: string }>(`PRAGMA table_info(team_profiles)`)
+        if (!profileCols.some(c => c.name === 'plan_mode_default')) {
+          await db.run(`ALTER TABLE team_profiles ADD COLUMN plan_mode_default INTEGER DEFAULT 1`)
+        }
+      }
+    },
+  },
 ]
 
 /**
