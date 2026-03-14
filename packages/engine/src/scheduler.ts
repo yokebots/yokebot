@@ -1030,6 +1030,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
     const runtimeConfig = { maxIterations: proactiveIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && proactiveCost > 0 }
     const proactiveDmChannel = await getDmChannel(db, agent.teamId, agent.id)
+    const heartbeatStart = new Date()
     const result = await runReactLoop(db, agent.id, agent.teamId, proactivePrompt, modelConfig, systemPrompt, state.workspaceConfig, state.skillsDir, runtimeConfig, proactiveModelId, proactiveDmChannel?.id)
 
     // Release unused reserved credits
@@ -1040,6 +1041,14 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     // Skip no-ops, iteration-limit messages, and thinking dumps — don't spam channels
     const cleanedResponse = result.response ? stripToolSyntax(result.response) : null
     const isNoOp = cleanedResponse?.includes('[no-op]') || cleanedResponse?.trim() === 'no-op' || (cleanedResponse?.trim().length ?? 0) === 0
+
+    // Mark noop heartbeat messages so they're excluded from compaction and search
+    if (isNoOp) {
+      try {
+        const { markNoopMessages } = await import('./memory.ts')
+        await markNoopMessages(db, agent.id, agent.teamId, heartbeatStart)
+      } catch { /* best-effort */ }
+    }
     const isIterationLimit = cleanedResponse?.includes('unable to complete the task within the iteration limit')
       || cleanedResponse?.includes('need a bit more time')
     const isThinkingDump = cleanedResponse
