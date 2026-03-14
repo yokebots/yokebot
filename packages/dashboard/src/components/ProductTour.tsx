@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate, useLocation } from 'react-router'
 
 const TOUR_STORAGE_KEY = 'yokebot:tourComplete'
 
@@ -9,42 +10,48 @@ interface TourStep {
   target: string
   /** Position of the tooltip relative to the target */
   position: 'top' | 'bottom' | 'left' | 'right'
+  /** If set, navigate to this path before showing the step */
+  navigateTo?: string
 }
 
 const TOUR_STEPS: TourStep[] = [
   {
     title: 'Welcome to YokeBot',
-    description: 'This is your Dashboard. It shows a snapshot of your agents, tasks, and activity at a glance. You can click it to continue, or use the buttons below.',
+    description: 'This is your Dashboard. It gives you a quick overview of your agents, tasks, and recent activity.',
     target: '[data-tour="dashboard"]',
     position: 'bottom',
+    navigateTo: '/dashboard',
   },
   {
-    title: 'Workspace & Team Chat',
-    description: 'The Workspace is your command center. Chat with AI agents using @mentions, type "/" for quick commands, and manage files and tabs all in one place.',
-    target: 'a[href="/workspace"]',
+    title: 'Team Chat',
+    description: 'This is your team chat. @mention an agent to assign work or ask questions. Type "/" for quick commands like /status, /assign, or /workflow.',
+    target: '[data-tour="chat-panel"]',
+    position: 'left',
+    navigateTo: '/workspace',
+  },
+  {
+    title: 'Files & Documents',
+    description: 'Your workspace files live here. Agents can create and update files as they work. Upload documents to the knowledge base for agents to reference.',
+    target: '[data-tour="files-panel"]',
     position: 'right',
+    navigateTo: '/workspace',
   },
   {
-    title: 'Agents',
-    description: 'View and manage your AI agents. Click any agent to configure its model, heartbeat frequency, skills, and system instructions. Use the toggle in the top bar to start/stop all agents.',
+    title: 'Tasks & Workflows',
+    description: 'Track tasks and run workflows from this panel. When Plan Mode is on, agents request your approval before acting. Switch to the Workflows tab to run multi-step automations.',
+    target: '[data-tour="tasks-panel"]',
+    position: 'left',
+    navigateTo: '/workspace',
+  },
+  {
+    title: 'Manage Your Agents',
+    description: 'Configure each agent here: choose a model, set the heartbeat frequency, install skills, and customize system instructions. Use the top bar toggle to start or stop all agents at once.',
     target: 'a[href="/agents"]',
     position: 'right',
   },
   {
-    title: 'Tasks & Approvals',
-    description: 'Track all tasks across your agents. When Plan Mode is on, agents will request your approval before taking action. You can also organize work into Goals, Projects, and Workflows.',
-    target: 'a[href="/tasks"]',
-    position: 'right',
-  },
-  {
-    title: 'Files & Data Tables',
-    description: 'Your workspace files and data tables live here. Agents can create, read, and update these as part of their work. Upload documents to the knowledge base for agents to reference.',
-    target: 'a[href="/files"]',
-    position: 'right',
-  },
-  {
     title: 'Universal Search',
-    description: 'Press Cmd+K anytime to search across agents, tasks, files, and more. It works from any page.',
+    description: 'Press Cmd+K anytime to search across agents, tasks, files, and more. It works from any page. You\'re all set!',
     target: '[data-tour="search"]',
     position: 'bottom',
   },
@@ -62,6 +69,8 @@ export function ProductTour({ forceStart, onComplete }: ProductTourProps) {
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 })
   const [highlightRect, setHighlightRect] = useState<DOMRect | null>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
+  const location = useLocation()
 
   useEffect(() => {
     if (forceStart) {
@@ -72,11 +81,19 @@ export function ProductTour({ forceStart, onComplete }: ProductTourProps) {
     // Auto-show for first-time users
     const completed = localStorage.getItem(TOUR_STORAGE_KEY)
     if (!completed) {
-      // Small delay so the page renders first
       const timer = setTimeout(() => setVisible(true), 1000)
       return () => clearTimeout(timer)
     }
   }, [forceStart])
+
+  // Navigate to the correct page when step changes
+  useEffect(() => {
+    if (!visible) return
+    const step = TOUR_STEPS[currentStep]
+    if (step?.navigateTo && location.pathname !== step.navigateTo) {
+      navigate(step.navigateTo)
+    }
+  }, [visible, currentStep, navigate, location.pathname])
 
   const positionTooltip = useCallback(() => {
     const step = TOUR_STEPS[currentStep]
@@ -84,8 +101,7 @@ export function ProductTour({ forceStart, onComplete }: ProductTourProps) {
 
     const el = document.querySelector(step.target)
     if (!el) {
-      // Target not found — try to find it on the current page
-      // If not visible, show tooltip centered
+      // Target not rendered yet (page still loading) — retry shortly
       setHighlightRect(null)
       setTooltipPos({
         top: window.innerHeight / 2 - 100,
@@ -130,12 +146,20 @@ export function ProductTour({ forceStart, onComplete }: ProductTourProps) {
     setTooltipPos({ top, left })
   }, [currentStep])
 
+  // Reposition when visible, step changes, or page navigates
+  // Use a short interval to catch elements that render after navigation
   useEffect(() => {
     if (!visible) return
     positionTooltip()
+    // Retry positioning a few times after navigation to catch late-rendering elements
+    const retries = [100, 300, 600]
+    const timers = retries.map(ms => setTimeout(positionTooltip, ms))
     window.addEventListener('resize', positionTooltip)
-    return () => window.removeEventListener('resize', positionTooltip)
-  }, [visible, currentStep, positionTooltip])
+    return () => {
+      timers.forEach(clearTimeout)
+      window.removeEventListener('resize', positionTooltip)
+    }
+  }, [visible, currentStep, positionTooltip, location.pathname])
 
   const completeTour = useCallback(() => {
     localStorage.setItem(TOUR_STORAGE_KEY, 'true')

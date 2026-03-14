@@ -9,6 +9,7 @@ interface ResizablePanelProps {
   side: 'left' | 'right'
   className?: string
   collapsed?: boolean
+  'data-tour'?: string
 }
 
 export function ResizablePanel({
@@ -20,6 +21,7 @@ export function ResizablePanel({
   side,
   className = '',
   collapsed = false,
+  'data-tour': dataTour,
 }: ResizablePanelProps) {
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem(`workspace-panel-${storageKey}`)
@@ -83,6 +85,7 @@ export function ResizablePanel({
     <div
       className={`relative shrink-0 ${className}`}
       style={{ width }}
+      data-tour={dataTour}
     >
       {children}
       {handle}

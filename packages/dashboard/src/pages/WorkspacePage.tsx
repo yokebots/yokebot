@@ -215,12 +215,13 @@ export function WorkspacePage() {
         storageKey="files"
         side="left"
         className="border-r border-border-subtle bg-light-surface overflow-hidden flex flex-col"
+        data-tour="files-panel"
       >
         <FilesPanel workspace={workspaceState} unreadFileIds={unreadFileIds} onMarkFileRead={handleMarkFileRead} onMarkAllFilesRead={handleMarkAllFilesRead} />
       </ResizablePanel>
 
       {/* Center: Context Pane (viewer tabs + team chat) */}
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0" data-tour="chat-panel">
         <ContextPane
           workspace={workspaceState}
           teamChannelId={teamChannelId}
@@ -237,6 +238,7 @@ export function WorkspacePage() {
         storageKey="tasks"
         side="right"
         className="border-l border-border-subtle bg-light-surface overflow-hidden flex flex-col"
+        data-tour="tasks-panel"
       >
         <div className="flex flex-col h-full">
           {/* Sub-tab toggle */}
