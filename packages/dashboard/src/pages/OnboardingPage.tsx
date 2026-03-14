@@ -160,6 +160,7 @@ export function OnboardingPage() {
   const [speakingAgent, setSpeakingAgent] = useState<{ name: string; icon: string; iconColor: string } | null>(null)
   const [meetingInput, setMeetingInput] = useState('')
   const [audioEnabled, setAudioEnabled] = useState(true)
+  const audioEnabledRef = useRef(true)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const meetingAudioUrlRef = useRef<string | null>(null)
   const meetingEndRef = useRef<HTMLDivElement>(null)
@@ -288,7 +289,7 @@ export function OnboardingPage() {
     }
 
     // Play audio as blob URL (not base64 data URI)
-    if (audioEnabled && audioBase64) {
+    if (audioEnabledRef.current && audioBase64) {
       try {
         if (audioRef.current) audioRef.current.pause()
         if (meetingAudioUrlRef.current) URL.revokeObjectURL(meetingAudioUrlRef.current)
@@ -319,7 +320,7 @@ export function OnboardingPage() {
     // Start word timer with estimated duration (will be recalibrated when audio loads)
     startMtgWordTimer(durationMs)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioEnabled])
+  }, [])
 
   // Start word-level highlight timer from a given word index
   // `screens` parameter avoids stale closure over narrationScreens React state
@@ -369,7 +370,7 @@ export function OnboardingPage() {
 
       const audio = new Audio(url)
       narrationAudioRef.current = audio
-      audio.muted = !audioEnabled
+      audio.muted = !audioEnabledRef.current
 
       // Recalibrate word timing when actual audio duration is known
       audio.onloadedmetadata = () => {
@@ -400,7 +401,7 @@ export function OnboardingPage() {
       setCurrentScreen(screens.length - 1)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioEnabled])
+  }, [])
 
   // Pause / resume narration
   const toggleNarrationPause = useCallback(() => {
@@ -523,10 +524,14 @@ export function OnboardingPage() {
     return () => { cancelled = true; if (narrationTimerRef.current) clearInterval(narrationTimerRef.current) }
   }, [step, activeTeam?.id, audioUnlocked, firstName, playNarration])
 
-  // Sync mute/unmute with current audio element
+  // Sync mute/unmute with current audio elements (narration + meeting)
   useEffect(() => {
+    audioEnabledRef.current = audioEnabled
     if (narrationAudioRef.current) {
       narrationAudioRef.current.muted = !audioEnabled
+    }
+    if (audioRef.current) {
+      audioRef.current.muted = !audioEnabled
     }
   }, [audioEnabled])
 
