@@ -777,119 +777,145 @@ interface ToolFormatAdapter {
   stripMarkup(text: string): string
 }
 
-// ---- Qwen 3.5 Adapter (qwen3-coder XML format) ----
-// Qwen 3.5 models were trained on the qwen3-coder format, NOT Hermes or OpenAI.
-// Format: <tool_call><function=name><parameter=key>value</parameter></function></tool_call>
+// ---- YokeBot Adapter (JSON-in-tags format) ----
+// Universal tool format for models that don't support OpenAI tool calling natively.
+// Uses JSON inside <tool_call> tags — simpler and more reliable than XML parameter formats,
+// especially for complex nested arguments (file arrays, code content, etc.).
+// Format: <tool_call>{"name": "tool_name", "arguments": {"key": "value"}}</tool_call>
 
-const qwen35Adapter: ToolFormatAdapter = {
-  id: 'qwen3_coder',
+const yokebotAdapter: ToolFormatAdapter = {
+  id: 'yokebot',
 
   matches(modelId: string): boolean {
     const id = modelId.toLowerCase()
-    // Qwen 3.5, Nemotron 3, and Step 3.5 Flash all use the qwen3-coder XML tool call format
-    return id.includes('qwen3.5') || id.includes('qwen3-5') || id.includes('nemotron') || id.includes('step-3')
+    // Models that need native tool format (don't support OpenAI tools reliably via proxy)
+    return id.includes('qwen3.5') || id.includes('qwen3-5')
+      || id.includes('nemotron')
+      || id.includes('step-3')
   },
 
   formatToolPrompt(tools: ToolDef[]): string {
-    const toolDescs = tools.map((t) => {
-      const fn = t.function
-      const props = (fn.parameters as { properties?: Record<string, { type?: string; description?: string; enum?: string[] }> })?.properties ?? {}
-      const required = (fn.parameters as { required?: string[] })?.required ?? []
-      const paramLines = Object.entries(props).map(([name, schema]) => {
-        const req = required.includes(name) ? 'required' : 'optional'
-        const type = schema.type ?? 'string'
-        const desc = schema.description ? ` — ${schema.description}` : ''
-        const enumVals = schema.enum ? ` (one of: ${schema.enum.join(', ')})` : ''
-        return `  - ${name} (${type}, ${req})${desc}${enumVals}`
-      }).join('\n')
-      return `### ${fn.name}\n${fn.description}\nParameters:\n${paramLines}`
-    }).join('\n\n')
+    // Describe tools in JSON schema format inside <tools> block
+    const toolSchemas = tools.map((t) => ({
+      type: 'function',
+      function: {
+        name: t.function.name,
+        description: t.function.description,
+        parameters: t.function.parameters,
+      },
+    }))
 
-    return `# Available Tools
+    return `You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions.
 
-You have access to the following tools. To call a tool, you MUST output a tool_call block in EXACTLY this XML format:
+<tools>
+${JSON.stringify(toolSchemas, null, 2)}
+</tools>
 
+For each function call, return a JSON object with the function name and arguments within <tool_call></tool_call> XML tags:
 <tool_call>
-<function=tool_name>
-<parameter=param_name>param_value</parameter>
-</function>
+{"name": "<function-name>", "arguments": <args-dict>}
 </tool_call>
 
-## CRITICAL FORMAT RULES — follow these EXACTLY:
-1. Every tool call MUST be wrapped in <tool_call>...</tool_call> tags.
-2. Inside, use <function=TOOL_NAME>...</function> with the exact tool name.
-3. Every parameter MUST use <parameter=PARAM_NAME>value</parameter> tags.
-4. You MUST include ALL required parameters. Do NOT leave any empty.
-5. The </function> closing tag is REQUIRED before </tool_call>.
-6. For JSON values (objects, arrays), output valid JSON as the parameter value.
-7. You may call multiple tools by outputting multiple <tool_call> blocks.
-8. ALWAYS call at least one tool when you have a task to do. Never just describe what you would do — ACT by calling tools.
-9. When you want to respond to the user, call the "respond" tool with a "message" parameter.
+RULES:
+1. ALWAYS call at least one tool when you have a task to do. Never describe what you would do — ACT by calling tools.
+2. You MUST respond to the user by calling the "respond" tool with a "message" argument. Do NOT write a plain text response.
+3. You may call multiple tools by outputting multiple <tool_call> blocks.
+4. The "arguments" value must be a valid JSON object with the correct parameter names and types.
+5. ALWAYS use the "think" tool first to plan your approach before taking action.
 
-## Example — calling a tool:
-
+Example — thinking then responding:
 <tool_call>
-<function=think>
-<parameter=thought>I need to check the current files before making changes.</parameter>
-</function>
+{"name": "think", "arguments": {"thought": "The user wants me to check the files first."}}
+</tool_call>
+<tool_call>
+{"name": "sandbox_list_files", "arguments": {"directory": "/home/daytona/app"}}
 </tool_call>
 
-## Example — responding to the user:
-
+Example — responding to the user:
 <tool_call>
-<function=respond>
-<parameter=message>I've completed the task! Here's what I did...</parameter>
-</function>
-</tool_call>
-
-${toolDescs}`
+{"name": "respond", "arguments": {"message": "I've completed the task! Here's what I did..."}}
+</tool_call>`
   },
 
   parseToolCalls(text: string): ToolCall[] {
     const calls: ToolCall[] = []
-    // Match <function=name>...</function> or <function=name>...</tool_call> (model sometimes omits </function>)
-    const funcRegex = /<function=([^>]+)>([\s\S]*?)(?:<\/function>|<\/tool_call>)/g
+
+    // Primary: match <tool_call>{...}</tool_call> blocks
+    const blockRegex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g
     let match
-    while ((match = funcRegex.exec(text)) !== null) {
-      const toolName = match[1].trim()
-      const body = match[2]
-      const params: Record<string, unknown> = {}
-
-      const paramRegex = /<parameter=([^>]+)>([\s\S]*?)<\/parameter>/g
-      let paramMatch
-      while ((paramMatch = paramRegex.exec(body)) !== null) {
-        const paramName = paramMatch[1].trim()
-        let paramValue: unknown = paramMatch[2].trim()
-        // Try to parse as JSON for objects/arrays/numbers/booleans
-        if (typeof paramValue === 'string') {
-          if (paramValue.startsWith('{') || paramValue.startsWith('[')) {
-            try { paramValue = JSON.parse(paramValue) } catch { /* keep as string */ }
-          } else if (paramValue === 'true') { paramValue = true }
-          else if (paramValue === 'false') { paramValue = false }
-          else if (/^-?\d+(\.\d+)?$/.test(paramValue)) { paramValue = Number(paramValue) }
+    while ((match = blockRegex.exec(text)) !== null) {
+      const jsonStr = match[1].trim()
+      try {
+        const parsed = JSON.parse(jsonStr) as { name: string; arguments: Record<string, unknown> }
+        if (parsed.name) {
+          calls.push({
+            id: `yokebot-${Date.now()}-${calls.length}`,
+            type: 'function',
+            function: {
+              name: parsed.name,
+              arguments: JSON.stringify(parsed.arguments ?? {}),
+            },
+          })
         }
-        params[paramName] = paramValue
+      } catch {
+        // JSON parse failed — try to extract name and arguments with regex fallback
+        const nameMatch = jsonStr.match(/"name"\s*:\s*"([^"]+)"/)
+        const argsMatch = jsonStr.match(/"arguments"\s*:\s*(\{[\s\S]*\})/)
+        if (nameMatch) {
+          calls.push({
+            id: `yokebot-${Date.now()}-${calls.length}`,
+            type: 'function',
+            function: {
+              name: nameMatch[1],
+              arguments: argsMatch?.[1] ?? '{}',
+            },
+          })
+        }
       }
-
-      calls.push({
-        id: `qwen35-${Date.now()}-${calls.length}`,
-        type: 'function',
-        function: { name: toolName, arguments: JSON.stringify(params) },
-      })
     }
+
+    // Fallback: also catch qwen3-coder XML format in case model falls back to training format
+    if (calls.length === 0) {
+      const funcRegex = /<function=([^>]+)>([\s\S]*?)(?:<\/function>|<\/tool_call>)/g
+      while ((match = funcRegex.exec(text)) !== null) {
+        const toolName = match[1].trim()
+        const body = match[2]
+        const params: Record<string, unknown> = {}
+        const paramRegex = /<parameter=([^>]+)>([\s\S]*?)<\/parameter>/g
+        let paramMatch
+        while ((paramMatch = paramRegex.exec(body)) !== null) {
+          const paramName = paramMatch[1].trim()
+          let paramValue: unknown = paramMatch[2].trim()
+          if (typeof paramValue === 'string') {
+            if (paramValue.startsWith('{') || paramValue.startsWith('[')) {
+              try { paramValue = JSON.parse(paramValue) } catch { /* keep as string */ }
+            } else if (paramValue === 'true') { paramValue = true }
+            else if (paramValue === 'false') { paramValue = false }
+            else if (/^-?\d+(\.\d+)?$/.test(paramValue)) { paramValue = Number(paramValue) }
+          }
+          params[paramName] = paramValue
+        }
+        calls.push({
+          id: `yokebot-fallback-${Date.now()}-${calls.length}`,
+          type: 'function',
+          function: { name: toolName, arguments: JSON.stringify(params) },
+        })
+      }
+    }
+
     return calls
   },
 
   stripMarkup(text: string): string {
     return text
-      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')  // closed blocks
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')  // closed JSON blocks
       .replace(/<tool_call>[\s\S]*$/g, '')                // unclosed trailing block
-      .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '') // standalone function blocks
-      .replace(/<function=[^>]*>[\s\S]*$/g, '')           // unclosed trailing function
-      .replace(/<\/function>/g, '')                       // orphaned closing tags
-      .replace(/<\/tool_call>/g, '')                      // orphaned closing tags
-      .replace(/<parameter=[^>]*>[\s\S]*?<\/parameter>/g, '') // orphaned parameter tags
-      .replace(/<\/parameter>/g, '')                      // orphaned closing parameter tags
+      .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '') // qwen3-coder fallback blocks
+      .replace(/<function=[^>]*>[\s\S]*$/g, '')           // unclosed fallback
+      .replace(/<\/function>/g, '')
+      .replace(/<\/tool_call>/g, '')
+      .replace(/<parameter=[^>]*>[\s\S]*?<\/parameter>/g, '')
+      .replace(/<\/parameter>/g, '')
       .trim()
   },
 }
@@ -948,7 +974,7 @@ const dsmlAdapter: ToolFormatAdapter = {
 }
 
 // Registry of all adapters — checked in order
-const TOOL_ADAPTERS: ToolFormatAdapter[] = [qwen35Adapter, dsmlAdapter]
+const TOOL_ADAPTERS: ToolFormatAdapter[] = [yokebotAdapter, dsmlAdapter]
 
 /** Find the native tool format adapter for a given model ID, if any */
 function getToolAdapter(providerModelId: string): ToolFormatAdapter | null {
@@ -981,20 +1007,16 @@ function applyNativeToolFormat(
   const modified: ChatMessage[] = []
   for (const msg of messages) {
     if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
-      // Convert assistant tool_calls into text showing what tools were called
+      // Convert assistant tool_calls into JSON-in-tags format
       const callText = msg.tool_calls.map((tc) => {
         const args = JSON.parse(tc.function.arguments) as Record<string, unknown>
-        const paramTags = Object.entries(args).map(([k, v]) => {
-          const val = typeof v === 'string' ? v : JSON.stringify(v)
-          return `<parameter=${k}>${val}</parameter>`
-        }).join('\n')
-        return `<tool_call>\n<function=${tc.function.name}>\n${paramTags}\n</function>\n</tool_call>`
+        return `<tool_call>\n${JSON.stringify({ name: tc.function.name, arguments: args })}\n</tool_call>`
       }).join('\n')
       const content = msg.content ? `${msg.content}\n\n${callText}` : callText
       modified.push({ role: 'assistant', content })
     } else if (msg.role === 'tool') {
       // Convert tool result into a user message showing the result
-      modified.push({ role: 'user', content: `[Tool Result]: ${msg.content}` })
+      modified.push({ role: 'user', content: `<tool_response>\n${msg.content}\n</tool_response>` })
     } else {
       modified.push(msg)
     }
