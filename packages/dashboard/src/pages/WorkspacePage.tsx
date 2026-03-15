@@ -49,11 +49,38 @@ export function WorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [mobileTab, setMobileTab] = useState<MobileTab>('Chat')
 
-  // Viewer tabs state
+  // Viewer tabs state — persist to localStorage per team
+  const storageKey = activeTeam ? `workspace-tabs:${activeTeam.id}` : null
   const [rightPanelTab, setRightPanelTab] = useState<'tasks' | 'workflows'>('tasks')
-  const [viewerTabs, setViewerTabs] = useState<ViewerTab[]>([])
-  const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [viewerTabs, setViewerTabs] = useState<ViewerTab[]>(() => {
+    if (!storageKey) return []
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (!saved) return []
+      const parsed = JSON.parse(saved) as { tabs: ViewerTab[]; activeTabId: string | null }
+      // Filter out browser tabs — sessions don't survive refresh
+      return (parsed.tabs ?? []).filter((t: ViewerTab) => t.type !== 'browser')
+    } catch { return [] }
+  })
+  const [activeTabId, setActiveTabId] = useState<string | null>(() => {
+    if (!storageKey) return null
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (!saved) return null
+      const parsed = JSON.parse(saved) as { tabs: ViewerTab[]; activeTabId: string | null }
+      const restoredTabs = (parsed.tabs ?? []).filter((t: ViewerTab) => t.type !== 'browser')
+      // Only restore activeTabId if the tab still exists after filtering
+      return restoredTabs.some((t: ViewerTab) => t.id === parsed.activeTabId) ? parsed.activeTabId : (restoredTabs[0]?.id ?? null)
+    } catch { return null }
+  })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+
+  // Persist tabs to localStorage whenever they change
+  useEffect(() => {
+    if (!storageKey) return
+    const data = { tabs: viewerTabs, activeTabId }
+    localStorage.setItem(storageKey, JSON.stringify(data))
+  }, [storageKey, viewerTabs, activeTabId])
 
   // Context pane split ratio (top viewer / bottom chat)
   const [splitRatio, setSplitRatio] = useState(() => {

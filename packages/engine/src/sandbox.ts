@@ -22,6 +22,7 @@ export interface SandboxSession {
   teamId: string
   lastActivity: number
   idleTimer: ReturnType<typeof setTimeout>
+  startupCommand?: string  // re-run on resume (e.g. "cd /home/daytona/app && npm run dev &")
 }
 
 export interface FileEntry {
@@ -49,8 +50,8 @@ export function setSandboxBroadcast(fn: (teamId: string, url: string) => void): 
 
 const sessions = new Map<string, SandboxSession>()
 
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
-const AUTO_ARCHIVE_MINUTES = 60         // 1 hour after stop → archive
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
+const AUTO_ARCHIVE_MINUTES = 120        // 2 hours after stop → archive
 
 let daytonaClient: Daytona | null = null
 
@@ -109,8 +110,8 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
   const daytona = getDaytona()
 
   // Check DB for existing sandbox
-  const row = await db.queryOne<{ daytona_sandbox_id: string; status: string }>(
-    'SELECT daytona_sandbox_id, status FROM sandbox_sessions WHERE team_id = $1',
+  const row = await db.queryOne<{ daytona_sandbox_id: string; status: string; startup_command: string | null }>(
+    'SELECT daytona_sandbox_id, status, startup_command FROM sandbox_sessions WHERE team_id = $1',
     [teamId],
   )
 
@@ -119,7 +120,8 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
       const sandbox = await daytona.get(row.daytona_sandbox_id)
 
       // Resume if stopped or archived
-      if (sandbox.state === 'stopped' || sandbox.state === 'archived') {
+      const wasResumed = sandbox.state === 'stopped' || sandbox.state === 'archived'
+      if (wasResumed) {
         console.log(`[sandbox] Resuming ${sandbox.state} sandbox for team ${teamId}`)
         await sandbox.start()
         await sandbox.waitUntilStarted(30)
@@ -131,9 +133,18 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
           teamId,
           lastActivity: Date.now(),
           idleTimer: setTimeout(() => {}, 0),
+          startupCommand: row.startup_command ?? undefined,
         }
         resetIdleTimer(session)
         sessions.set(teamId, session)
+
+        // Re-run startup command after resume (e.g. restart dev server)
+        if (wasResumed && row.startup_command) {
+          console.log(`[sandbox] Re-running startup command for team ${teamId}: ${row.startup_command}`)
+          session.sandbox.process.executeCommand(row.startup_command, undefined, undefined, 10).catch(err => {
+            console.error(`[sandbox] Startup command failed for team ${teamId}:`, (err as Error).message)
+          })
+        }
 
         // Update DB status
         await db.run(
@@ -336,6 +347,19 @@ export async function getPreviewUrl(db: Db, teamId: string, port: number): Promi
     }
   }
   throw new Error('Failed to get preview URL after retry')
+}
+
+/**
+ * Set a startup command that will be re-run whenever the sandbox resumes from stopped/archived state.
+ * Typically used to restart the dev server (e.g. "cd /home/daytona/app && npm run dev &").
+ */
+export async function setStartupCommand(db: Db, teamId: string, command: string): Promise<void> {
+  const session = sessions.get(teamId)
+  if (session) session.startupCommand = command
+  await db.run(
+    'UPDATE sandbox_sessions SET startup_command = $1 WHERE team_id = $2',
+    [command, teamId],
+  )
 }
 
 /**

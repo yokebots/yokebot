@@ -1911,6 +1911,13 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 42,
+    name: 'add_sandbox_startup_command',
+    async up(db: Db) {
+      await db.exec(`ALTER TABLE sandbox_sessions ADD COLUMN IF NOT EXISTS startup_command TEXT`)
+    },
+  },
 ]
 
 /**

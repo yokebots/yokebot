@@ -1382,9 +1382,12 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'sandbox_preview': {
-      const { getPreviewUrl } = await import('./sandbox.ts')
+      const { getPreviewUrl, setStartupCommand } = await import('./sandbox.ts')
       const port = args.port as number
       const url = await getPreviewUrl(ctx.db, ctx.teamId, port)
+      // Auto-save a startup command so the dev server restarts on sandbox resume
+      const defaultCmd = `cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &`
+      await setStartupCommand(ctx.db, ctx.teamId, defaultCmd)
       await logActivity(ctx.db, 'sandbox_preview', ctx.agentId, `Sandbox preview: port ${port}`, undefined, ctx.teamId)
       return `Preview URL: ${url}\n\nThe preview is now accessible in the dashboard.`
     }
