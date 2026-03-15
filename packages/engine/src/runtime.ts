@@ -626,9 +626,9 @@ function getBuiltinTools(): ToolDef[] {
     }, ['description']),
 
     // Sandbox tools — app-building in Daytona sandboxes
-    toolDef('sandbox_exec', 'Run a shell command in the team sandbox (isolated dev environment). Use for: npm create, npm run dev, git commands, installing packages, running builds, etc. The sandbox persists between calls.', {
-      command: { type: 'string', description: 'Shell command to execute (e.g. "npm create vite@latest app -- --template react-ts -y")' },
-      cwd: { type: 'string', description: 'Working directory (default: sandbox root)' },
+    toolDef('sandbox_exec', 'Run a shell command in the team sandbox (isolated dev environment). The sandbox persists between calls. IMPORTANT: Always prefix CI=true for npm create/init commands to avoid interactive prompts. Use /home/daytona/ as the working directory. For long-running processes like dev servers, append & to run in background.', {
+      command: { type: 'string', description: 'Shell command to execute (e.g. "cd /home/daytona && CI=true npm create vite@latest app -- --template react-ts")' },
+      cwd: { type: 'string', description: 'Working directory (default: /home/daytona)' },
     }, ['command']),
 
     toolDef('sandbox_write_file', 'Write or create a file in the team sandbox. Use for writing source code, config files, etc.', {

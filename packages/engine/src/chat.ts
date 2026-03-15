@@ -399,8 +399,14 @@ export async function processMentions(
     return
   }
 
-  // Separate agent mentions from other types
-  const agentMentions = mentions.filter(m => m.type === 'agent')
+  // Separate agent mentions from other types, deduplicating by ID
+  const seenAgentIds = new Set<string>()
+  const agentMentions = mentions.filter(m => {
+    if (m.type !== 'agent') return false
+    if (seenAgentIds.has(m.id)) return false
+    seenAgentIds.add(m.id)
+    return true
+  })
   const otherMentions = mentions.filter(m => m.type !== 'agent')
 
   // Process agent mentions concurrently with per-agent timeout (120s)
