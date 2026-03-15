@@ -22,7 +22,7 @@ export function HelpDropdown({ onRestartTour }: HelpDropdownProps) {
     { icon: 'monitor_heart', label: 'System Status', href: 'https://yokebot.com/status' },
     { icon: 'mail', label: 'Contact Support', href: 'mailto:support@yokebot.com' },
     { icon: 'rate_review', label: 'Give Feedback', href: 'https://github.com/yokebots/yokebot/issues' },
-    { icon: 'forum', label: 'Join Discord', href: 'https://discord.gg/yokebot' },
+    { icon: 'forum', label: 'Join Discord', href: 'https://discord.gg/kqfFr87KqV' },
     { divider: true },
     { icon: 'keyboard', label: 'Keyboard Shortcuts', action: () => { setOpen(false); showShortcuts() } },
     ...(onRestartTour ? [{ icon: 'tour', label: 'Restart Tutorial', action: () => { setOpen(false); onRestartTour() } }] : []),
