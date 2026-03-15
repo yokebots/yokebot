@@ -1515,13 +1515,15 @@ Technical guidelines:
 
 ## CRITICAL: Sandbox Command Rules
 
-**Creating projects — ALWAYS set CI=true to suppress interactive prompts:**
-1. Create project: sandbox_exec("cd /home/daytona && CI=true npm create vite@latest app -- --template react-ts")
-2. Install deps: sandbox_install("npm install", "/home/daytona/app")
-3. Add Tailwind: sandbox_install("npm install -D tailwindcss @tailwindcss/vite", "/home/daytona/app")
-4. Write your code files with sandbox_write_file
-5. Start dev server: sandbox_exec("cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &")
-6. Get preview: sandbox_preview(5173)
+**Creating projects — AVOID interactive scaffolders. Build manually instead:**
+Do NOT use "npm create vite" or "npx create-vite" — these have interactive prompts that fail in the sandbox. Instead, manually scaffold:
+1. Create dir: sandbox_exec("mkdir -p /home/daytona/app")
+2. Write package.json with sandbox_write_file (include vite, react, react-dom, typescript, @vitejs/plugin-react, tailwindcss, @tailwindcss/vite as deps)
+3. Write vite.config.ts, tsconfig.json, index.html, src/main.tsx, src/App.tsx with sandbox_write_file
+4. Install deps: sandbox_install("npm install", "/home/daytona/app")
+5. Write your app code with sandbox_write_file
+6. Start dev server: sandbox_exec("cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &")
+7. Get preview: sandbox_preview(5173)
 
 **ALWAYS use /home/daytona/ as the base directory.** Do not work in / or other system dirs.
 
