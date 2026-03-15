@@ -112,9 +112,10 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
     }
   }, [mode, activeSessionId])
 
-  // Keyboard handler
+  // Keyboard handler — skip when URL input is focused
   const handleKeyDown = useCallback(async (e: React.KeyboardEvent) => {
     if (mode !== 'take_control' || !activeSessionId) return
+    if (urlInputRef.current && document.activeElement === urlInputRef.current) return
 
     const specialKeys = ['Enter', 'Tab', 'Backspace', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Home', 'End']
     if (specialKeys.includes(e.key)) {
