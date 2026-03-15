@@ -581,8 +581,16 @@ export async function getAvailableModels(db: Db): Promise<LogicalModel[]> {
 // ---- Chat completion ----
 
 const LLM_TIMEOUT_MS = 120_000  // 120s — large context + many tools can take a while
-const LLM_MAX_RETRIES = 1     // 1 retry on timeout/5xx
-const LLM_RETRY_DELAY_MS = 2_000
+const LLM_MAX_RETRIES = 3     // 3 retries with exponential backoff
+const LLM_BASE_DELAY_MS = 2_000  // 2s → 4s → 8s
+
+function retryDelay(attempt: number): number {
+  return LLM_BASE_DELAY_MS * Math.pow(2, attempt) // exponential backoff
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status >= 500 || status === 429 || status === 408
+}
 
 export async function chatCompletion(
   config: ModelConfig,
@@ -600,11 +608,12 @@ export async function chatCompletion(
     try {
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(LLM_TIMEOUT_MS) })
 
-      // Retry on 5xx server errors
-      if (res.status >= 500 && attempt < LLM_MAX_RETRIES) {
+      // Retry on 5xx, 429 (rate limit), 408 (timeout)
+      if (isRetryableStatus(res.status) && attempt < LLM_MAX_RETRIES) {
         const text = await res.text()
-        console.log(`[model] Retry ${attempt + 1}/${LLM_MAX_RETRIES} after ${res.status}: ${text.slice(0, 100)}`)
-        await new Promise(r => setTimeout(r, LLM_RETRY_DELAY_MS))
+        const delay = retryDelay(attempt)
+        console.log(`[model] Retry ${attempt + 1}/${LLM_MAX_RETRIES} after ${res.status} (waiting ${delay}ms): ${text.slice(0, 100)}`)
+        await new Promise(r => setTimeout(r, delay))
         continue
       }
 
@@ -622,8 +631,9 @@ export async function chatCompletion(
       lastErr = err as Error
       const isTimeout = lastErr.name === 'TimeoutError' || lastErr.name === 'AbortError'
       if (isTimeout && attempt < LLM_MAX_RETRIES) {
-        console.log(`[model] Retry ${attempt + 1}/${LLM_MAX_RETRIES} after timeout (${LLM_TIMEOUT_MS}ms)`)
-        await new Promise(r => setTimeout(r, LLM_RETRY_DELAY_MS))
+        const delay = retryDelay(attempt)
+        console.log(`[model] Retry ${attempt + 1}/${LLM_MAX_RETRIES} after timeout (waiting ${delay}ms)`)
+        await new Promise(r => setTimeout(r, delay))
         continue
       }
       throw lastErr
@@ -654,7 +664,8 @@ export async function chatCompletionWithFallback(
       return await chatCompletion(config, messages)
     }
     if (!fallbackConfig) throw primaryErr
-    console.log(`[model] Primary model failed, trying fallback: ${fallbackConfig.endpoint}/${fallbackConfig.model}`)
+    console.log(`[model] Primary model failed (${errMsg.slice(0, 100)}), trying fallback: ${fallbackConfig.endpoint}/${fallbackConfig.model}`)
+    // Fallback also gets full retry logic via chatCompletion's built-in retries
     try {
       return await chatCompletion({ endpoint: fallbackConfig.endpoint, model: fallbackConfig.model, apiKey: fallbackConfig.apiKey }, messages, tools)
     } catch (fallbackErr) {
