@@ -1991,6 +1991,7 @@ export async function applyStyleToSource(data: {
 export async function applyTextToSource(opts: {
   sourceFile: string
   sourceLine: number
+  oldText: string
   newText: string
 }): Promise<{ ok: boolean }> {
   return request('/api/sandbox/apply-text', {

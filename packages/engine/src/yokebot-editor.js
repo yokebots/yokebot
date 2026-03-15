@@ -230,15 +230,11 @@
     var target = e.target
     if (target === highlightEl || target.id === '__yokebot-highlight') return
 
-    // Only allow text editing on elements with direct text content
-    var hasDirectText = false
-    for (var i = 0; i < target.childNodes.length; i++) {
-      if (target.childNodes[i].nodeType === 3 && target.childNodes[i].textContent.trim()) {
-        hasDirectText = true
-        break
-      }
-    }
-    if (!hasDirectText) return
+    // Only allow text editing on leaf-ish elements with text content
+    var hasText = target.textContent && target.textContent.trim().length > 0
+    // Skip elements with many children (e.g. layout containers)
+    var childElements = target.querySelectorAll('*')
+    if (!hasText || childElements.length > 5) return
 
     var selector = buildSelector(target)
     var source = getReactSource(target)
@@ -279,6 +275,7 @@
         window.parent.postMessage({
           type: 'yokebot:text-changed',
           selector: selector,
+          oldText: oldText,
           newText: newText,
           sourceFile: source ? source.fileName : null,
           sourceLine: source ? source.lineNumber : null,

@@ -120,9 +120,12 @@ export function AnnotationOverlay({ width, height, onSendToBot, onClose }: Annot
     setCurrent(null)
   }, [drawing, current])
 
-  // Focus text input when shown
+  // Focus text input when shown (delayed to avoid canvas stealing focus)
   useEffect(() => {
-    if (textInput) textInputRef.current?.focus()
+    if (textInput) {
+      const timer = setTimeout(() => textInputRef.current?.focus(), 50)
+      return () => clearTimeout(timer)
+    }
   }, [textInput])
 
   const commitText = useCallback(() => {
@@ -256,8 +259,10 @@ export function AnnotationOverlay({ width, height, onSendToBot, onClose }: Annot
           onChange={e => setTextValue(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') commitText(); if (e.key === 'Escape') setTextInput(null) }}
           onBlur={commitText}
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
           className="absolute z-50 bg-white/90 border-2 border-red-400 rounded px-2 py-1 text-sm text-red-600 outline-none shadow-lg"
-          style={{ left: textInput.x, top: Math.max(40, textInput.y - 20), minWidth: 150 }}
+          style={{ left: textInput.x, top: Math.max(40, textInput.y - 20), minWidth: 200 }}
           placeholder="Add comment..."
         />
       )}

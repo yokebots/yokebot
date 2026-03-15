@@ -2624,9 +2624,10 @@ async function main() {
   // Persist inline text edits to sandbox source files
   app.post('/api/sandbox/apply-text', async (req, res) => {
     const teamId = req.user!.activeTeamId!
-    const { sourceFile, sourceLine, newText } = req.body as {
+    const { sourceFile, sourceLine, oldText, newText } = req.body as {
       sourceFile: string
       sourceLine: number
+      oldText?: string
       newText: string
     }
     if (!sourceFile || !sourceLine || newText == null) {
@@ -2640,32 +2641,60 @@ async function main() {
 
       const content = await sandboxReadFile(db, teamId, filePath)
       const lines = content.split('\n')
-
-      // Find the text content near the source line and replace it
       const targetIdx = sourceLine - 1
-      if (targetIdx >= 0 && targetIdx < lines.length) {
-        const searchRange = lines.slice(Math.max(0, targetIdx - 2), Math.min(lines.length, targetIdx + 3))
-        const rangeStart = Math.max(0, targetIdx - 2)
+      let replaced = false
 
-        // Look for text between > and < on nearby lines
-        for (let i = 0; i < searchRange.length; i++) {
-          const line = searchRange[i]
-          // Match text content between JSX tags: >text<
-          const textMatch = line.match(/(>[^<]*<)/)
+      // Strategy 1: If we have oldText, search for it near the source line
+      if (oldText && oldText.trim()) {
+        const oldTrimmed = oldText.trim()
+        const searchStart = Math.max(0, targetIdx - 5)
+        const searchEnd = Math.min(lines.length, targetIdx + 6)
+
+        // Try line-by-line first (handles most JSX text content)
+        for (let i = searchStart; i < searchEnd; i++) {
+          const line = lines[i]
+          if (line.includes(oldTrimmed)) {
+            lines[i] = line.replace(oldTrimmed, newText.trim())
+            replaced = true
+            break
+          }
+        }
+
+        // If not found line-by-line, try as a multi-line block
+        if (!replaced) {
+          const searchBlock = lines.slice(searchStart, searchEnd).join('\n')
+          if (searchBlock.includes(oldTrimmed)) {
+            const newBlock = searchBlock.replace(oldTrimmed, newText.trim())
+            const newBlockLines = newBlock.split('\n')
+            lines.splice(searchStart, searchEnd - searchStart, ...newBlockLines)
+            replaced = true
+          }
+        }
+      }
+
+      // Strategy 2: Regex fallback — find >text< near target line
+      if (!replaced) {
+        const searchStart = Math.max(0, targetIdx - 3)
+        const searchEnd = Math.min(lines.length, targetIdx + 4)
+        for (let i = searchStart; i < searchEnd; i++) {
+          const line = lines[i]
+          const textMatch = line.match(/(>[^<]+)</)
           if (textMatch) {
-            const oldText = textMatch[1].slice(1, -1).trim()
-            if (oldText.length > 0) {
-              const newLine = line.replace(textMatch[1], '>' + newText + '<')
-              lines[rangeStart + i] = newLine
+            const existingText = textMatch[1].slice(1).trim()
+            if (existingText.length > 0) {
+              lines[i] = line.replace(textMatch[1], '>' + newText.trim())
+              replaced = true
               break
             }
           }
         }
+      }
 
+      if (replaced) {
         await sandboxWriteFile(db, teamId, filePath, lines.join('\n'))
       }
 
-      res.json({ ok: true })
+      res.json({ ok: true, replaced })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }

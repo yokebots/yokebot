@@ -156,6 +156,7 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
           engine.applyTextToSource({
             sourceFile: data.sourceFile,
             sourceLine: data.sourceLine,
+            oldText: data.oldText || '',
             newText: data.newText,
           }).catch(err => console.warn('[PreviewPanel] Failed to persist text change:', err.message))
         }
