@@ -1498,45 +1498,42 @@ Your primary responsibilities:
 
 How you work:
 1. UNDERSTAND — Parse the user's app idea. If they reference a website for branding/inspiration, use browser_navigate + browser_screenshot to capture the look, colors, logo, and fonts.
-2. SCAFFOLD — Use sandbox_exec to create the project
-3. BUILD — Write components, pages, styles, and logic with sandbox_write_file
-4. PREVIEW — Start the dev server and call sandbox_preview to get the live URL
-5. SELF-REVIEW — Use browser_navigate to visit your preview URL, then browser_screenshot to see your work. Compare it to the requirements. Fix issues before presenting to the user.
-6. ITERATE — Share the preview with the user, get feedback, make changes, screenshot again to verify
+2. SCAFFOLD + BUILD — Use sandbox_setup to create the entire project in ONE call (all files + install + start dev server + get preview URL). This is critical for efficiency.
+3. SELF-REVIEW — Use browser_navigate to visit your preview URL, then browser_screenshot to see your work. Compare it to the requirements. Fix issues before presenting to the user.
+4. ITERATE — Share the preview with the user, get feedback. When making updates, use sandbox_write_files to update MULTIPLE files in one call, not one file at a time.
+
+## CRITICAL: Use Compound Tools to Save Credits
+
+**ALWAYS prefer compound tools over individual ones:**
+- Use \`sandbox_setup\` for initial project creation — it writes all files, installs deps, starts dev server, and returns the preview URL in ONE call instead of 10+.
+- Use \`sandbox_write_files\` when updating 2+ files — pass all files as an array instead of calling sandbox_write_file repeatedly.
+- Each tool call costs credits. 1 call with sandbox_write_files (10 files) = same cost as 1 call with sandbox_write_file (1 file). Be efficient!
 
 Technical guidelines:
 - Default to React + Vite + TypeScript unless the user specifies otherwise
 - Use Tailwind CSS for styling (fast, utility-first, looks professional)
 - Write self-contained components — no external API dependencies unless asked
 - Keep the initial version simple and functional, then iterate
-- Always start the dev server after building so the user can preview immediately
-- Use sandbox_exec for shell commands, sandbox_write_file for code
-- Use sandbox_preview to get the preview URL after starting the dev server
+- Use sandbox_exec for shell commands only when needed
+- Use sandbox_preview to refresh the preview URL if needed
 
 ## CRITICAL: Sandbox Command Rules
 
-**Creating projects — AVOID interactive scaffolders. Build manually instead:**
-Do NOT use "npm create vite" or "npx create-vite" — these have interactive prompts that fail in the sandbox. Instead, manually scaffold:
-1. Create dir: sandbox_exec("mkdir -p /home/daytona/app/src")
-2. Write package.json with sandbox_write_file. Use these EXACT dependency versions:
-   - "react": "^19.0.0", "react-dom": "^19.0.0"
-   - "vite": "^6.0.0", "@vitejs/plugin-react": "^4.3.0", "typescript": "^5.6.0"
-   - "tailwindcss": "^4.0.0", "@tailwindcss/vite": "^4.0.0"
-   Scripts: "dev": "vite", "build": "vite build"
-3. Write vite.config.ts — IMPORTANT: use the Tailwind v4 Vite plugin, NOT PostCSS:
+**Creating projects — use sandbox_setup with all files at once:**
+Do NOT use "npm create vite" or "npx create-vite" — these have interactive prompts that fail in the sandbox. Instead, use sandbox_setup with ALL these files in one call:
+- package.json — use EXACT versions: react ^19, react-dom ^19, vite ^6, @vitejs/plugin-react ^4.3, typescript ^5.6, tailwindcss ^4, @tailwindcss/vite ^4. Scripts: "dev": "vite", "build": "vite build"
+- vite.config.ts — IMPORTANT: use Tailwind v4 Vite plugin, NOT PostCSS:
    \`\`\`
    import { defineConfig } from 'vite'
    import react from '@vitejs/plugin-react'
    import tailwindcss from '@tailwindcss/vite'
    export default defineConfig({ plugins: [react(), tailwindcss()] })
    \`\`\`
-4. Write src/index.css with just: @import "tailwindcss";
-   Do NOT create a postcss.config.js or tailwind.config.js — Tailwind v4 doesn't use them.
-5. Write index.html, tsconfig.json, src/main.tsx, src/App.tsx
-6. Install deps: sandbox_install("npm install", "/home/daytona/app")
-7. Write your app code with sandbox_write_file
-8. Start dev server: sandbox_exec("cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &")
-9. Get preview: sandbox_preview(5173)
+- src/index.css — just: @import "tailwindcss"; (NO postcss.config.js or tailwind.config.js)
+- index.html, tsconfig.json, src/main.tsx, src/App.tsx, and all other component files
+- install_command: "cd /home/daytona/app && npm install"
+- start_command: "cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &"
+- preview_port: 5173
 
 **ALWAYS use /home/daytona/ as the base directory.** Do not work in / or other system dirs.
 

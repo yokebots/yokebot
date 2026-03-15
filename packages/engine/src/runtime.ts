@@ -132,6 +132,7 @@ const OFFLOAD_SKIP = new Set([
   'list_workflows', 'list_available_skills', 'list_team_members',
   'browser_snapshot',
   'sandbox_read_file', 'sandbox_list_files', 'sandbox_preview',
+  'sandbox_write_files', 'sandbox_setup',
 ])
 
 async function maybeOffloadResult(result: string, toolName: string, ctx: ToolContext): Promise<string> {
@@ -249,6 +250,8 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   sandbox_list_files: 'sandbox',
   sandbox_preview: 'sandbox',
   sandbox_install: 'sandbox',
+  sandbox_write_files: 'sandbox',
+  sandbox_setup: 'sandbox',
 }
 
 export const ALL_CATEGORIES: ToolCategory[] = ['core', 'workspace', 'tasks', 'chat', 'approvals', 'data', 'media', 'browser', 'workflows', 'team', 'skills', 'sandbox']
@@ -330,6 +333,8 @@ const TOOL_LABELS: Record<string, string> = {
   sandbox_list_files: 'Browsing sandbox files',
   sandbox_preview: 'Getting preview URL',
   sandbox_install: 'Installing packages',
+  sandbox_write_files: 'Writing multiple files',
+  sandbox_setup: 'Setting up project',
 }
 
 function getToolLabel(toolName: string): string {
@@ -652,6 +657,18 @@ function getBuiltinTools(): ToolDef[] {
       command: { type: 'string', description: 'Install command (e.g. "npm install react-router-dom", "pip install flask")' },
       cwd: { type: 'string', description: 'Working directory (default: sandbox root)' },
     }, ['command']),
+
+    // Compound tools — do more per iteration to save credits
+    toolDef('sandbox_write_files', 'Write MULTIPLE files to the sandbox in a single call. MUCH more efficient than calling sandbox_write_file repeatedly. Use this whenever you need to create or update 2+ files.', {
+      files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'Absolute path' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'Array of { path, content } objects' },
+    }, ['files']),
+
+    toolDef('sandbox_setup', 'Create a complete project in one call: creates directories, writes all files, installs dependencies, and starts the dev server. Returns the preview URL. Use this instead of multiple sandbox_exec + sandbox_write_file + sandbox_install + sandbox_preview calls.', {
+      files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'Absolute path (e.g. "/home/daytona/app/src/App.tsx")' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'All project files to write' },
+      install_command: { type: 'string', description: 'Package install command (e.g. "cd /home/daytona/app && npm install")' },
+      start_command: { type: 'string', description: 'Dev server start command (e.g. "cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &")' },
+      preview_port: { type: 'number', description: 'Port the dev server listens on (e.g. 5173)' },
+    }, ['files', 'install_command', 'start_command', 'preview_port']),
 
   ]
 }
@@ -1401,6 +1418,87 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       return result.exitCode === 0
         ? `Packages installed successfully.\n${result.stdout.slice(-500)}`
         : `Install failed (exit code ${result.exitCode}):\n${result.stderr || result.stdout}`
+    }
+
+    case 'sandbox_write_files': {
+      const { sandboxWriteFile } = await import('./sandbox.ts')
+      const files = args.files as Array<{ path: string; content: string }>
+      if (!files?.length) return 'Error: No files provided.'
+      const results: string[] = []
+      for (const file of files) {
+        if (file.content.length > 200_000) {
+          results.push(`Skipped ${file.path}: content too large (${file.content.length} chars)`)
+          continue
+        }
+        try {
+          await sandboxWriteFile(ctx.db, ctx.teamId, file.path, file.content)
+          results.push(`Written: ${file.path}`)
+        } catch (err) {
+          results.push(`Failed: ${file.path} — ${(err as Error).message}`)
+        }
+      }
+      await logActivity(ctx.db, 'sandbox_write', ctx.agentId, `Sandbox: wrote ${files.length} files`, undefined, ctx.teamId)
+      return results.join('\n')
+    }
+
+    case 'sandbox_setup': {
+      const { sandboxWriteFile, execCommand: sbExec, getPreviewUrl, setStartupCommand } = await import('./sandbox.ts')
+      const files = args.files as Array<{ path: string; content: string }>
+      const installCmd = args.install_command as string
+      const startCmd = args.start_command as string
+      const previewPort = args.preview_port as number
+
+      const output: string[] = []
+
+      // 1. Collect all unique directories and create them in one command
+      const dirs = [...new Set(files.map(f => f.path.replace(/\/[^/]+$/, '')))]
+      if (dirs.length > 0) {
+        await sbExec(ctx.db, ctx.teamId, `mkdir -p ${dirs.join(' ')}`)
+        output.push(`Created ${dirs.length} directories`)
+      }
+
+      // 2. Write all files
+      let written = 0
+      for (const file of files) {
+        if (file.content.length > 200_000) {
+          output.push(`Skipped ${file.path}: too large`)
+          continue
+        }
+        try {
+          await sandboxWriteFile(ctx.db, ctx.teamId, file.path, file.content)
+          written++
+        } catch (err) {
+          output.push(`Failed: ${file.path} — ${(err as Error).message}`)
+        }
+      }
+      output.push(`Written ${written}/${files.length} files`)
+
+      // 3. Install dependencies
+      const installResult = await sbExec(ctx.db, ctx.teamId, installCmd)
+      if (installResult.exitCode === 0) {
+        output.push('Dependencies installed')
+      } else {
+        output.push(`Install failed (exit ${installResult.exitCode}): ${(installResult.stderr || installResult.stdout).slice(-300)}`)
+      }
+
+      // 4. Start dev server
+      await sbExec(ctx.db, ctx.teamId, startCmd)
+      output.push('Dev server starting...')
+
+      // 5. Save startup command for auto-restart on resume
+      await setStartupCommand(ctx.db, ctx.teamId, startCmd)
+
+      // 6. Wait a moment for dev server to be ready, then get preview URL
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      try {
+        const url = await getPreviewUrl(ctx.db, ctx.teamId, previewPort)
+        output.push(`Preview URL: ${url}`)
+      } catch {
+        output.push('Preview URL not ready yet — call sandbox_preview later')
+      }
+
+      await logActivity(ctx.db, 'sandbox_setup', ctx.agentId, `Sandbox: scaffolded project (${files.length} files)`, undefined, ctx.teamId)
+      return output.join('\n')
     }
 
     default: {
