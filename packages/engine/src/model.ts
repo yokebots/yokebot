@@ -124,6 +124,53 @@ export const MODEL_CATALOG: LogicalModel[] = [
     backends: [{ providerId: 'deepinfra', providerModelId: 'MiniMaxAI/MiniMax-M2.5', priority: 1 }],
   },
 
+  // ---- Text/Chat — Efficient tier (budget-friendly, fast) ----
+  {
+    id: 'qwen-3.5-9b',
+    name: 'Qwen 3.5 9B',
+    description: 'Budget powerhouse — 80% cheaper than DeepSeek V3.2, great for simple agent tasks',
+    type: 'chat',
+    category: 'efficient',
+    contextWindow: 262000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'qwen/qwen3.5-9b', priority: 1 },
+      { providerId: 'together', providerModelId: 'Qwen/Qwen3.5-9B', priority: 2 },
+    ],
+  },
+  {
+    id: 'step-3.5-flash',
+    name: 'Step 3.5 Flash',
+    description: 'Best price-to-performance — 66% cheaper than DS V3.2, faster, 256K context, strong tool calling',
+    type: 'chat',
+    category: 'efficient',
+    contextWindow: 256000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'stepfun/step-3.5-flash', priority: 1 },
+    ],
+  },
+  {
+    id: 'mercury-2',
+    name: 'Mercury 2',
+    description: 'Speed king — 1000 tokens/sec, diffusion-based architecture, great for real-time interactions',
+    type: 'chat',
+    category: 'efficient',
+    contextWindow: 128000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'inception/mercury-2', priority: 1 },
+    ],
+  },
+  {
+    id: 'grok-4.1-fast',
+    name: 'Grok 4.1 Fast',
+    description: 'xAI agentic model — 2M context window, optimized for tool calling',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 2000000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'x-ai/grok-4.1-fast', priority: 1 },
+    ],
+  },
+
   // ---- Text/Chat — Frontier tier ----
   {
     id: 'devstral-2',
