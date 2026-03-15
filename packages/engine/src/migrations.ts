@@ -1922,10 +1922,11 @@ const migrations: Migration[] = [
     version: 43,
     name: 'seed_new_model_credit_costs',
     async up(db: Db) {
-      // Add credit costs for 4 new models added to MODEL_CATALOG
-      // Pricing: Qwen 3.5 9B = 3 (84% margin @ Power), Step 3.5 Flash = 5 (72%), Mercury 2 = 8 (57%), Grok 4.1 Fast = 8 (69%)
+      // Add credit costs for 5 new models added to MODEL_CATALOG
+      // Pricing: Qwen 3.5 9B = 3, Step 3.5 Flash = 5, Mercury 2 = 8, Grok 4.1 Fast = 8, Qwen 3.5 27B = 15
       const newModels = [
         { id: 'qwen-3.5-9b', credits: 3, type: 'chat', si: 3, sp: 3, ss: 5, desc: 'Budget powerhouse — 80% cheaper than DeepSeek V3.2, great for simple agent tasks', tag: 'Cheapest workhorse', pros: '["80% cheaper than DeepSeek V3.2","262K context","Apache 2.0 license","Fast inference"]', cons: '["9B params limits complex reasoning","Tool calling unproven at this scale"]', date: '2026-03-01', pop: 50 },
+        { id: 'qwen-3.5-27b', credits: 15, type: 'chat', si: 5, sp: 4, ss: 4, desc: 'Strong coder and reasoner — SWE-bench 72.4, 262K context, Apache 2.0, cheaper than DeepSeek V3.2', tag: 'Mid-level coding ace', pros: '["SWE-bench 72.4 (matches GPT-5 mini)","262K context","Apache 2.0","25% cheaper than DS V3.2"]', cons: '["Expensive output tokens ($1.56/M)","Slower than MoE models"]', date: '2026-02-24', pop: 65 },
         { id: 'step-3.5-flash', credits: 5, type: 'chat', si: 4, sp: 4, ss: 5, desc: 'Best price-to-performance — 66% cheaper than DS V3.2, faster, 256K context, strong tool calling', tag: 'Budget all-star', pros: '["Better benchmarks than DeepSeek V3.2","66% cheaper","148 tps","256K context","Open weights"]', cons: '["Less established provider","Chinese lab"]', date: '2026-02-15', pop: 60 },
         { id: 'mercury-2', credits: 8, type: 'chat', si: 3, sp: 3, ss: 5, desc: 'Speed king — 1000 tokens/sec, diffusion-based architecture, great for real-time interactions', tag: 'Speed demon', pros: '["1000 tps — 10x faster than traditional models","Great for real-time/voice agents"]', cons: '["Lower benchmarks than DS V3.2","New architecture (diffusion LLM)","Limited providers"]', date: '2026-01-15', pop: 45 },
         { id: 'grok-4.1-fast', credits: 8, type: 'chat', si: 3, sp: 4, ss: 4, desc: 'xAI agentic model — 2M context window, optimized for tool calling', tag: 'Long context specialist', pros: '["2M token context window","Good tool calling","33% cheaper than DS V3.2"]', cons: '["Below DS V3.2 on non-reasoning benchmarks","Proprietary"]', date: '2026-02-01', pop: 55 },

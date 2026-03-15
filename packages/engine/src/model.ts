@@ -124,6 +124,19 @@ export const MODEL_CATALOG: LogicalModel[] = [
     backends: [{ providerId: 'deepinfra', providerModelId: 'MiniMaxAI/MiniMax-M2.5', priority: 1 }],
   },
 
+  // ---- Text/Chat — Mid tier ----
+  {
+    id: 'qwen-3.5-27b',
+    name: 'Qwen 3.5 27B',
+    description: 'Strong coder and reasoner — SWE-bench 72.4, 262K context, Apache 2.0, cheaper than DeepSeek V3.2',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 262000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'qwen/qwen3.5-27b', priority: 1 },
+    ],
+  },
+
   // ---- Text/Chat — Efficient tier (budget-friendly, fast) ----
   {
     id: 'qwen-3.5-9b',

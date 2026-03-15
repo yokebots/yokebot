@@ -38,6 +38,7 @@ const modelCards = [
   { icon: 'music_note', color: 'purple', tag: 'Music Gen', name: 'ACE-Step 1.5', desc: 'Full AI songs with lyrics in any genre. From lo-fi to orchestral.', stars: { i: 0, p: 4, s: 3 }, credits: 100 },
   { icon: 'graphic_eq', color: 'indigo', tag: 'Sound FX', name: 'Mirelo SFX', desc: 'Premium sound effects and foley. 70% win rate in blind tests.', stars: { i: 0, p: 4, s: 4 }, credits: 120 },
   // New efficient & frontier models
+  { icon: 'engineering', color: 'purple', tag: 'Coding', name: 'Qwen 3.5 27B', desc: 'SWE-bench 72.4 — matches GPT-5 mini. Strong coder and reasoner at half the price.', stars: { i: 5, p: 4, s: 4 }, credits: 15 },
   { icon: 'speed', color: 'green', tag: 'Efficient', name: 'Step 3.5 Flash', desc: '66% cheaper than DeepSeek V3.2 with better benchmarks. 256K context, 148 tps.', stars: { i: 4, p: 4, s: 5 }, credits: 5 },
   { icon: 'savings', color: 'teal', tag: 'Budget', name: 'Qwen 3.5 9B', desc: 'Incredible value at 9B params. 262K context, Apache 2.0, 80% cheaper.', stars: { i: 3, p: 3, s: 5 }, credits: 3 },
   { icon: 'rocket_launch', color: 'rose', tag: 'Speed', name: 'Mercury 2', desc: 'Diffusion LLM — 1,000 tps. 10x faster than traditional models.', stars: { i: 3, p: 3, s: 5 }, credits: 8 },
