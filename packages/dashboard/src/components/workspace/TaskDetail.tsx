@@ -59,11 +59,16 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
     engine.getMentionCompletions().then(setCompletions).catch(() => {})
   }, [])
 
-  const updateField = async (field: string, value: string) => {
+  const updateField = async (field: string, value: string | null) => {
+    // Optimistic update so the UI feels instant
+    setTask(prev => prev ? { ...prev, [field]: value } : prev)
     try {
       const updated = await engine.updateTask(taskId, { [field]: value })
       setTask(prev => prev ? { ...prev, ...updated } : prev)
-    } catch { /* ignore */ }
+    } catch {
+      // Revert on failure
+      loadAll()
+    }
   }
 
   const sendReply = async () => {
@@ -118,12 +123,20 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
     )
   }
 
-  const assignedAgent = task.assignedAgentId ? agents.find(a => a.id === task.assignedAgentId) : null
-
   // Filter progress steps to only those for this task's assigned agent, scoped to this task
   const agentSteps = task.assignedAgentId
     ? (progressMap.get(task.assignedAgentId) ?? []).filter(s => !s.taskId || s.taskId === taskId)
     : []
+
+  const handleDelete = async () => {
+    if (!confirm('Delete this task? This cannot be undone.')) return
+    setActionLoading(true)
+    try {
+      await engine.deleteTask(taskId)
+      onBack()
+    } catch { /* ignore */ }
+    setActionLoading(false)
+  }
 
   const handleRetry = async () => {
     setActionLoading(true)
@@ -164,6 +177,14 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
         </button>
         <span className="material-symbols-outlined text-[16px] text-text-muted">task_alt</span>
         <span className="text-sm font-semibold text-text-main truncate flex-1">{task.title}</span>
+        <button
+          onClick={handleDelete}
+          disabled={actionLoading}
+          className="rounded p-0.5 text-text-muted hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-50"
+          title="Delete task"
+        >
+          <span className="material-symbols-outlined text-[16px]">delete</span>
+        </button>
       </div>
 
       {/* Blocked banner */}
@@ -289,21 +310,20 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
               onTagsChange={(tags) => setTask((prev) => prev ? { ...prev, tags } : prev)}
             />
           </div>
-          {/* Assigned agent */}
-          {assignedAgent && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted w-14">Agent</span>
-              <div className="flex items-center gap-1">
-                <span
-                  className="material-symbols-outlined text-[14px]"
-                  style={{ color: assignedAgent.iconColor ?? '#0F4D26' }}
-                >
-                  {assignedAgent.iconName ?? 'smart_toy'}
-                </span>
-                <span className="text-xs text-text-main">{assignedAgent.name}</span>
-              </div>
-            </div>
-          )}
+          {/* Assigned agent (reassignable) */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted w-14">Agent</span>
+            <select
+              value={task.assignedAgentId ?? ''}
+              onChange={(e) => updateField('assignedAgentId', e.target.value || null!)}
+              className="rounded border border-border-subtle px-2 py-0.5 text-xs focus:border-forest-green focus:outline-none"
+            >
+              <option value="">Unassigned</option>
+              {agents.map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
           {/* Credit Estimate */}
           {task.estimatedCredits != null && (
             <div className="flex items-center gap-2">
