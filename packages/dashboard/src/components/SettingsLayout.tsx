@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router'
 
 const TABS = [
   { id: 'identity', label: 'Business Context', path: '/settings' },
+  { id: 'brand-kit', label: 'Brand Kit', path: '/settings/brand-kit' },
   { id: 'user', label: 'Profile', path: '/settings/user' },
   { id: 'team', label: 'Team', path: '/settings/team' },
   { id: 'integrations', label: 'Integrations', path: '/settings/integrations' },

@@ -132,7 +132,7 @@ const OFFLOAD_SKIP = new Set([
   'list_workflows', 'list_available_skills', 'list_team_members',
   'browser_snapshot',
   'sandbox_read_file', 'sandbox_list_files', 'sandbox_preview',
-  'sandbox_write_files', 'sandbox_setup',
+  'sandbox_import', 'sandbox_write_files', 'sandbox_setup',
   // Compound tools — results are short summaries
   'create_tasks', 'write_workspace_files', 'add_source_of_record_rows',
 ])
@@ -252,6 +252,7 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   sandbox_list_files: 'sandbox',
   sandbox_preview: 'sandbox',
   sandbox_install: 'sandbox',
+  sandbox_import: 'sandbox',
   sandbox_write_files: 'sandbox',
   sandbox_setup: 'sandbox',
   // Compound tools — batch operations to save credits
@@ -339,6 +340,7 @@ const TOOL_LABELS: Record<string, string> = {
   sandbox_list_files: 'Browsing sandbox files',
   sandbox_preview: 'Getting preview URL',
   sandbox_install: 'Installing packages',
+  sandbox_import: 'Importing project',
   sandbox_write_files: 'Writing multiple files',
   sandbox_setup: 'Setting up project',
   create_tasks: 'Creating multiple tasks',
@@ -664,6 +666,10 @@ function getBuiltinTools(): ToolDef[] {
     toolDef('sandbox_install', 'Install packages in the sandbox. Runs in /home/daytona/app automatically.', {
       command: { type: 'string', description: 'Install command (e.g. "npm install react-router-dom")' },
     }, ['command']),
+
+    toolDef('sandbox_import', 'Import an existing project from a GitHub or GitLab URL into the sandbox. Clones the repo, auto-detects the framework (Vite, Next.js, CRA, Remix, Astro, SvelteKit, static), installs dependencies, and starts the dev server. Works with projects from any tool: Lovable, Bolt, v0, Replit, etc.', {
+      url: { type: 'string', description: 'GitHub or GitLab repository URL (e.g. "https://github.com/user/repo")' },
+    }, ['url']),
 
     // Compound tools — do more per iteration to save credits
     toolDef('sandbox_write_files', 'Write MULTIPLE files to the sandbox in a single call. MUCH more efficient than calling sandbox_write_file repeatedly. Use this whenever you need to create or update 2+ files.', {
@@ -1498,6 +1504,26 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         : `Install failed (exit code ${result.exitCode}):\n${result.stderr || result.stdout}`
     }
 
+    case 'sandbox_import': {
+      const { importProject } = await import('./sandbox.ts')
+      const repoUrl = args.url as string
+      if (!repoUrl) return 'Error: "url" is required. Pass a GitHub or GitLab repository URL.'
+      try {
+        const result = await importProject(ctx.db, ctx.teamId, repoUrl)
+        await logActivity(ctx.db, 'sandbox_import', ctx.agentId, `Imported project from ${repoUrl} (${result.framework})`, undefined, ctx.teamId)
+        const lines = [
+          `Project imported successfully!`,
+          `Framework: ${result.framework}`,
+          `Port: ${result.port}`,
+        ]
+        if (result.previewUrl) lines.push(`Preview URL: ${result.previewUrl}`)
+        else lines.push('Preview not ready yet — call sandbox_preview to get the URL.')
+        return lines.join('\n')
+      } catch (err) {
+        return `Error importing project: ${(err as Error).message}`
+      }
+    }
+
     case 'sandbox_write_files': {
       const { sandboxWriteFile } = await import('./sandbox.ts')
       // Defensive: ensure files is an array
@@ -1860,7 +1886,7 @@ export interface RunResult {
  * The CoT instructions ensure agents reason before every action, leading
  * to better prioritization, fewer mistakes, and more thoughtful responses.
  */
-export function buildAgentSystemPrompt(agentName: string, customPrompt?: string | null, timezone?: string | null, creditBalance?: number | null): string {
+export function buildAgentSystemPrompt(agentName: string, customPrompt?: string | null, timezone?: string | null, creditBalance?: number | null, brandKit?: Record<string, string | null> | null): string {
   let identity = customPrompt?.trim()
     ? customPrompt.trim()
     : `You are ${agentName}, a proactive AI agent.`
@@ -1882,7 +1908,36 @@ export function buildAgentSystemPrompt(agentName: string, customPrompt?: string 
   const time = timeFormatter.format(now)        // "2:30 PM"
   const isoDate = now.toLocaleDateString('en-CA', { timeZone: tz }) // "2026-03-01"
 
-  return `${identity}
+  // Brand kit design guidelines
+  let brandSection = ''
+  if (brandKit) {
+    brandSection = `\n\n## Brand Kit — Design Guidelines
+
+When building UI, pages, or apps for this team, ALWAYS follow these design tokens:
+
+**Colors:**
+- Primary: ${brandKit.primaryColor ?? '#3b82f6'}
+- Secondary: ${brandKit.secondaryColor ?? '#10b981'}
+- Accent: ${brandKit.accentColor ?? '#f59e0b'}
+- Background: ${brandKit.backgroundColor ?? '#ffffff'}
+- Surface/Card: ${brandKit.surfaceColor ?? '#f8fafc'}
+- Text: ${brandKit.textColor ?? '#1e293b'}
+
+**Typography:**
+- Headings: ${brandKit.headingFont ?? 'Inter'} (${brandKit.headingStyle ?? 'bold'})
+- Body: ${brandKit.bodyFont ?? 'Inter'}
+- Base size: ${brandKit.baseFontSize ?? '16px'}
+
+**Components:**
+- Border radius: ${brandKit.borderRadius ?? '8px'}
+- Spacing: ${brandKit.spacingScale ?? 'comfortable'}
+- Buttons: ${brandKit.buttonStyle ?? 'rounded'}
+- Cards: ${brandKit.cardStyle ?? 'elevated'}
+
+Use Tailwind CSS classes that match these values. For custom colors, use arbitrary values like \`bg-[${brandKit.primaryColor}]\`. Be consistent across all pages and components.`
+  }
+
+  return `${identity}${brandSection}
 
 ## Current Date & Time
 

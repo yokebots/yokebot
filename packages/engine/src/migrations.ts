@@ -1942,6 +1942,68 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 44,
+    name: 'create_brand_kits_table',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS brand_kits (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL UNIQUE,
+            primary_color TEXT NOT NULL DEFAULT '#3b82f6',
+            secondary_color TEXT NOT NULL DEFAULT '#10b981',
+            accent_color TEXT NOT NULL DEFAULT '#f59e0b',
+            background_color TEXT NOT NULL DEFAULT '#ffffff',
+            surface_color TEXT NOT NULL DEFAULT '#f8fafc',
+            text_color TEXT NOT NULL DEFAULT '#1e293b',
+            heading_font TEXT NOT NULL DEFAULT 'Inter',
+            body_font TEXT NOT NULL DEFAULT 'Inter',
+            base_font_size TEXT NOT NULL DEFAULT '16px',
+            heading_style TEXT NOT NULL DEFAULT 'bold',
+            border_radius TEXT NOT NULL DEFAULT '8px',
+            spacing_scale TEXT NOT NULL DEFAULT 'comfortable',
+            button_style TEXT NOT NULL DEFAULT 'rounded',
+            card_style TEXT NOT NULL DEFAULT 'elevated',
+            preset TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`ALTER TABLE brand_kits ENABLE ROW LEVEL SECURITY`)
+        await db.exec(`
+          CREATE POLICY brand_kits_all ON brand_kits
+            FOR ALL
+            USING (true)
+            WITH CHECK (true)
+        `)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS brand_kits (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL UNIQUE,
+            primary_color TEXT NOT NULL DEFAULT '#3b82f6',
+            secondary_color TEXT NOT NULL DEFAULT '#10b981',
+            accent_color TEXT NOT NULL DEFAULT '#f59e0b',
+            background_color TEXT NOT NULL DEFAULT '#ffffff',
+            surface_color TEXT NOT NULL DEFAULT '#f8fafc',
+            text_color TEXT NOT NULL DEFAULT '#1e293b',
+            heading_font TEXT NOT NULL DEFAULT 'Inter',
+            body_font TEXT NOT NULL DEFAULT 'Inter',
+            base_font_size TEXT NOT NULL DEFAULT '16px',
+            heading_style TEXT NOT NULL DEFAULT 'bold',
+            border_radius TEXT NOT NULL DEFAULT '8px',
+            spacing_scale TEXT NOT NULL DEFAULT 'comfortable',
+            button_style TEXT NOT NULL DEFAULT 'rounded',
+            card_style TEXT NOT NULL DEFAULT 'elevated',
+            preset TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+      }
+    },
+  },
 ]
 
 /**

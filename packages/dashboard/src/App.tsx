@@ -29,6 +29,7 @@ import { WorkflowBuilderPage } from '@/pages/WorkflowBuilderPage'
 import { WorkflowRunPage } from '@/pages/WorkflowRunPage'
 import { WorkspacePage } from '@/pages/WorkspacePage'
 import { SessionVaultPage } from '@/pages/SessionVaultPage'
+import { BrandKitPage } from '@/pages/BrandKitPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
@@ -155,6 +156,7 @@ function AppRoutes() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/notifications" element={<SettingsPage />} />
         <Route path="settings/api-keys" element={<SettingsPage />} />
+        <Route path="settings/brand-kit" element={<BrandKitPage />} />
         <Route path="settings/vault" element={<SessionVaultPage />} />
         <Route path="settings/billing" element={<BillingPage />} />
         <Route path="settings/usage" element={<UsagePage />} />

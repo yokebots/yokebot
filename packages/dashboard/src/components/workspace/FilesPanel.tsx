@@ -1117,6 +1117,10 @@ function SandboxSection({ workspace }: { workspace: WorkspaceState }) {
   const [files, setFiles] = useState<engine.SandboxFileEntry[]>([])
   const [currentDir, setCurrentDir] = useState('/')
   const [loading, setLoading] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [importUrl, setImportUrl] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
 
   // Fetch sandbox status on expand
   useEffect(() => {
@@ -1159,6 +1163,24 @@ function SandboxSection({ workspace }: { workspace: WorkspaceState }) {
     }
   }, [workspace])
 
+  const handleImport = useCallback(async () => {
+    if (!importUrl.trim()) return
+    setImporting(true)
+    setImportError(null)
+    try {
+      const result = await engine.importProject(importUrl.trim())
+      setShowImport(false)
+      setImportUrl('')
+      // Refresh status and open preview
+      engine.getSandboxStatus().then(setStatus).catch(() => {})
+      if (result.previewUrl) openPreview()
+    } catch (err) {
+      setImportError((err as Error).message)
+    } finally {
+      setImporting(false)
+    }
+  }, [importUrl, openPreview])
+
   return (
     <div className="border-t border-border-subtle shrink-0">
       <button
@@ -1177,10 +1199,98 @@ function SandboxSection({ workspace }: { workspace: WorkspaceState }) {
 
       {expanded && (
         <div className="px-2 pb-2 max-h-48 overflow-y-auto">
+          {/* Import Project button — always visible */}
+          <div className="px-2 py-1">
+            {!showImport ? (
+              <button
+                onClick={() => setShowImport(true)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-forest-green bg-forest-green/5 hover:bg-forest-green/10 border border-forest-green/20 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[14px]">download</span>
+                Import Project
+              </button>
+            ) : (
+              <div className="space-y-1.5">
+                <input
+                  type="text"
+                  value={importUrl}
+                  onChange={e => setImportUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleImport(); if (e.key === 'Escape') setShowImport(false) }}
+                  placeholder="https://github.com/user/repo"
+                  className="w-full px-2 py-1.5 rounded border border-border-subtle bg-light-surface text-[11px] text-text-main font-mono placeholder:text-text-muted/50 focus:outline-none focus:ring-1 focus:ring-forest-green"
+                  autoFocus
+                />
+                {importError && (
+                  <div className="text-[10px] text-red-400 bg-red-400/10 rounded px-2 py-1">{importError}</div>
+                )}
+                <div className="flex gap-1">
+                  <button
+                    onClick={handleImport}
+                    disabled={importing || !importUrl.trim()}
+                    className="flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded text-[10px] bg-forest-green text-white hover:bg-forest-green/90 disabled:opacity-50 transition-colors"
+                  >
+                    {importing ? (
+                      <><span className="material-symbols-outlined text-[12px] animate-spin">progress_activity</span>Importing...</>
+                    ) : (
+                      <><span className="material-symbols-outlined text-[12px]">download</span>Import</>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => { setShowImport(false); setImportError(null) }}
+                    className="px-2 py-1 rounded text-[10px] text-text-muted hover:text-text-main hover:bg-light-surface-alt transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {!status || status.status === 'none' ? (
             <p className="px-2 py-2 text-center text-[10px] text-text-muted">
               No sandbox active. Ask BuilderBot to build something!
             </p>
+          ) : status.status === 'stopped' ? (
+            <div className="px-2 py-2 space-y-2">
+              <div className="flex items-center gap-2 text-[10px] text-text-muted">
+                <span className="h-2 w-2 rounded-full bg-yellow-500" />
+                <span>Sandbox is stopped (idle timeout)</span>
+              </div>
+              <button
+                onClick={async () => {
+                  setStatus({ ...status, status: 'starting' as any })
+                  try {
+                    await engine.startSandbox()
+                    // Poll until running
+                    for (let i = 0; i < 15; i++) {
+                      await new Promise(r => setTimeout(r, 2000))
+                      const s = await engine.getSandboxStatus()
+                      setStatus(s)
+                      if (s.status === 'running') {
+                        openPreview()
+                        break
+                      }
+                    }
+                  } catch (err) {
+                    setStatus({ ...status, status: 'stopped' })
+                  }
+                }}
+                disabled={status.status === ('starting' as any)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs text-white bg-forest-green hover:bg-forest-green/90 disabled:opacity-50 transition-colors"
+              >
+                {status.status === ('starting' as any) ? (
+                  <>
+                    <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                    Waking up sandbox...
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[14px]">play_arrow</span>
+                    Start Sandbox
+                  </>
+                )}
+              </button>
+            </div>
           ) : (
             <>
               {/* Status bar */}

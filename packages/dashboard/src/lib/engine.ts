@@ -1977,6 +1977,58 @@ export async function readSandboxFile(path: string): Promise<{ path: string; con
   return request(`/api/sandbox/files${path}`)
 }
 
+export async function applyStyleToSource(data: {
+  sourceFile: string
+  sourceLine: number
+  changes: Array<{ property: string; value: string; tailwindClass: string }>
+}): Promise<{ ok: boolean }> {
+  return request('/api/sandbox/apply-style', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function importProject(url: string): Promise<{ status: string; framework: string; port: number; previewUrl?: string }> {
+  return request('/api/sandbox/import', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  })
+}
+
+// ---- Brand Kit ----
+
+export interface BrandKit {
+  teamId: string
+  primaryColor: string
+  secondaryColor: string
+  accentColor: string
+  backgroundColor: string
+  surfaceColor: string
+  textColor: string
+  headingFont: string
+  bodyFont: string
+  baseFontSize: string
+  headingStyle: string
+  borderRadius: string
+  spacingScale: string
+  buttonStyle: string
+  cardStyle: string
+  preset: string | null
+}
+
+export async function getBrandKit(): Promise<BrandKit> {
+  const teamId = getActiveTeamId()
+  return request(`/api/teams/${teamId}/brand-kit`)
+}
+
+export async function updateBrandKit(kit: Partial<BrandKit>): Promise<{ ok: boolean }> {
+  const teamId = getActiveTeamId()
+  return request(`/api/teams/${teamId}/brand-kit`, {
+    method: 'PUT',
+    body: JSON.stringify(kit),
+  })
+}
+
 // ---- Publishing (static R2 + dynamic Railway) ----
 
 export interface PublishedApp {

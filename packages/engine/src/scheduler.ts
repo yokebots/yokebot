@@ -434,7 +434,27 @@ export async function respondToMention(
     broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'working')
 
     const mentionBalance = HOSTED_MODE ? await getCreditBalance(db, teamId) : null
-    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz, mentionBalance)
+    const mentionBrandKitRow = await db.queryOne<Record<string, unknown>>(
+      'SELECT * FROM brand_kits WHERE team_id = $1',
+      [teamId],
+    )
+    const mentionBrandKit = mentionBrandKitRow ? {
+      primaryColor: mentionBrandKitRow.primary_color as string,
+      secondaryColor: mentionBrandKitRow.secondary_color as string,
+      accentColor: mentionBrandKitRow.accent_color as string,
+      backgroundColor: mentionBrandKitRow.background_color as string,
+      surfaceColor: mentionBrandKitRow.surface_color as string,
+      textColor: mentionBrandKitRow.text_color as string,
+      headingFont: mentionBrandKitRow.heading_font as string,
+      bodyFont: mentionBrandKitRow.body_font as string,
+      baseFontSize: mentionBrandKitRow.base_font_size as string,
+      headingStyle: mentionBrandKitRow.heading_style as string,
+      borderRadius: mentionBrandKitRow.border_radius as string,
+      spacingScale: mentionBrandKitRow.spacing_scale as string,
+      buttonStyle: mentionBrandKitRow.button_style as string,
+      cardStyle: mentionBrandKitRow.card_style as string,
+    } : null
+    const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz, mentionBalance, mentionBrandKit)
     const mentionWorkPrompt = [
       `A user @mentioned you in the team chat and asked:`,
       `"${triggerMessage.content}"`,
@@ -715,7 +735,27 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
   const teamTz = await getTeamTimezoneCached(db, agent.teamId)
   const heartbeatBalance = HOSTED_MODE ? await getCreditBalance(db, agent.teamId) : null
-  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz, heartbeatBalance)
+  const heartbeatBrandKitRow = await db.queryOne<Record<string, unknown>>(
+    'SELECT * FROM brand_kits WHERE team_id = $1',
+    [agent.teamId],
+  )
+  const heartbeatBrandKit = heartbeatBrandKitRow ? {
+    primaryColor: heartbeatBrandKitRow.primary_color as string,
+    secondaryColor: heartbeatBrandKitRow.secondary_color as string,
+    accentColor: heartbeatBrandKitRow.accent_color as string,
+    backgroundColor: heartbeatBrandKitRow.background_color as string,
+    surfaceColor: heartbeatBrandKitRow.surface_color as string,
+    textColor: heartbeatBrandKitRow.text_color as string,
+    headingFont: heartbeatBrandKitRow.heading_font as string,
+    bodyFont: heartbeatBrandKitRow.body_font as string,
+    baseFontSize: heartbeatBrandKitRow.base_font_size as string,
+    headingStyle: heartbeatBrandKitRow.heading_style as string,
+    borderRadius: heartbeatBrandKitRow.border_radius as string,
+    spacingScale: heartbeatBrandKitRow.spacing_scale as string,
+    buttonStyle: heartbeatBrandKitRow.button_style as string,
+    cardStyle: heartbeatBrandKitRow.card_style as string,
+  } : null
+  const systemPrompt = buildAgentSystemPrompt(agent.name, agent.systemPrompt, teamTz, heartbeatBalance, heartbeatBrandKit)
   const isAdvisor = agent.templateId === 'advisor-bot'
 
   // ---- Task-focused sprint mode ----

@@ -406,6 +406,135 @@ export async function stopSandbox(db: Db, teamId: string): Promise<void> {
   )
 }
 
+// ---- Framework detection for imported projects ----
+
+interface FrameworkInfo {
+  name: string
+  devCommand: string
+  port: number
+}
+
+function detectFrameworkFromPackageJson(pkgJson: string): FrameworkInfo {
+  try {
+    const pkg = JSON.parse(pkgJson)
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+
+    if (deps.vite || deps['@vitejs/plugin-react']) {
+      return { name: 'vite', devCommand: 'npm run dev -- --host 0.0.0.0', port: 5173 }
+    }
+    if (deps.next) {
+      return { name: 'next', devCommand: 'npm run dev', port: 3000 }
+    }
+    if (deps['react-scripts']) {
+      return { name: 'cra', devCommand: 'npm start', port: 3000 }
+    }
+    if (deps.remix || deps['@remix-run/dev']) {
+      return { name: 'remix', devCommand: 'npm run dev', port: 5173 }
+    }
+    if (deps.astro) {
+      return { name: 'astro', devCommand: 'npm run dev -- --host 0.0.0.0', port: 4321 }
+    }
+    if (deps.svelte || deps['@sveltejs/kit']) {
+      return { name: 'svelte', devCommand: 'npm run dev -- --host 0.0.0.0', port: 5173 }
+    }
+    // Fallback: generic Node.js project with Vite-like defaults
+    return { name: 'node', devCommand: 'npm run dev -- --host 0.0.0.0', port: 5173 }
+  } catch {
+    return { name: 'unknown', devCommand: 'npx serve -s . -p 3000', port: 3000 }
+  }
+}
+
+// Directories to ignore from various tools
+const CLEANUP_DIRS = ['.lovable', '.bolt', '.replit']
+const CLEANUP_FILES = ['lovable.config.ts', 'replit.nix', '.replit']
+
+/**
+ * Import a project from a Git URL into the team's sandbox.
+ * Clones the repo, auto-detects the framework, installs deps, starts dev server.
+ */
+export async function importProject(db: Db, teamId: string, repoUrl: string): Promise<{
+  status: string
+  framework: string
+  port: number
+  previewUrl?: string
+}> {
+  const PROJECT_DIR = '/home/daytona/app'
+
+  // 1. Clean existing project
+  await execCommand(db, teamId, `rm -rf ${PROJECT_DIR}`)
+  await execCommand(db, teamId, `mkdir -p ${PROJECT_DIR}`)
+
+  // 2. Clone the repo
+  console.log(`[sandbox] Importing project from ${repoUrl} for team ${teamId}`)
+  const cloneResult = await execCommand(db, teamId, `git clone --depth 1 "${repoUrl}" ${PROJECT_DIR}`)
+  if (cloneResult.exitCode !== 0) {
+    throw new Error(`Failed to clone repository: ${cloneResult.stderr || cloneResult.stdout}`)
+  }
+
+  // 3. Clean up tool-specific files
+  const cleanupCmds = [
+    ...CLEANUP_DIRS.map(d => `rm -rf ${PROJECT_DIR}/${d}`),
+    ...CLEANUP_FILES.map(f => `rm -f ${PROJECT_DIR}/${f}`),
+    `rm -rf ${PROJECT_DIR}/.git`, // remove git history to save space
+  ]
+  await execCommand(db, teamId, cleanupCmds.join(' && '))
+
+  // 4. Detect framework
+  let framework: FrameworkInfo
+  const pkgResult = await execCommand(db, teamId, `cat ${PROJECT_DIR}/package.json 2>/dev/null`)
+  if (pkgResult.exitCode === 0 && pkgResult.stdout.trim()) {
+    framework = detectFrameworkFromPackageJson(pkgResult.stdout)
+  } else {
+    // Check for static site (just HTML)
+    const htmlCheck = await execCommand(db, teamId, `test -f ${PROJECT_DIR}/index.html && echo "yes" || echo "no"`)
+    if (htmlCheck.stdout.trim() === 'yes') {
+      framework = { name: 'static', devCommand: 'npx serve -s . -p 3000', port: 3000 }
+    } else {
+      // Check for Python
+      const pyCheck = await execCommand(db, teamId, `test -f ${PROJECT_DIR}/requirements.txt && echo "yes" || echo "no"`)
+      if (pyCheck.stdout.trim() === 'yes') {
+        framework = { name: 'python', devCommand: 'python -m http.server 3000', port: 3000 }
+      } else {
+        framework = { name: 'unknown', devCommand: 'npx serve -s . -p 3000', port: 3000 }
+      }
+    }
+  }
+
+  console.log(`[sandbox] Detected framework: ${framework.name} for team ${teamId}`)
+
+  // 5. Install dependencies (if package.json exists)
+  if (pkgResult.exitCode === 0) {
+    const installResult = await execCommand(db, teamId, `cd ${PROJECT_DIR} && npm install`)
+    if (installResult.exitCode !== 0) {
+      // Retry with clean slate
+      await execCommand(db, teamId, `cd ${PROJECT_DIR} && rm -rf node_modules package-lock.json && npm install`)
+    }
+  }
+
+  // 6. Start dev server
+  const startCmd = `cd ${PROJECT_DIR} && ${framework.devCommand} &`
+  await execCommand(db, teamId, startCmd)
+
+  // 7. Save startup command for resume
+  await setStartupCommand(db, teamId, startCmd)
+
+  // 8. Wait and get preview URL
+  await new Promise(resolve => setTimeout(resolve, 5000))
+  let previewUrl: string | undefined
+  try {
+    previewUrl = await getPreviewUrl(db, teamId, framework.port)
+  } catch {
+    // Preview not ready yet — caller can get it later
+  }
+
+  return {
+    status: 'imported',
+    framework: framework.name,
+    port: framework.port,
+    previewUrl,
+  }
+}
+
 /**
  * Get sandbox status for a team (from DB, doesn't wake the sandbox).
  */
