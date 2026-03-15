@@ -274,6 +274,10 @@ async function main() {
   const proxyTokenStore = new Map<string, { teamId: string; signedUrl: string; expires: number }>()
 
   app.all('/api/sandbox/proxy/:token/*path', async (req, res) => {
+    // Allow iframe embedding from our dashboard
+    res.removeHeader('X-Frame-Options')
+    res.removeHeader('Content-Security-Policy')
+
     const { token } = req.params
     const subPath = req.params.path || ''
 
