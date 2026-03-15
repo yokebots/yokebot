@@ -276,8 +276,9 @@ async function main() {
 
   const handleProxyRequest = async (req: Request, res: Response) => {
 
-    const { token } = req.params
-    const subPath = req.params.path || ''
+    const token = req.params.token as string
+    const rawPath = req.params.path
+    const subPath = Array.isArray(rawPath) ? rawPath.join('/') : (rawPath || '')
 
     // Validate proxy token
     const entry = proxyTokenStore.get(token)
