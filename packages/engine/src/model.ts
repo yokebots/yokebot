@@ -686,7 +686,22 @@ export async function chatCompletion(
 
       const choice = data.choices[0]
       if (!choice) throw new Error('No choices returned from model API')
-      return { content: choice.message.content, tool_calls: choice.message.tool_calls ?? [], usage: data.usage }
+
+      let content = choice.message.content
+      let toolCalls = choice.message.tool_calls ?? []
+
+      // If the model dumped tool calls as DSML text instead of proper tool_calls, parse them out
+      if (content && toolCalls.length === 0 && content.includes('DSML')) {
+        const parsed = parseDSMLToolCalls(content)
+        if (parsed.length > 0) {
+          toolCalls = parsed
+          // Remove the DSML markup from content so it doesn't leak into chat
+          content = content.replace(/<[｜|]DSML[｜|][^>]*>[\s\S]*$/g, '').trim() || null
+          console.log(`[model] Recovered ${parsed.length} tool call(s) from DSML text content`)
+        }
+      }
+
+      return { content, tool_calls: toolCalls, usage: data.usage }
     } catch (err) {
       lastErr = err as Error
       const isTimeout = lastErr.name === 'TimeoutError' || lastErr.name === 'AbortError'
@@ -700,6 +715,43 @@ export async function chatCompletion(
     }
   }
   throw lastErr ?? new Error('Chat completion failed')
+}
+
+// ---- DSML recovery ----
+// DeepSeek models sometimes output their internal function-call format (DSML tags) as text
+// instead of proper OpenAI-compatible tool_calls. This parser recovers them.
+
+function parseDSMLToolCalls(text: string): ToolCall[] {
+  const calls: ToolCall[] = []
+  // Match <｜DSML｜invoke name="toolName"> ... </｜DSML｜invoke> or similar patterns
+  // The DSML format uses fullwidth ｜ (U+FF5C) but sometimes regular | too
+  const invokeRegex = /<[｜|]DSML[｜|]invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)(?:<[｜|]DSML[｜|]\/invoke>|<\/[｜|]DSML[｜|]invoke>|$)/g
+  let match
+  while ((match = invokeRegex.exec(text)) !== null) {
+    const toolName = match[1]
+    const body = match[2]
+    const params: Record<string, unknown> = {}
+
+    // Extract parameters: <｜DSML｜parameter name="paramName" string="true">value</｜DSML｜parameter>
+    const paramRegex = /<[｜|]DSML[｜|]parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)(?:<[｜|]DSML[｜|]\/parameter>|<\/[｜|]DSML[｜|]parameter>)/g
+    let paramMatch
+    while ((paramMatch = paramRegex.exec(body)) !== null) {
+      const paramName = paramMatch[1]
+      let paramValue: unknown = paramMatch[2].trim()
+      // Try to parse as JSON if it looks like an object or array
+      if (typeof paramValue === 'string' && (paramValue.startsWith('{') || paramValue.startsWith('['))) {
+        try { paramValue = JSON.parse(paramValue) } catch { /* keep as string */ }
+      }
+      params[paramName] = paramValue
+    }
+
+    calls.push({
+      id: `dsml-recovery-${Date.now()}-${calls.length}`,
+      type: 'function',
+      function: { name: toolName, arguments: JSON.stringify(params) },
+    })
+  }
+  return calls
 }
 
 // ---- Fallback support ----
