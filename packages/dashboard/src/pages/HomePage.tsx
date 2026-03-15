@@ -343,13 +343,13 @@ export function HomePage() {
               {/* Team */}
               <div className="pricing-card-hover group relative flex flex-col rounded-xl border border-border-subtle bg-white p-8 transition-all duration-300 hover:border-forest-green/30" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)' }}>
                 <h3 className="mb-1 font-display text-xl font-bold text-text-main">Starter Crew</h3>
-                <p className="mb-4 text-xs text-text-muted">Hire your first three AI agents!</p>
+                <p className="mb-4 text-xs text-text-muted">Optimal for small teams (1–3 members)</p>
                 <div className="mb-6 flex items-baseline gap-1">
                   <span className="text-4xl font-bold text-text-main">$29</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['3 Agent Team Members', '30-Min Heartbeat Interval', '24/7 Always Available', '50,000 Universal Credits/Mo'].map((f) => (
+                  {['50,000 Universal Credits/Mo', 'Unlimited Agents', 'Unlimited Team Members', '30-Min Heartbeat Interval', '24/7 Always Available'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
@@ -370,13 +370,13 @@ export function HomePage() {
               <div className="pricing-card-hover relative z-10 flex scale-105 flex-col rounded-xl border border-accent-gold/50 bg-white p-8 shadow-2xl shadow-accent-gold/10" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03), 0 25px 50px -12px rgba(212, 160, 23, 0.15)' }}>
                 <div className="absolute right-0 top-0 rounded-bl-lg rounded-tr-lg bg-accent-gold px-3 py-1 text-xs font-bold text-white">POPULAR</div>
                 <h3 className="mb-1 font-display text-xl font-bold text-text-main">Growth Crew</h3>
-                <p className="mb-4 text-xs text-text-muted">A full-time team that never calls in sick</p>
+                <p className="mb-4 text-xs text-text-muted">Optimal for growing teams (4–9 members)</p>
                 <div className="mb-6 flex items-baseline gap-1">
                   <span className="text-4xl font-bold text-text-main">$59</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['9 Agent Team Members', '15-Min Heartbeat Interval', '24/7 Always Available', '150,000 Universal Credits/Mo'].map((f) => (
+                  {['150,000 Universal Credits/Mo', 'Unlimited Agents', 'Unlimited Team Members', '15-Min Heartbeat Interval', '24/7 Always Available'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
@@ -396,13 +396,13 @@ export function HomePage() {
               {/* Enterprise */}
               <div className="pricing-card-hover group relative flex flex-col rounded-xl border border-border-subtle bg-white p-8 transition-all duration-300 hover:border-forest-green/30" style={{ boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)' }}>
                 <h3 className="mb-1 font-display text-xl font-bold text-text-main">Power Crew</h3>
-                <p className="mb-4 text-xs text-text-muted">An always-on workforce that never sleeps</p>
+                <p className="mb-4 text-xs text-text-muted">Optimal for large teams (10+ members)</p>
                 <div className="mb-6 flex items-baseline gap-1">
                   <span className="text-4xl font-bold text-text-main">$149</span>
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['30 Agent Team Members', '5-Min Heartbeat Interval', '24/7 Always Available', '500,000 Universal Credits/Mo'].map((f) => (
+                  {['500,000 Universal Credits/Mo', 'Unlimited Agents', 'Unlimited Team Members', '5-Min Heartbeat Interval', '24/7 Always Available'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}

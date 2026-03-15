@@ -3116,6 +3116,10 @@ async function main() {
     const members = await getTeamMembers(db, req.params.id)
     const caller = members.find((m) => m.userId === req.user!.id)
     if (!caller || caller.role !== 'admin') return res.status(403).json({ error: 'Only team admins can add members' })
+    // Sanity cap at 25 team members
+    if (members.length >= 25) {
+      return res.status(403).json({ error: 'Maximum 25 team members. Contact support if you need more.' })
+    }
     const { userId, email, role } = validate(AddMemberSchema, req.body)
     // Look up the real userId if the caller passed email as userId (invite flow)
     let resolvedUserId = userId
