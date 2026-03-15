@@ -33,15 +33,16 @@ export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
   const [publishResult, setPublishResult] = useState<engine.PublishedApp | null>(null)
   const [publishError, setPublishError] = useState<string | null>(null)
 
-  // Fetch preview URL if not provided
+  // Fetch preview via proxy to avoid Daytona's cross-origin interstitial
   useEffect(() => {
     if (url) return
     let cancelled = false
     setLoading(true)
-    engine.getSandboxPreview()
+    engine.getSandboxProxyToken()
       .then(res => {
         if (!cancelled) {
-          setUrl(res.url)
+          // Build full proxy URL: engine base + proxy path
+          setUrl(`${engine.getBaseUrl()}${res.proxyUrl}`)
           setLoading(false)
         }
       })

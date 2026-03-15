@@ -1425,6 +1425,11 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         return 'Error: Do not use "npm create" or "npx create-*" — they require interactive prompts that fail in the sandbox. Use sandbox_setup instead to create a project with all files at once.'
       }
 
+      // Auto-background long-running server commands — they hang without &
+      if (/\b(npm\s+run\s+dev|npm\s+start|npx\s+vite|node\s+server|python\s+-m\s+http)\b/i.test(command) && !command.trimEnd().endsWith('&')) {
+        command = command.trimEnd() + ' &'
+      }
+
       // If the command doesn't reference a directory, prefix with cd to project dir
       if (!command.includes('/home/daytona') && !command.startsWith('cd ')) {
         command = `cd ${SANDBOX_PROJECT_DIR} && ${command}`

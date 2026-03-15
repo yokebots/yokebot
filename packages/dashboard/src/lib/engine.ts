@@ -9,6 +9,9 @@ import { supabase } from './supabase'
 
 const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://localhost:3001'
 
+/** Get the engine base URL (used by proxy iframe, logo URLs, etc.) */
+export function getBaseUrl(): string { return ENGINE_URL }
+
 // Active team ID — set by TeamProvider, included in all requests
 let _activeTeamId: string | null = null
 
@@ -1960,6 +1963,10 @@ export async function stopSandbox(): Promise<{ status: string }> {
 
 export async function getSandboxPreview(port = 5173): Promise<{ url: string; port: number }> {
   return request(`/api/sandbox/preview?port=${port}`)
+}
+
+export async function getSandboxProxyToken(port = 5173): Promise<{ token: string; proxyUrl: string }> {
+  return request(`/api/sandbox/proxy-token?port=${port}`)
 }
 
 export async function listSandboxFiles(dir = '/'): Promise<SandboxFileEntry[]> {
