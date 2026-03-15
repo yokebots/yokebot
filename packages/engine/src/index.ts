@@ -128,6 +128,7 @@ async function main() {
     crossOriginResourcePolicy: { policy: 'cross-origin' },
     crossOriginOpenerPolicy: false,
     contentSecurityPolicy: false, // CSP not useful for a JSON API
+    frameguard: false, // We handle X-Frame-Options per-route (proxy needs iframe embedding)
   }))
 
   // CORS — restrict to known origins in production
@@ -274,9 +275,6 @@ async function main() {
   const proxyTokenStore = new Map<string, { teamId: string; signedUrl: string; expires: number }>()
 
   app.all('/api/sandbox/proxy/:token/*path', async (req, res) => {
-    // Allow iframe embedding from our dashboard
-    res.removeHeader('X-Frame-Options')
-    res.removeHeader('Content-Security-Policy')
 
     const { token } = req.params
     const subPath = req.params.path || ''
