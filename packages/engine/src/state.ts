@@ -498,6 +498,26 @@ const SQLITE_DDL = `
     last_activity TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Published apps (static on R2, dynamic on Railway)
+  CREATE TABLE IF NOT EXISTS published_apps (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    app_name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    subdomain TEXT NOT NULL UNIQUE,
+    custom_domain TEXT,
+    hosting_type TEXT NOT NULL DEFAULT 'static',
+    status TEXT NOT NULL DEFAULT 'building',
+    published_url TEXT,
+    r2_prefix TEXT,
+    railway_project_id TEXT,
+    railway_service_id TEXT,
+    build_log TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -515,6 +535,8 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_chat_channel ON chat_messages(channel_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, agent_id);
   CREATE INDEX IF NOT EXISTS idx_sor_rows_table ON sor_rows(table_id);
+  CREATE INDEX IF NOT EXISTS idx_published_apps_team ON published_apps(team_id);
+  CREATE INDEX IF NOT EXISTS idx_published_apps_subdomain ON published_apps(subdomain);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_notifications_team ON notifications(team_id, user_id);
   CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
@@ -1056,6 +1078,26 @@ const POSTGRES_DDL = `
     last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- Published apps (static on R2, dynamic on Railway)
+  CREATE TABLE IF NOT EXISTS published_apps (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    app_name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    subdomain TEXT NOT NULL UNIQUE,
+    custom_domain TEXT,
+    hosting_type TEXT NOT NULL DEFAULT 'static',
+    status TEXT NOT NULL DEFAULT 'building',
+    published_url TEXT,
+    r2_prefix TEXT,
+    railway_project_id TEXT,
+    railway_service_id TEXT,
+    build_log TEXT,
+    created_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -1073,6 +1115,8 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_chat_channel ON chat_messages(channel_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, agent_id);
   CREATE INDEX IF NOT EXISTS idx_sor_rows_table ON sor_rows(table_id);
+  CREATE INDEX IF NOT EXISTS idx_published_apps_team ON published_apps(team_id);
+  CREATE INDEX IF NOT EXISTS idx_published_apps_subdomain ON published_apps(subdomain);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_notifications_team ON notifications(team_id, user_id);
   CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
@@ -1162,10 +1206,13 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS api_keys ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS memory_nodes ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS sandbox_sessions ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS published_apps ENABLE ROW LEVEL SECURITY;
 
   CREATE INDEX IF NOT EXISTS idx_memory_nodes_agent ON memory_nodes(agent_id, depth);
   CREATE INDEX IF NOT EXISTS idx_memory_nodes_team ON memory_nodes(team_id, agent_id);
   CREATE INDEX IF NOT EXISTS idx_sandbox_sessions_team ON sandbox_sessions(team_id);
+  CREATE INDEX IF NOT EXISTS idx_published_apps_team ON published_apps(team_id);
+  CREATE INDEX IF NOT EXISTS idx_published_apps_subdomain ON published_apps(subdomain);
 
   -- No permissive policies = deny all for anon + authenticated roles.
   -- The Express backend connects as the Postgres owner or uses

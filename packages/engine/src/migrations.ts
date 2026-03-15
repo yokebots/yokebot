@@ -1737,6 +1737,58 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 40,
+    name: 'add_published_apps',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS published_apps (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            app_name TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            subdomain TEXT NOT NULL UNIQUE,
+            custom_domain TEXT,
+            hosting_type TEXT NOT NULL DEFAULT 'static',
+            status TEXT NOT NULL DEFAULT 'building',
+            published_url TEXT,
+            r2_prefix TEXT,
+            railway_project_id TEXT,
+            railway_service_id TEXT,
+            build_log TEXT,
+            created_by TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_published_apps_team ON published_apps(team_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_published_apps_subdomain ON published_apps(subdomain)`)
+        await db.exec(`ALTER TABLE published_apps ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS published_apps (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            app_name TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            subdomain TEXT NOT NULL UNIQUE,
+            custom_domain TEXT,
+            hosting_type TEXT NOT NULL DEFAULT 'static',
+            status TEXT NOT NULL DEFAULT 'building',
+            published_url TEXT,
+            r2_prefix TEXT,
+            railway_project_id TEXT,
+            railway_service_id TEXT,
+            build_log TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+      }
+    },
+  },
 ]
 
 /**

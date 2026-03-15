@@ -22,6 +22,16 @@ export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
   const [consoleLogs, setConsoleLogs] = useState<string[]>([])
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
+  // Publish dialog state
+  const [showPublish, setShowPublish] = useState(false)
+  const [publishName, setPublishName] = useState('')
+  const [publishSubdomain, setPublishSubdomain] = useState('')
+  const [publishType, setPublishType] = useState<'static' | 'custom-domain' | 'dynamic'>('custom-domain')
+  const [customDomain, setCustomDomain] = useState('')
+  const [publishing, setPublishing] = useState(false)
+  const [publishResult, setPublishResult] = useState<engine.PublishedApp | null>(null)
+  const [publishError, setPublishError] = useState<string | null>(null)
+
   // Fetch preview URL if not provided
   useEffect(() => {
     if (url) return
@@ -65,6 +75,49 @@ export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
       iframeRef.current.src = url
     }
   }, [url])
+
+  const handlePublish = async () => {
+    if (!publishName.trim() || !publishSubdomain.trim()) return
+    setPublishing(true)
+    setPublishError(null)
+
+    try {
+      // For paid hosting, handle Stripe checkout flow first
+      if (publishType === 'custom-domain' || publishType === 'dynamic') {
+        const checkout = await engine.checkoutHostingAddon(publishName, publishType)
+        if (checkout.url) {
+          // Redirect to Stripe checkout
+          window.location.href = checkout.url
+          return
+        }
+        // If added directly (existing subscription), continue to publish
+      }
+
+      const app = await engine.publishApp({
+        appName: publishName.trim(),
+        displayName: publishName.trim(),
+        subdomain: publishSubdomain.trim(),
+        hostingType: publishType,
+        ...(publishType !== 'static' && customDomain.trim() ? { customDomain: customDomain.trim() } : {}),
+      })
+      setPublishResult(app)
+    } catch (err) {
+      setPublishError((err as Error).message)
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  // Auto-generate subdomain from name
+  const handleNameChange = (name: string) => {
+    setPublishName(name)
+    const subdomain = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 63)
+    setPublishSubdomain(subdomain)
+  }
 
   const vpWidth = VIEWPORT_WIDTHS[viewport]
 
@@ -130,6 +183,18 @@ export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
 
         <div className="flex-1" />
 
+        {/* Publish button */}
+        <button
+          onClick={() => setShowPublish(true)}
+          className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-forest-green text-white hover:bg-forest-green/90 transition-colors"
+          title="Publish this app"
+        >
+          <span className="material-symbols-outlined text-[14px]">rocket_launch</span>
+          Publish
+        </button>
+
+        <div className="h-4 w-px bg-border-subtle mx-1" />
+
         {/* Console toggle */}
         <button
           onClick={() => setConsoleOpen(!consoleOpen)}
@@ -159,8 +224,166 @@ export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
         )}
       </div>
 
+      {/* Publish Dialog */}
+      {showPublish && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-light-surface rounded-lg shadow-xl border border-border-subtle w-[420px] max-w-[90vw]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
+              <h3 className="text-sm font-semibold text-text-main">Publish App</h3>
+              <button
+                onClick={() => { setShowPublish(false); setPublishResult(null); setPublishError(null) }}
+                className="text-text-muted hover:text-text-main"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            {publishResult ? (
+              <div className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="material-symbols-outlined text-2xl text-forest-green">check_circle</span>
+                  <span className="text-sm font-medium text-text-main">Published!</span>
+                </div>
+                <div className="bg-light-surface-alt rounded p-3 mb-3">
+                  <div className="text-[10px] text-text-muted mb-1">Your app is live at:</div>
+                  <a
+                    href={publishResult.publishedUrl ?? '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-forest-green hover:underline font-mono"
+                  >
+                    {publishResult.publishedUrl}
+                  </a>
+                </div>
+                <button
+                  onClick={() => { setShowPublish(false); setPublishResult(null) }}
+                  className="w-full px-3 py-2 rounded text-xs bg-forest-green text-white hover:bg-forest-green/90"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <div className="p-4 space-y-3">
+                <div>
+                  <label className="block text-[11px] text-text-muted mb-1">App Name</label>
+                  <input
+                    type="text"
+                    value={publishName}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                    placeholder="My Awesome App"
+                    className="w-full px-3 py-2 rounded border border-border-subtle bg-light-surface text-sm text-text-main placeholder:text-text-muted/50 focus:outline-none focus:ring-1 focus:ring-forest-green"
+                    autoFocus
+                  />
+                </div>
+
+                {publishType === 'static' && (
+                  <div>
+                    <label className="block text-[11px] text-text-muted mb-1">Subdomain</label>
+                    <div className="flex items-center gap-0">
+                      <input
+                        type="text"
+                        value={publishSubdomain}
+                        onChange={(e) => setPublishSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                        placeholder="my-awesome-app"
+                        className="flex-1 px-3 py-2 rounded-l border border-r-0 border-border-subtle bg-light-surface text-sm text-text-main font-mono placeholder:text-text-muted/50 focus:outline-none focus:ring-1 focus:ring-forest-green"
+                      />
+                      <span className="px-3 py-2 rounded-r border border-border-subtle bg-light-surface-alt text-[11px] text-text-muted whitespace-nowrap">
+                        .yokebot.app
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-[11px] text-text-muted mb-1">Hosting Plan</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setPublishType('custom-domain')}
+                      className={`p-3 rounded border text-left transition-colors ${
+                        publishType === 'custom-domain'
+                          ? 'border-forest-green bg-forest-green/5'
+                          : 'border-border-subtle hover:border-text-muted/30'
+                      }`}
+                    >
+                      <div className="text-xs font-medium text-text-main">Static Site</div>
+                      <div className="text-[10px] text-forest-green mt-0.5">$9/mo</div>
+                      <div className="text-[9px] text-text-muted mt-0.5">Your domain, fast CDN</div>
+                    </button>
+                    <button
+                      onClick={() => setPublishType('dynamic')}
+                      className={`p-3 rounded border text-left transition-colors ${
+                        publishType === 'dynamic'
+                          ? 'border-forest-green bg-forest-green/5'
+                          : 'border-border-subtle hover:border-text-muted/30'
+                      }`}
+                    >
+                      <div className="text-xs font-medium text-text-main">App Hosting</div>
+                      <div className="text-[10px] text-forest-green mt-0.5">$25/mo</div>
+                      <div className="text-[9px] text-text-muted mt-0.5">Server, database, API</div>
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setPublishType('static')}
+                    className="mt-2 text-[10px] text-text-muted hover:text-text-main transition-colors"
+                  >
+                    Or share for free on yokebot.app
+                  </button>
+                </div>
+
+                {(publishType === 'custom-domain' || publishType === 'dynamic') && (
+                  <div>
+                    <label className="block text-[11px] text-text-muted mb-1">Custom Domain</label>
+                    <input
+                      type="text"
+                      value={customDomain}
+                      onChange={(e) => setCustomDomain(e.target.value.toLowerCase().trim())}
+                      placeholder="app.yourbusiness.com"
+                      className="w-full px-3 py-2 rounded border border-border-subtle bg-light-surface text-sm text-text-main font-mono placeholder:text-text-muted/50 focus:outline-none focus:ring-1 focus:ring-forest-green"
+                    />
+                    <div className="text-[10px] text-text-muted mt-1">
+                      Point a CNAME record from your domain to your app after publishing.
+                    </div>
+                  </div>
+                )}
+
+                {publishType === 'dynamic' && (
+                  <div className="bg-light-surface-alt rounded p-2 text-[10px] text-text-muted">
+                    Includes 100 compute hrs, 5GB bandwidth, 500MB storage, 100MB DB, 500K requests/mo.
+                    Overages billed from your credits.
+                  </div>
+                )}
+
+                {publishError && (
+                  <div className="text-xs text-red-400 bg-red-400/10 rounded p-2">{publishError}</div>
+                )}
+
+                <button
+                  onClick={handlePublish}
+                  disabled={publishing || !publishName.trim() || !publishSubdomain.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-xs bg-forest-green text-white hover:bg-forest-green/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {publishing ? (
+                    <>
+                      <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                      Publishing...
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[14px]">rocket_launch</span>
+                      {publishType === 'dynamic' ? 'Subscribe & Publish — $25/mo'
+                        : publishType === 'custom-domain' ? 'Subscribe & Publish — $9/mo'
+                        : 'Publish — Free'}
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Preview iframe */}
-      <div className="flex-1 overflow-hidden flex items-start justify-center bg-[#1a1a1a]">
+      <div className="flex-1 overflow-hidden flex items-start justify-center bg-[#1a1a1a] relative">
         {url ? (
           <iframe
             ref={iframeRef}

@@ -1614,6 +1614,7 @@ export type SseEventType =
   | 'agent_progress'
   | 'browser_frame'
   | 'sandbox_preview'
+  | 'app_published'
 
 type SseListener = (data: unknown) => void
 
@@ -1966,4 +1967,58 @@ export async function listSandboxFiles(dir = '/'): Promise<SandboxFileEntry[]> {
 
 export async function readSandboxFile(path: string): Promise<{ path: string; content: string }> {
   return request(`/api/sandbox/files${path}`)
+}
+
+// ---- Publishing (static R2 + dynamic Railway) ----
+
+export interface PublishedApp {
+  id: string
+  teamId: string
+  appName: string
+  displayName: string
+  subdomain: string
+  customDomain: string | null
+  hostingType: 'static' | 'custom-domain' | 'dynamic'
+  status: 'building' | 'published' | 'stopped' | 'failed'
+  publishedUrl: string | null
+  r2Prefix: string | null
+  railwayProjectId: string | null
+  railwayServiceId: string | null
+  buildLog: string | null
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export async function listPublishedApps(): Promise<PublishedApp[]> {
+  return request('/api/publish')
+}
+
+export async function getPublishedApp(id: string): Promise<PublishedApp> {
+  return request(`/api/publish/${id}`)
+}
+
+export async function publishApp(data: {
+  appName: string
+  displayName: string
+  subdomain: string
+  hostingType: 'static' | 'custom-domain' | 'dynamic'
+  customDomain?: string
+}): Promise<PublishedApp> {
+  return request('/api/publish', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function unpublishApp(id: string): Promise<{ deleted: boolean }> {
+  return request(`/api/publish/${id}`, { method: 'DELETE' })
+}
+
+export async function upgradeToFullStack(id: string): Promise<PublishedApp> {
+  return request(`/api/publish/${id}/upgrade`, { method: 'POST' })
+}
+
+export async function checkoutHostingAddon(appName: string, hostingType: 'custom-domain' | 'dynamic'): Promise<{ url?: string; added?: boolean }> {
+  return request('/api/billing/checkout/hosting', {
+    method: 'POST',
+    body: JSON.stringify({ appName, hostingType }),
+  })
 }

@@ -20,7 +20,7 @@ export function setCreditBroadcast(fn: (teamId: string, credits: number) => void
 
 export type SubscriptionTier = 'none' | 'team' | 'business' | 'enterprise'
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'inactive'
-export type CreditTransactionType = 'subscription_renewal' | 'credit_pack' | 'starter_credits' | 'media_debit' | 'heartbeat_debit' | 'skill_debit' | 'credit_reset' | 'adjustment'
+export type CreditTransactionType = 'subscription_renewal' | 'credit_pack' | 'starter_credits' | 'media_debit' | 'heartbeat_debit' | 'skill_debit' | 'hosting_debit' | 'credit_reset' | 'adjustment'
 
 export interface TeamSubscription {
   teamId: string

@@ -220,6 +220,54 @@ async function main() {
     next()
   })
 
+  // ===== Published app routing (*.yokebot.app + custom domains) =====
+  // This MUST be before auth middleware — published apps are public-facing.
+  app.use(async (req, res, next) => {
+    const host = req.hostname
+
+    try {
+      const { getPublishedAppBySubdomain, getPublishedAppByCustomDomain, serveStaticFile } = await import('./publish.ts')
+      let publishedApp = null
+
+      // Check if this is a *.yokebot.app subdomain
+      if (host?.endsWith('.yokebot.app')) {
+        const subdomain = host.replace('.yokebot.app', '')
+        if (!subdomain || subdomain.includes('.')) return next()
+        publishedApp = await getPublishedAppBySubdomain(db, subdomain)
+      }
+      // Check if this is a custom domain
+      else if (host && !host.includes('yokebot.com') && !host.includes('localhost')) {
+        publishedApp = await getPublishedAppByCustomDomain(db, host)
+      }
+
+      if (!publishedApp) return next()
+
+      if (publishedApp.hostingType === 'static' || publishedApp.hostingType === 'custom-domain') {
+        const result = await serveStaticFile(publishedApp, req.path)
+        res.status(result.status).set('Content-Type', result.contentType)
+        if (result.body) {
+          res.set('Cache-Control', 'public, max-age=3600')
+          res.send(result.body)
+        } else {
+          res.send('Not found')
+        }
+      } else if (publishedApp.hostingType === 'dynamic' && publishedApp.railwayServiceId) {
+        // Dynamic apps have their custom domain pointed directly at Railway
+        // This fallback handles the case where DNS isn't fully propagated
+        if (publishedApp.publishedUrl) {
+          res.redirect(307, publishedApp.publishedUrl)
+        } else {
+          res.status(503).send('App is being deployed...')
+        }
+      } else {
+        res.status(503).send('App is not available')
+      }
+    } catch (err) {
+      console.error(`[publish] Routing error for ${host}:`, (err as Error).message)
+      return next() // Fall through to normal API routing on error
+    }
+  })
+
   // Auth
   app.use(authMiddleware)
 
@@ -458,6 +506,12 @@ async function main() {
     const { setSandboxBroadcast } = await import('./sandbox.ts')
     setSandboxBroadcast((teamId, url) => {
       broadcastToTeam(teamId, 'sandbox_preview', { url })
+    })
+
+    // Wire publish broadcast so dashboard updates when apps are published
+    const { setPublishBroadcast } = await import('./publish.ts')
+    setPublishBroadcast((teamId, app) => {
+      broadcastToTeam(teamId, 'app_published', app)
     })
   }
 
@@ -2239,6 +2293,115 @@ async function main() {
       const { sandboxReadFile } = await import('./sandbox.ts')
       const content = await sandboxReadFile(db, teamId, filePath)
       res.json({ path: filePath, content })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  // ===== Publishing (static R2 + dynamic Railway) =====
+
+  app.get('/api/publish', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { listPublishedApps } = await import('./publish.ts')
+      const apps = await listPublishedApps(db, teamId)
+      res.json(apps)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/publish/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { getPublishedApp } = await import('./publish.ts')
+      const app = await getPublishedApp(db, req.params.id)
+      if (!app) return res.status(404).json({ error: 'App not found' })
+      if (app.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+      res.json(app)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/publish', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const { appName, displayName, subdomain, hostingType, customDomain } = req.body as {
+      appName: string; displayName: string; subdomain: string
+      hostingType: 'static' | 'custom-domain' | 'dynamic'; customDomain?: string
+    }
+
+    if (!appName || !displayName || !subdomain) {
+      return res.status(400).json({ error: 'appName, displayName, and subdomain are required' })
+    }
+    if ((hostingType === 'custom-domain' || hostingType === 'dynamic') && !customDomain) {
+      return res.status(400).json({ error: 'customDomain is required for paid hosting' })
+    }
+
+    try {
+      const { publishStatic, publishCustomDomain, publishDynamic } = await import('./publish.ts')
+      const opts = { appName, displayName, subdomain, customDomain: customDomain!, createdBy: req.user!.id }
+
+      let app
+      if (hostingType === 'dynamic') {
+        app = await publishDynamic(db, teamId, opts)
+      } else if (hostingType === 'custom-domain') {
+        app = await publishCustomDomain(db, teamId, opts)
+      } else {
+        app = await publishStatic(db, teamId, { appName, displayName, subdomain, createdBy: req.user!.id })
+      }
+
+      await logActivity(db, 'app_published', null, `Published ${hostingType} app: ${displayName} (${subdomain}.yokebot.app)`, undefined, teamId)
+      res.json(app)
+    } catch (err) {
+      console.error('[publish] Publish error:', (err as Error).message)
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.delete('/api/publish/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { unpublishApp, getPublishedApp } = await import('./publish.ts')
+      const app = await getPublishedApp(db, req.params.id)
+      if (!app) return res.status(404).json({ error: 'App not found' })
+      if (app.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+
+      // Remove Stripe addon if paid hosting
+      if (app.hostingType === 'dynamic' || app.hostingType === 'custom-domain') {
+        try {
+          const { getSubscription } = await import('./billing.ts')
+          const sub = await getSubscription(db, teamId)
+          const priceId = app.hostingType === 'dynamic'
+            ? process.env.STRIPE_APP_HOSTING_PRICE_ID
+            : process.env.STRIPE_CUSTOM_DOMAIN_PRICE_ID
+          if (sub?.stripeSubscriptionId && priceId) {
+            const eePath = '../../../ee/stripe-billing.js'
+            const ee = await import(eePath) as {
+              removeHostingFromSubscription: (subscriptionId: string, priceId: string) => Promise<void>
+            }
+            await ee.removeHostingFromSubscription(sub.stripeSubscriptionId, priceId)
+          }
+        } catch (err) {
+          console.error('[publish] Failed to remove Stripe hosting addon:', (err as Error).message)
+        }
+      }
+
+      await unpublishApp(db, teamId, req.params.id)
+      await logActivity(db, 'app_unpublished', null, `Unpublished app: ${app.displayName}`, undefined, teamId)
+      res.json({ deleted: true })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/publish/:id/upgrade', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { upgradeToFullStack } = await import('./publish.ts')
+      const app = await upgradeToFullStack(db, teamId, req.params.id)
+      await logActivity(db, 'app_upgraded', null, `Upgraded app to full-stack: ${app.displayName}`, undefined, teamId)
+      res.json(app)
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }

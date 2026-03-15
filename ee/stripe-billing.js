@@ -116,3 +116,101 @@ export async function listCheckoutLineItems(sessionId) {
   const stripe = getStripe()
   return stripe.checkout.sessions.listLineItems(sessionId, { limit: 1 })
 }
+
+/**
+ * Create a Stripe Checkout session for an App Hosting addon ($9/mo per app).
+ * This adds a recurring subscription item for the hosting addon.
+ */
+export async function createAppHostingCheckout(teamId, userId, email, priceId, appName, successUrl, cancelUrl) {
+  const stripe = getStripe()
+
+  const customers = await stripe.customers.list({ email, limit: 1 })
+  let customer = customers.data[0]
+  if (!customer) {
+    customer = await stripe.customers.create({
+      email,
+      metadata: { yokebot_team_id: teamId, yokebot_user_id: userId },
+    })
+  }
+
+  const session = await stripe.checkout.sessions.create({
+    customer: customer.id,
+    mode: 'subscription',
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    subscription_data: {
+      metadata: {
+        yokebot_team_id: teamId,
+        type: 'app_hosting',
+        app_name: appName,
+      },
+    },
+    metadata: {
+      yokebot_team_id: teamId,
+      type: 'app_hosting',
+      app_name: appName,
+    },
+  })
+
+  return { sessionId: session.id, url: session.url, customerId: customer.id }
+}
+
+/**
+ * Add an App Hosting addon to an existing subscription.
+ * Increments the quantity if already subscribed, or adds a new subscription item.
+ */
+export async function addHostingToSubscription(subscriptionId, priceId) {
+  const stripe = getStripe()
+
+  // Check if the hosting price is already on the subscription
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ['items.data.price'],
+  })
+
+  const existingItem = subscription.items.data.find(
+    item => item.price.id === priceId
+  )
+
+  if (existingItem) {
+    // Increment quantity (one more app)
+    const updated = await stripe.subscriptionItems.update(existingItem.id, {
+      quantity: existingItem.quantity + 1,
+    })
+    return { subscriptionItemId: updated.id, quantity: updated.quantity }
+  } else {
+    // Add new line item
+    const item = await stripe.subscriptionItems.create({
+      subscription: subscriptionId,
+      price: priceId,
+      quantity: 1,
+    })
+    return { subscriptionItemId: item.id, quantity: 1 }
+  }
+}
+
+/**
+ * Remove one App Hosting addon from a subscription.
+ * Decrements quantity or removes the item entirely if quantity reaches 0.
+ */
+export async function removeHostingFromSubscription(subscriptionId, priceId) {
+  const stripe = getStripe()
+
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ['items.data.price'],
+  })
+
+  const existingItem = subscription.items.data.find(
+    item => item.price.id === priceId
+  )
+
+  if (!existingItem) return
+
+  if (existingItem.quantity > 1) {
+    await stripe.subscriptionItems.update(existingItem.id, {
+      quantity: existingItem.quantity - 1,
+    })
+  } else {
+    await stripe.subscriptionItems.del(existingItem.id)
+  }
+}

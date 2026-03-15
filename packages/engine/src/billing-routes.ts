@@ -149,6 +149,57 @@ export function registerBillingRoutes(app: Express, db: Db): void {
     }
   })
 
+  // ---- POST /api/billing/checkout/hosting ----
+  // Handles both custom-domain ($9/mo) and app-hosting ($25/mo) addons
+  app.post('/api/billing/checkout/hosting', async (req: Request, res: Response) => {
+    const teamId = req.user?.activeTeamId
+    if (!teamId) { res.status(400).json({ error: 'Team context required' }); return }
+
+    const { appName, hostingType } = req.body as { appName: string; hostingType: 'custom-domain' | 'dynamic' }
+    if (!appName) { res.status(400).json({ error: 'appName is required' }); return }
+
+    const priceId = hostingType === 'dynamic'
+      ? process.env.STRIPE_APP_HOSTING_PRICE_ID
+      : process.env.STRIPE_CUSTOM_DOMAIN_PRICE_ID
+    if (!priceId) { res.status(500).json({ error: 'Hosting price not configured' }); return }
+
+    const sub = await getSubscription(db, teamId)
+
+    // If user already has an active subscription, add hosting as a line item
+    if (sub?.stripeSubscriptionId && (sub.status === 'active' || sub.status === 'past_due')) {
+      try {
+        const eePath = '../../../ee/stripe-billing.js'
+        const ee = await import(eePath) as {
+          addHostingToSubscription: (subscriptionId: string, priceId: string) => Promise<{ subscriptionItemId: string; quantity: number }>
+        }
+        const result = await ee.addHostingToSubscription(sub.stripeSubscriptionId, priceId)
+        res.json({ added: true, ...result })
+      } catch (err) {
+        console.error('[billing] Add hosting addon error:', err)
+        res.status(500).json({ error: 'Failed to add hosting addon' })
+      }
+      return
+    }
+
+    // Otherwise, create a new checkout session for the hosting addon
+    try {
+      const eePath = '../../../ee/stripe-billing.js'
+      const ee = await import(eePath) as {
+        createAppHostingCheckout: (teamId: string, userId: string, email: string, priceId: string, appName: string, successUrl: string, cancelUrl: string) => Promise<{ url: string; customerId: string }>
+      }
+      const dashboardUrl = process.env.DASHBOARD_URL ?? 'https://yokebot.com'
+      const result = await ee.createAppHostingCheckout(
+        teamId, req.user!.id, req.user!.email, priceId, appName,
+        `${dashboardUrl}/workspace?published=true`,
+        `${dashboardUrl}/workspace?canceled=true`,
+      )
+      res.json({ url: result.url })
+    } catch (err) {
+      console.error('[billing] Hosting checkout error:', err)
+      res.status(500).json({ error: 'Failed to create hosting checkout session' })
+    }
+  })
+
   // ---- POST /api/billing/portal ----
   app.post('/api/billing/portal', async (req: Request, res: Response) => {
     const teamId = req.user?.activeTeamId
