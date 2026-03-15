@@ -711,6 +711,28 @@ function getBuiltinTools(): ToolDef[] {
 /**
  * Execute a single tool call and return the result string.
  */
+// ---- Sandbox path normalization ----
+// Agents may use arbitrary project directory names (e.g. /home/daytona/booking-app/).
+// We enforce a canonical project directory so the sandbox stays consistent.
+const SANDBOX_PROJECT_DIR = '/home/daytona/app'
+
+/** Normalize a file path — rewrite /home/daytona/<anything>/ to /home/daytona/app/ */
+function normalizeSandboxPath(path: string): string {
+  // Already canonical
+  if (path.startsWith(SANDBOX_PROJECT_DIR + '/') || path === SANDBOX_PROJECT_DIR) return path
+  // Rewrite /home/daytona/<other-name>/... to canonical
+  const m = path.match(/^\/home\/daytona\/[^/]+\/(.+)$/)
+  if (m) return `${SANDBOX_PROJECT_DIR}/${m[1]}`
+  // If it's just /home/daytona/<other-name> with no subpath, return project dir
+  if (/^\/home\/daytona\/[^/]+$/.test(path)) return SANDBOX_PROJECT_DIR
+  return path
+}
+
+/** Normalize cd commands in shell strings — rewrite cd /home/daytona/<x> to canonical */
+function normalizeSandboxCommand(command: string): string {
+  return command.replace(/\/home\/daytona\/[^/\s&]+/g, SANDBOX_PROJECT_DIR)
+}
+
 async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<string> {
   let args: Record<string, unknown>
   try {
@@ -1399,7 +1421,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     // ---- Sandbox (Daytona app-building) ----
     case 'sandbox_exec': {
       const { execCommand: sbExec } = await import('./sandbox.ts')
-      const command = args.command as string
+      // Normalize any non-standard project paths in the command to /home/daytona/app
+      const command = normalizeSandboxCommand(args.command as string)
       const cwd = args.cwd as string | undefined
       const result = await sbExec(ctx.db, ctx.teamId, command, cwd)
       await logActivity(ctx.db, 'sandbox_exec', ctx.agentId, `Sandbox: ${command.slice(0, 100)}`, undefined, ctx.teamId)
@@ -1410,7 +1433,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_write_file': {
       const { sandboxWriteFile } = await import('./sandbox.ts')
-      const path = args.path as string
+      const path = normalizeSandboxPath(args.path as string)
       const content = args.content as string
       if (content.length > 200_000) return `Error: File content too large (${content.length} chars). Maximum is 200,000 characters.`
       await sandboxWriteFile(ctx.db, ctx.teamId, path, content)
@@ -1420,14 +1443,14 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_read_file': {
       const { sandboxReadFile } = await import('./sandbox.ts')
-      const path = args.path as string
+      const path = normalizeSandboxPath(args.path as string)
       const content = await sandboxReadFile(ctx.db, ctx.teamId, path)
       return content
     }
 
     case 'sandbox_list_files': {
       const { sandboxListFiles } = await import('./sandbox.ts')
-      const dir = (args.directory as string) ?? '/'
+      const dir = normalizeSandboxPath((args.directory as string) ?? '/home/daytona/app')
       const files = await sandboxListFiles(ctx.db, ctx.teamId, dir)
       if (files.length === 0) return `No files found in "${dir}".`
       return files.map(f => `${f.isDirectory ? '[dir] ' : ''}${f.path} (${f.size} bytes)`).join('\n')
@@ -1446,7 +1469,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_install': {
       const { execCommand: sbExec } = await import('./sandbox.ts')
-      const command = args.command as string
+      const command = normalizeSandboxCommand(args.command as string)
       const cwd = args.cwd as string | undefined
       const result = await sbExec(ctx.db, ctx.teamId, command, cwd)
       await logActivity(ctx.db, 'sandbox_install', ctx.agentId, `Sandbox install: ${command.slice(0, 100)}`, undefined, ctx.teamId)
@@ -1457,7 +1480,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_write_files': {
       const { sandboxWriteFile } = await import('./sandbox.ts')
-      const files = args.files as Array<{ path: string; content: string }>
+      const files = (args.files as Array<{ path: string; content: string }>).map(f => ({
+        ...f, path: normalizeSandboxPath(f.path),
+      }))
       if (!files?.length) return 'Error: No files provided.'
       const results: string[] = []
       for (const file of files) {
@@ -1478,21 +1503,43 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_setup': {
       const { sandboxWriteFile, execCommand: sbExec, getPreviewUrl, setStartupCommand } = await import('./sandbox.ts')
-      const files = args.files as Array<{ path: string; content: string }>
-      const installCmd = args.install_command as string
-      const startCmd = args.start_command as string
-      const previewPort = args.preview_port as number
+      const rawFiles = args.files as Array<{ path: string; content: string }>
+      const previewPort = (args.preview_port as number) || 5173
 
+      // Hardcoded project directory — agents cannot choose a different location
+      const PROJECT_DIR = '/home/daytona/app'
       const output: string[] = []
 
-      // 1. Collect all unique directories and create them in one command
+      // Normalize all file paths to use the canonical project directory
+      // Agents may pass paths like /home/daytona/booking-app/src/App.tsx — rewrite them
+      const files = rawFiles.map(f => {
+        let path = f.path
+        // If path starts with /home/daytona/<something>/, rewrite to PROJECT_DIR
+        const homeMatch = path.match(/^\/home\/daytona\/[^/]+\/(.+)$/)
+        if (homeMatch) {
+          path = `${PROJECT_DIR}/${homeMatch[1]}`
+        } else if (!path.startsWith(PROJECT_DIR)) {
+          // Relative paths or other absolute paths — prefix with PROJECT_DIR
+          path = `${PROJECT_DIR}/${path.replace(/^\/+/, '')}`
+        }
+        return { path, content: f.content }
+      })
+
+      // Hardcoded install and start commands — ignore what the agent passes
+      const installCmd = `cd ${PROJECT_DIR} && npm install`
+      const startCmd = `cd ${PROJECT_DIR} && npm run dev -- --host 0.0.0.0 &`
+
+      // 1. Clean slate — remove any old project at this location
+      await sbExec(ctx.db, ctx.teamId, `rm -rf ${PROJECT_DIR}`)
+
+      // 2. Collect all unique directories and create them in one command
       const dirs = [...new Set(files.map(f => f.path.replace(/\/[^/]+$/, '')))]
       if (dirs.length > 0) {
         await sbExec(ctx.db, ctx.teamId, `mkdir -p ${dirs.join(' ')}`)
         output.push(`Created ${dirs.length} directories`)
       }
 
-      // 2. Write all files
+      // 3. Write all files
       let written = 0
       for (const file of files) {
         if (file.content.length > 200_000) {
@@ -1506,16 +1553,13 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           output.push(`Failed: ${file.path} — ${(err as Error).message}`)
         }
       }
-      output.push(`Written ${written}/${files.length} files`)
+      output.push(`Written ${written}/${files.length} files to ${PROJECT_DIR}`)
 
-      // 3. Install dependencies (with auto-retry if node_modules is corrupted)
+      // 4. Install dependencies (with auto-retry if node_modules is corrupted)
       let installResult = await sbExec(ctx.db, ctx.teamId, installCmd)
       if (installResult.exitCode !== 0) {
-        // Detect project dir from install command
-        const cdMatch = installCmd.match(/cd\s+(\/[^\s&]+)/)
-        const projectDir = cdMatch?.[1] ?? '/home/daytona/app'
         output.push('Install failed, cleaning node_modules and retrying...')
-        await sbExec(ctx.db, ctx.teamId, `rm -rf ${projectDir}/node_modules ${projectDir}/package-lock.json`)
+        await sbExec(ctx.db, ctx.teamId, `rm -rf ${PROJECT_DIR}/node_modules ${PROJECT_DIR}/package-lock.json`)
         installResult = await sbExec(ctx.db, ctx.teamId, installCmd)
       }
       if (installResult.exitCode === 0) {
@@ -1524,14 +1568,14 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         output.push(`Install failed (exit ${installResult.exitCode}): ${(installResult.stderr || installResult.stdout).slice(-300)}`)
       }
 
-      // 4. Start dev server
+      // 5. Start dev server
       await sbExec(ctx.db, ctx.teamId, startCmd)
       output.push('Dev server starting...')
 
-      // 5. Save startup command for auto-restart on resume
+      // 6. Save startup command for auto-restart on resume
       await setStartupCommand(ctx.db, ctx.teamId, startCmd)
 
-      // 6. Wait a moment for dev server to be ready, then get preview URL
+      // 7. Wait a moment for dev server to be ready, then get preview URL
       await new Promise(resolve => setTimeout(resolve, 3000))
       try {
         const url = await getPreviewUrl(ctx.db, ctx.teamId, previewPort)

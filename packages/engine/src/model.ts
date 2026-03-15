@@ -786,7 +786,8 @@ const qwen35Adapter: ToolFormatAdapter = {
 
   matches(modelId: string): boolean {
     const id = modelId.toLowerCase()
-    return id.includes('qwen3.5') || id.includes('qwen3-5')
+    // Qwen 3.5, Nemotron 3, and Step 3.5 Flash all use the qwen3-coder XML tool call format
+    return id.includes('qwen3.5') || id.includes('qwen3-5') || id.includes('nemotron') || id.includes('step-3')
   },
 
   formatToolPrompt(tools: ToolDef[]): string {
