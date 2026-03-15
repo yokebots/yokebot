@@ -24,6 +24,7 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(isAgentSession ? null : sessionId)
+  const [zoom, setZoom] = useState(100)
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
@@ -177,6 +178,27 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
     }
   }, [activeSessionId, urlInput])
 
+  // Back / Forward
+  const handleBack = useCallback(async () => {
+    if (!activeSessionId) return
+    try {
+      const result = await engine.sendBrowserInteraction(activeSessionId, { type: 'back' })
+      setScreenshot(result.screenshot)
+      setCurrentUrl(result.url)
+      setUrlInput(result.url)
+    } catch { /* ignore */ }
+  }, [activeSessionId])
+
+  const handleForward = useCallback(async () => {
+    if (!activeSessionId) return
+    try {
+      const result = await engine.sendBrowserInteraction(activeSessionId, { type: 'forward' })
+      setScreenshot(result.screenshot)
+      setCurrentUrl(result.url)
+      setUrlInput(result.url)
+    } catch { /* ignore */ }
+  }, [activeSessionId])
+
   // Refresh
   const handleRefresh = useCallback(async () => {
     if (!activeSessionId) return
@@ -239,6 +261,20 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
       {mode === 'take_control' && (
         <div className="flex items-center gap-1 border-b border-border-subtle bg-light-surface-alt px-2 py-1">
           <button
+            onClick={handleBack}
+            className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
+            title="Back"
+          >
+            <span className="material-symbols-outlined text-base">arrow_back</span>
+          </button>
+          <button
+            onClick={handleForward}
+            className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
+            title="Forward"
+          >
+            <span className="material-symbols-outlined text-base">arrow_forward</span>
+          </button>
+          <button
             onClick={handleRefresh}
             className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
             title="Refresh"
@@ -256,6 +292,29 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
               className="flex-1 bg-white border border-border-subtle rounded px-2 py-1 text-xs focus:border-forest-green focus:outline-none"
             />
           </form>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setZoom(z => Math.max(25, z - 25))}
+              className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
+              title="Zoom out"
+            >
+              <span className="material-symbols-outlined text-sm">zoom_out</span>
+            </button>
+            <button
+              onClick={() => setZoom(100)}
+              className="px-1 py-0.5 rounded hover:bg-light-surface-alt2 text-text-muted text-[10px] font-mono min-w-[36px] text-center"
+              title="Reset zoom"
+            >
+              {zoom}%
+            </button>
+            <button
+              onClick={() => setZoom(z => Math.min(200, z + 25))}
+              className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
+              title="Zoom in"
+            >
+              <span className="material-symbols-outlined text-sm">zoom_in</span>
+            </button>
+          </div>
           <button
             onClick={handleSaveLogin}
             disabled={savingLogin}
@@ -281,7 +340,7 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
       {/* Browser view */}
       <div
         ref={containerRef}
-        className="flex-1 flex items-center justify-center overflow-hidden bg-slate-100 p-2"
+        className="flex-1 flex items-center justify-center overflow-auto bg-slate-100 p-2"
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
@@ -292,10 +351,16 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
             alt="Browser view"
             onClick={handleClick}
             onWheel={handleWheel}
-            className={`max-h-full max-w-full rounded border border-border-subtle shadow-lg ${
+            className={`rounded border border-border-subtle shadow-lg ${
               mode === 'take_control' ? 'cursor-crosshair' : 'cursor-default'
             }`}
-            style={{ imageRendering: 'auto' }}
+            style={{
+              imageRendering: 'auto',
+              transform: `scale(${zoom / 100})`,
+              transformOrigin: 'center center',
+              maxWidth: zoom <= 100 ? '100%' : 'none',
+              maxHeight: zoom <= 100 ? '100%' : 'none',
+            }}
             draggable={false}
           />
         ) : (

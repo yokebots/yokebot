@@ -41,6 +41,8 @@ export type InteractionAction =
   | { type: 'type'; text: string }
   | { type: 'press'; key: string }
   | { type: 'scroll'; x: number; y: number; deltaX: number; deltaY: number }
+  | { type: 'back' }
+  | { type: 'forward' }
 
 export interface BrowserSessionInfo {
   id: string
@@ -278,6 +280,12 @@ export async function interactWithSession(
     case 'scroll':
       await page.mouse.move(action.x, action.y)
       await page.mouse.wheel(action.deltaX, action.deltaY)
+      break
+    case 'back':
+      await page.goBack({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {})
+      break
+    case 'forward':
+      await page.goForward({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {})
       break
   }
 

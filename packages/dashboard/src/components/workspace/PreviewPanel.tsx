@@ -20,6 +20,7 @@ export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
   const [viewport, setViewport] = useState<ViewportMode>('desktop')
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [consoleLogs, setConsoleLogs] = useState<string[]>([])
+  const [zoom, setZoom] = useState(100)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
   // Publish dialog state
@@ -180,6 +181,31 @@ export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
             </span>
           </button>
         ))}
+
+        <div className="h-4 w-px bg-border-subtle mx-1" />
+
+        {/* Zoom controls */}
+        <button
+          onClick={() => setZoom(z => Math.max(25, z - 25))}
+          className="flex items-center px-1 py-1 rounded text-xs text-text-muted hover:text-text-main hover:bg-light-surface-alt transition-colors"
+          title="Zoom out"
+        >
+          <span className="material-symbols-outlined text-[14px]">zoom_out</span>
+        </button>
+        <button
+          onClick={() => setZoom(100)}
+          className="px-1 py-0.5 rounded text-[10px] font-mono text-text-muted hover:text-text-main hover:bg-light-surface-alt min-w-[36px] text-center transition-colors"
+          title="Reset zoom"
+        >
+          {zoom}%
+        </button>
+        <button
+          onClick={() => setZoom(z => Math.min(200, z + 25))}
+          className="flex items-center px-1 py-1 rounded text-xs text-text-muted hover:text-text-main hover:bg-light-surface-alt transition-colors"
+          title="Zoom in"
+        >
+          <span className="material-symbols-outlined text-[14px]">zoom_in</span>
+        </button>
 
         <div className="flex-1" />
 
@@ -383,16 +409,19 @@ export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
       )}
 
       {/* Preview iframe */}
-      <div className="flex-1 overflow-hidden flex items-start justify-center bg-[#1a1a1a] relative">
+      <div className="flex-1 overflow-auto flex items-start justify-center bg-[#1a1a1a] relative">
         {url ? (
           <iframe
             ref={iframeRef}
             src={url}
             title="App Preview"
-            className="bg-white h-full border-0"
+            className="bg-white border-0"
             style={{
               width: vpWidth ? `${vpWidth}px` : '100%',
-              maxWidth: '100%',
+              height: '100%',
+              maxWidth: zoom <= 100 ? '100%' : 'none',
+              transform: `scale(${zoom / 100})`,
+              transformOrigin: 'top center',
               boxShadow: vpWidth ? '0 0 20px rgba(0,0,0,0.3)' : 'none',
               borderRadius: vpWidth ? '8px' : '0',
               marginTop: vpWidth ? '8px' : '0',
