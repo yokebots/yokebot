@@ -1,9 +1,10 @@
 export const PLANS = [
   {
     tier: 'team', name: 'Starter Crew', price: '$29', period: '/mo',
-    subtitle: 'Hire your first three AI agents!',
+    subtitle: 'Optimal for small teams (1–3 members)',
     features: [
-      '3 Agent Team Members',
+      'Unlimited Agents',
+      'Unlimited Team Members',
       '30-Min Heartbeat Interval',
       '24/7 Always Available',
       '50,000 Universal Credits/Mo',
@@ -14,9 +15,10 @@ export const PLANS = [
   },
   {
     tier: 'business', name: 'Growth Crew', price: '$59', period: '/mo', popular: true,
-    subtitle: 'A full-time team that never calls in sick',
+    subtitle: 'Optimal for growing teams (4–9 members)',
     features: [
-      '9 Agent Team Members',
+      'Unlimited Agents',
+      'Unlimited Team Members',
       '15-Min Heartbeat Interval',
       '24/7 Always Available',
       '150,000 Universal Credits/Mo',
@@ -27,9 +29,10 @@ export const PLANS = [
   },
   {
     tier: 'enterprise', name: 'Power Crew', price: '$149', period: '/mo',
-    subtitle: 'An always-on workforce that never sleeps',
+    subtitle: 'Optimal for large teams (10+ members)',
     features: [
-      '30 Agent Team Members',
+      'Unlimited Agents',
+      'Unlimited Team Members',
       '5-Min Heartbeat Interval',
       '24/7 Always Available',
       '500,000 Universal Credits/Mo',

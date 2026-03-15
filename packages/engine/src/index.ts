@@ -713,31 +713,20 @@ async function main() {
     const teamId = req.user!.activeTeamId!
     const body = validate(CreateAgentSchema, req.body)
 
-    // Check if template is free (exempt from agent limits)
+    // Block hosted-only templates in self-hosted mode
     const templateId = (req.body as Record<string, unknown>).templateId as string | undefined
-    let isTemplFree = false
     if (templateId) {
       const tmpl = getTemplate(templateId)
-      if (tmpl?.isFree) isTemplFree = true
-
-      // Block hosted-only templates in self-hosted mode
       if (tmpl?.hostedOnly && process.env.YOKEBOT_HOSTED_MODE !== 'true') {
         return res.status(403).json({ error: 'This agent is only available on YokeBot Cloud.' })
       }
     }
 
-    // Enforce agent count limit in hosted mode (free templates exempt)
-    if (process.env.YOKEBOT_HOSTED_MODE === 'true' && !isTemplFree) {
+    // Sanity cap at 100 agents to prevent abuse (credits are the real throttle)
+    if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
       const existing = await listAgents(db, teamId)
-      const paidAgentCount = existing.filter((a) => a.templateId !== 'advisor-bot').length
-      const maxAgents = req.subscription?.maxAgents ?? 3  // Free tier: 3 agents
-      if (paidAgentCount >= maxAgents) {
-        return res.status(403).json({
-          error: `Your plan allows ${maxAgents} agent(s). Upgrade to add more.`,
-          code: 'AGENT_LIMIT_REACHED',
-          currentCount: paidAgentCount,
-          maxAgents,
-        })
+      if (existing.length >= 100) {
+        return res.status(403).json({ error: 'Maximum 100 agents per team. Contact support if you need more.' })
       }
     }
 
