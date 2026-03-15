@@ -65,6 +65,9 @@ function getDaytona(): Daytona {
 
 // ---- Idle Timer ----
 
+// Store db reference so idle timer can update status
+let _db: Db | null = null
+
 function resetIdleTimer(session: SandboxSession): void {
   clearTimeout(session.idleTimer)
   session.lastActivity = Date.now()
@@ -73,9 +76,13 @@ function resetIdleTimer(session: SandboxSession): void {
     try {
       await session.sandbox.stop()
       sessions.delete(session.teamId)
-      // Update DB status
-      // We don't have db reference here, so we just remove from memory
-      // The DB status will be updated on next access
+      // Update DB status so next access knows to resume
+      if (_db) {
+        await _db.run(
+          `UPDATE sandbox_sessions SET status = 'stopped', last_activity = ${_db.now()} WHERE team_id = $1`,
+          [session.teamId],
+        )
+      }
     } catch (err) {
       console.error(`[sandbox] Failed to stop idle sandbox for team ${session.teamId}:`, (err as Error).message)
     }
@@ -89,6 +96,9 @@ function resetIdleTimer(session: SandboxSession): void {
  * on first call. Resumes stopped sandboxes automatically.
  */
 export async function getOrCreateSandbox(db: Db, teamId: string): Promise<SandboxSession> {
+  // Store db reference for idle timer DB updates
+  _db = db
+
   // Check in-memory cache first
   const existing = sessions.get(teamId)
   if (existing) {
@@ -173,82 +183,158 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
 }
 
 /**
+ * Check if an error indicates the sandbox needs to be resumed.
+ */
+function isSandboxNotStartedError(err: unknown): boolean {
+  const msg = (err as Error).message ?? ''
+  return msg.includes('Is the Sandbox started') || msg.includes('failed to resolve container IP') || msg.includes('ECONNREFUSED')
+}
+
+/**
+ * Evict the in-memory session so getOrCreateSandbox will re-fetch and resume from DB.
+ */
+function evictSession(teamId: string): void {
+  const session = sessions.get(teamId)
+  if (session) clearTimeout(session.idleTimer)
+  sessions.delete(teamId)
+}
+
+/**
  * Execute a shell command in the team's sandbox.
+ * Auto-resumes the sandbox if it was stopped.
  */
 export async function execCommand(db: Db, teamId: string, command: string, cwd?: string): Promise<ExecResult> {
-  const session = await getOrCreateSandbox(db, teamId)
-  resetIdleTimer(session)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const session = await getOrCreateSandbox(db, teamId)
+    resetIdleTimer(session)
 
-  try {
-    const result = await session.sandbox.process.executeCommand(command, cwd, undefined, 120)
-    return {
-      stdout: result.artifacts?.stdout ?? result.result ?? '',
-      stderr: '',
-      exitCode: result.exitCode,
+    try {
+      const result = await session.sandbox.process.executeCommand(command, cwd, undefined, 120)
+      return {
+        stdout: result.artifacts?.stdout ?? result.result ?? '',
+        stderr: '',
+        exitCode: result.exitCode,
+      }
+    } catch (err) {
+      if (isSandboxNotStartedError(err) && attempt === 0) {
+        console.log(`[sandbox] Sandbox not started for team ${teamId}, evicting and retrying...`)
+        evictSession(teamId)
+        continue
+      }
+      return {
+        stdout: '',
+        stderr: (err as Error).message,
+        exitCode: 1,
+      }
     }
-  } catch (err) {
-    return {
-      stdout: '',
-      stderr: (err as Error).message,
-      exitCode: 1,
+  }
+  return { stdout: '', stderr: 'Failed to execute command after retry', exitCode: 1 }
+}
+
+/**
+ * Write a file in the team's sandbox.
+ * Auto-resumes the sandbox if it was stopped.
+ */
+export async function sandboxWriteFile(db: Db, teamId: string, path: string, content: string): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const session = await getOrCreateSandbox(db, teamId)
+    resetIdleTimer(session)
+    try {
+      await session.sandbox.fs.uploadFile(Buffer.from(content, 'utf-8'), path)
+      return
+    } catch (err) {
+      if (isSandboxNotStartedError(err) && attempt === 0) {
+        console.log(`[sandbox] Sandbox not started for team ${teamId}, evicting and retrying...`)
+        evictSession(teamId)
+        continue
+      }
+      throw err
     }
   }
 }
 
 /**
- * Write a file in the team's sandbox.
- */
-export async function sandboxWriteFile(db: Db, teamId: string, path: string, content: string): Promise<void> {
-  const session = await getOrCreateSandbox(db, teamId)
-  resetIdleTimer(session)
-  await session.sandbox.fs.uploadFile(Buffer.from(content, 'utf-8'), path)
-}
-
-/**
  * Read a file from the team's sandbox.
+ * Auto-resumes the sandbox if it was stopped.
  */
 export async function sandboxReadFile(db: Db, teamId: string, path: string): Promise<string> {
-  const session = await getOrCreateSandbox(db, teamId)
-  resetIdleTimer(session)
-  const buffer = await session.sandbox.fs.downloadFile(path)
-  return buffer.toString('utf-8')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const session = await getOrCreateSandbox(db, teamId)
+    resetIdleTimer(session)
+    try {
+      const buffer = await session.sandbox.fs.downloadFile(path)
+      return buffer.toString('utf-8')
+    } catch (err) {
+      if (isSandboxNotStartedError(err) && attempt === 0) {
+        console.log(`[sandbox] Sandbox not started for team ${teamId}, evicting and retrying...`)
+        evictSession(teamId)
+        continue
+      }
+      throw err
+    }
+  }
+  throw new Error('Failed to read file after retry')
 }
 
 /**
  * List files in a directory in the team's sandbox.
+ * Auto-resumes the sandbox if it was stopped.
  */
 export async function sandboxListFiles(db: Db, teamId: string, dir: string): Promise<FileEntry[]> {
-  const session = await getOrCreateSandbox(db, teamId)
-  resetIdleTimer(session)
-
-  const files = await session.sandbox.fs.listFiles(dir || '/')
-  return files.map(f => ({
-    name: f.name,
-    path: dir ? `${dir.replace(/\/+$/, '')}/${f.name}` : `/${f.name}`,
-    isDirectory: f.isDir,
-    size: f.size ?? 0,
-  }))
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const session = await getOrCreateSandbox(db, teamId)
+    resetIdleTimer(session)
+    try {
+      const files = await session.sandbox.fs.listFiles(dir || '/')
+      return files.map(f => ({
+        name: f.name,
+        path: dir ? `${dir.replace(/\/+$/, '')}/${f.name}` : `/${f.name}`,
+        isDirectory: f.isDir,
+        size: f.size ?? 0,
+      }))
+    } catch (err) {
+      if (isSandboxNotStartedError(err) && attempt === 0) {
+        console.log(`[sandbox] Sandbox not started for team ${teamId}, evicting and retrying...`)
+        evictSession(teamId)
+        continue
+      }
+      throw err
+    }
+  }
+  return []
 }
 
 /**
  * Get the public preview URL for a port in the team's sandbox.
+ * Auto-resumes the sandbox if it was stopped.
  */
 export async function getPreviewUrl(db: Db, teamId: string, port: number): Promise<string> {
-  const session = await getOrCreateSandbox(db, teamId)
-  resetIdleTimer(session)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const session = await getOrCreateSandbox(db, teamId)
+    resetIdleTimer(session)
+    try {
+      const link = await session.sandbox.getPreviewLink(port)
 
-  const link = await session.sandbox.getPreviewLink(port)
+      // Update preview URL in DB
+      await db.run(
+        `UPDATE sandbox_sessions SET preview_url = $1, last_activity = ${db.now()} WHERE team_id = $2`,
+        [link.url, teamId],
+      )
 
-  // Update preview URL in DB
-  await db.run(
-    `UPDATE sandbox_sessions SET preview_url = $1, last_activity = ${db.now()} WHERE team_id = $2`,
-    [link.url, teamId],
-  )
+      // Broadcast to dashboard so PreviewPanel auto-opens
+      if (sandboxBroadcast) sandboxBroadcast(teamId, link.url)
 
-  // Broadcast to dashboard so PreviewPanel auto-opens
-  if (sandboxBroadcast) sandboxBroadcast(teamId, link.url)
-
-  return link.url
+      return link.url
+    } catch (err) {
+      if (isSandboxNotStartedError(err) && attempt === 0) {
+        console.log(`[sandbox] Sandbox not started for team ${teamId}, evicting and retrying...`)
+        evictSession(teamId)
+        continue
+      }
+      throw err
+    }
+  }
+  throw new Error('Failed to get preview URL after retry')
 }
 
 /**
