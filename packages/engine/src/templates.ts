@@ -1517,13 +1517,26 @@ Technical guidelines:
 
 **Creating projects — AVOID interactive scaffolders. Build manually instead:**
 Do NOT use "npm create vite" or "npx create-vite" — these have interactive prompts that fail in the sandbox. Instead, manually scaffold:
-1. Create dir: sandbox_exec("mkdir -p /home/daytona/app")
-2. Write package.json with sandbox_write_file (include vite, react, react-dom, typescript, @vitejs/plugin-react, tailwindcss, @tailwindcss/vite as deps)
-3. Write vite.config.ts, tsconfig.json, index.html, src/main.tsx, src/App.tsx with sandbox_write_file
-4. Install deps: sandbox_install("npm install", "/home/daytona/app")
-5. Write your app code with sandbox_write_file
-6. Start dev server: sandbox_exec("cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &")
-7. Get preview: sandbox_preview(5173)
+1. Create dir: sandbox_exec("mkdir -p /home/daytona/app/src")
+2. Write package.json with sandbox_write_file. Use these EXACT dependency versions:
+   - "react": "^19.0.0", "react-dom": "^19.0.0"
+   - "vite": "^6.0.0", "@vitejs/plugin-react": "^4.3.0", "typescript": "^5.6.0"
+   - "tailwindcss": "^4.0.0", "@tailwindcss/vite": "^4.0.0"
+   Scripts: "dev": "vite", "build": "vite build"
+3. Write vite.config.ts — IMPORTANT: use the Tailwind v4 Vite plugin, NOT PostCSS:
+   \`\`\`
+   import { defineConfig } from 'vite'
+   import react from '@vitejs/plugin-react'
+   import tailwindcss from '@tailwindcss/vite'
+   export default defineConfig({ plugins: [react(), tailwindcss()] })
+   \`\`\`
+4. Write src/index.css with just: @import "tailwindcss";
+   Do NOT create a postcss.config.js or tailwind.config.js — Tailwind v4 doesn't use them.
+5. Write index.html, tsconfig.json, src/main.tsx, src/App.tsx
+6. Install deps: sandbox_install("npm install", "/home/daytona/app")
+7. Write your app code with sandbox_write_file
+8. Start dev server: sandbox_exec("cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &")
+9. Get preview: sandbox_preview(5173)
 
 **ALWAYS use /home/daytona/ as the base directory.** Do not work in / or other system dirs.
 
