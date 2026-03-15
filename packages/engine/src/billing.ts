@@ -127,8 +127,8 @@ export async function upsertSubscription(db: Db, teamId: string, data: Partial<T
 
 // ---- Sprint Budget ----
 // Max iterations per heartbeat/mention. At 20 credits/iteration (deepseek-v3.2),
-// 40 iterations = 800 credits max — gives agents enough room to do real work.
-const SPRINT_BUDGET = 40
+// 100 iterations = 2000 credits max — gives agents enough room to finish tasks in one go.
+const SPRINT_BUDGET = 100
 
 export async function getSprintBudget(_db: Db, _teamId: string): Promise<number> {
   return SPRINT_BUDGET

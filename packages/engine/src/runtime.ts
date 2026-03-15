@@ -752,7 +752,12 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         }
       }
       // Validate assignedAgentId belongs to this team
+      // AdvisorBot (team manager) cannot assign tasks to himself — his job is to delegate
       let targetAgentId = (args.assignedAgentId as string) ?? ctx.agentId
+      const callerAgent = await getAgent(ctx.db, ctx.agentId)
+      if (targetAgentId === ctx.agentId && callerAgent?.templateId === 'advisor-bot') {
+        return `Error: As the team manager, you must delegate tasks to other agents — not yourself. Use list_agents to find the right agent for this task.`
+      }
       if (targetAgentId && targetAgentId !== ctx.agentId) {
         const targetAgent = await getAgent(ctx.db, targetAgentId)
         if (!targetAgent || targetAgent.teamId !== ctx.teamId) {

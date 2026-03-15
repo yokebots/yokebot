@@ -447,7 +447,7 @@ export async function respondToMention(
     const mentionModelId = agent.modelId || undefined
     const mentionCost = HOSTED_MODE && mentionModelId ? await getModelCreditCost(db, mentionModelId) : 0
     let mentionReserved = 0
-    let mentionIterations = 40
+    let mentionIterations = 100
 
     if (HOSTED_MODE && mentionCost > 0) {
       const reservation = await reserveCredits(db, agent.teamId, mentionIterations, mentionCost)
@@ -964,8 +964,8 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     }
   }
 
-  // ---- Cheap-poll: skip generic check-in if no new messages (non-advisor only) ----
-  if (!isAdvisor) {
+  // ---- Cheap-poll: skip generic check-in if no new messages ----
+  {
     const hasMessages = await hasNewMessages(db, agent.teamId, agent.id, agent.heartbeatSeconds)
     if (!hasMessages) {
       console.log(`[scheduler] "${agent.name}" — no new messages, skipping generic check-in (no LLM call)`)
@@ -1013,7 +1013,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   const proactivePrompt = isAdvisor ? advisorPrompt : genericPrompt
 
   try {
-    const proactiveMax = isAdvisor ? 5 : 10
+    const proactiveMax = isAdvisor ? 20 : 15
     const proactiveModelId = agent.modelId || undefined
     const proactiveCost = HOSTED_MODE && proactiveModelId ? await getModelCreditCost(db, proactiveModelId) : 0
     let proactiveReserved = 0
