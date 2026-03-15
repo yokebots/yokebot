@@ -336,10 +336,8 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
       resourceId: path,
     }
     workspace.addViewerTab(tab)
-    // Mark file as read when opened
-    if (unreadFileIds?.has(path)) {
-      onMarkFileRead?.(path)
-    }
+    // Always mark file as read when opened (even if not in unreadFileIds — covers race conditions)
+    onMarkFileRead?.(path)
   }
 
   const openTable = (table: engine.SorTable) => {
@@ -572,16 +570,6 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
           <span className="material-symbols-outlined text-[14px]">table_chart</span>
           Data
         </button>
-        {activePanel === 'files' && (
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            title="Upload files"
-            className="ml-auto flex items-center gap-1 rounded-md px-2 py-1.5 text-xs text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors disabled:opacity-40"
-          >
-            <span className="material-symbols-outlined text-[14px]">{uploading ? 'hourglass_top' : 'upload_file'}</span>
-          </button>
-        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -591,15 +579,25 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
         />
       </div>
 
-      {/* Search */}
-      <div className="px-1 py-1.5 shrink-0">
+      {/* Search + Upload row */}
+      <div className="flex items-center gap-1 px-1 py-1.5 shrink-0">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={activePanel === 'files' ? 'Search files...' : 'Search tables...'}
-          className="w-full rounded-lg border border-border-subtle px-2.5 py-1.5 text-xs focus:border-forest-green focus:outline-none"
+          className="flex-1 rounded-lg border border-border-subtle px-2.5 py-1.5 text-xs focus:border-forest-green focus:outline-none"
         />
+        {activePanel === 'files' && (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title="Upload files"
+            className="flex items-center gap-1 rounded-lg border border-border-subtle px-2 py-1.5 text-xs text-text-muted hover:border-forest-green hover:text-forest-green transition-colors disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-[14px]">{uploading ? 'hourglass_top' : 'upload_file'}</span>
+          </button>
+        )}
       </div>
 
       {/* Content area */}

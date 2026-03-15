@@ -324,6 +324,20 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
               ))}
             </select>
           </div>
+          {/* Assigned human user */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted w-14">Owner</span>
+            <select
+              value={task.assignedUserId ?? ''}
+              onChange={(e) => updateField('assignedUserId', e.target.value || null!)}
+              className="rounded border border-border-subtle px-2 py-0.5 text-xs focus:border-forest-green focus:outline-none"
+            >
+              <option value="">Unassigned</option>
+              {completions?.users.map(u => (
+                <option key={u.userId} value={u.userId}>{u.email}</option>
+              ))}
+            </select>
+          </div>
           {/* Credit Estimate */}
           {task.estimatedCredits != null && (
             <div className="flex items-center gap-2">

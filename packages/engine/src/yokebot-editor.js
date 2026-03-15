@@ -31,15 +31,40 @@
   let highlightEl = null
   let lastHovered = null
 
-  // ---- Undo/redo history ----
+  // ---- Undo/redo history (persisted via sessionStorage, capped at 50) ----
+  var MAX_HISTORY = 50
   var changeHistory = []
   var historyIndex = -1
+
+  // Restore history from sessionStorage on load
+  try {
+    var saved = sessionStorage.getItem('__yokebot_history')
+    if (saved) {
+      var parsed = JSON.parse(saved)
+      changeHistory = parsed.entries || []
+      historyIndex = parsed.index != null ? parsed.index : changeHistory.length - 1
+    }
+  } catch (e) { /* ignore parse errors */ }
+
+  function saveHistory() {
+    try {
+      sessionStorage.setItem('__yokebot_history', JSON.stringify({
+        entries: changeHistory,
+        index: historyIndex,
+      }))
+    } catch (e) { /* storage full or unavailable */ }
+  }
 
   function recordChange(entry) {
     // Truncate any redo entries beyond current index
     changeHistory = changeHistory.slice(0, historyIndex + 1)
     changeHistory.push(entry)
+    // Cap at MAX_HISTORY — drop oldest entries
+    if (changeHistory.length > MAX_HISTORY) {
+      changeHistory = changeHistory.slice(changeHistory.length - MAX_HISTORY)
+    }
     historyIndex = changeHistory.length - 1
+    saveHistory()
     window.parent.postMessage({
       type: 'yokebot:history-state',
       canUndo: historyIndex >= 0,
@@ -362,6 +387,7 @@
             }
           }
           historyIndex--
+          saveHistory()
           window.parent.postMessage({ type: 'yokebot:history-state', canUndo: historyIndex >= 0, canRedo: historyIndex < changeHistory.length - 1 }, '*')
         }
         break
@@ -377,6 +403,7 @@
               el.style[entry.property] = entry.newValue
             }
           }
+          saveHistory()
           window.parent.postMessage({ type: 'yokebot:history-state', canUndo: historyIndex >= 0, canRedo: historyIndex < changeHistory.length - 1 }, '*')
         }
         break
@@ -390,5 +417,14 @@
   document.addEventListener('click', onClick, true)
   document.addEventListener('dblclick', onDblClick, true)
 
-  console.log('[yokebot-editor] Visual editor bridge loaded')
+  // Broadcast restored history state so parent knows undo/redo availability
+  if (changeHistory.length > 0) {
+    window.parent.postMessage({
+      type: 'yokebot:history-state',
+      canUndo: historyIndex >= 0,
+      canRedo: historyIndex < changeHistory.length - 1,
+    }, '*')
+  }
+
+  console.log('[yokebot-editor] Visual editor bridge loaded (' + changeHistory.length + ' history entries restored)')
 })()

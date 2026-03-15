@@ -137,21 +137,11 @@ const OFFLOAD_SKIP = new Set([
   'create_tasks', 'write_workspace_files', 'add_source_of_record_rows',
 ])
 
-async function maybeOffloadResult(result: string, toolName: string, ctx: ToolContext): Promise<string> {
-  if (result.length <= OFFLOAD_THRESHOLD) return result
-  if (OFFLOAD_SKIP.has(toolName)) return result
-  if (result.startsWith('Error:') || result.startsWith('⚠️')) return result
-
-  const filePath = `tool-results/${toolName}_${Date.now()}.txt`
-  try {
-    const wr = await writeFile(ctx.db, ctx.teamId, filePath, result, ctx.agentId, ctx.currentTaskId)
-    if (!wr.success) return result
-  } catch {
-    return result // write failed — fall back to full result
-  }
-
-  const preview = result.slice(0, 500)
-  return `Result saved to workspace: ${filePath} (${result.length} chars)\n\nPreview:\n${preview}\n...\n\nUse read_workspace_file to see full result.`
+async function maybeOffloadResult(result: string, _toolName: string, _ctx: ToolContext): Promise<string> {
+  // Tool results stay in-memory conversation context only.
+  // No longer offloaded to workspace files — reduces file clutter and unread notification noise.
+  // Context window masking (maskOldObservations) handles large results.
+  return result
 }
 
 /**

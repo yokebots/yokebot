@@ -30,13 +30,33 @@ const FONT_SIZE = 14
 export function AnnotationOverlay({ width, height, onSendToBot, onClose }: AnnotationOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [tool, setTool] = useState<AnnotationTool>('rectangle')
-  const [annotations, setAnnotations] = useState<Annotation[]>([])
+  const [annotations, setAnnotations] = useState<Annotation[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('__yokebot_annotations')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [drawing, setDrawing] = useState(false)
   const [current, setCurrent] = useState<Annotation | null>(null)
   const [textInput, setTextInput] = useState<{ x: number; y: number } | null>(null)
   const [textValue, setTextValue] = useState('')
   const textInputRef = useRef<HTMLInputElement>(null)
-  const [redoStack, setRedoStack] = useState<Annotation[]>([])
+  const [redoStack, setRedoStack] = useState<Annotation[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('__yokebot_annotations_redo')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+
+  const MAX_ANNOTATIONS = 50
+
+  // Persist annotations to sessionStorage
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('__yokebot_annotations', JSON.stringify(annotations.slice(-MAX_ANNOTATIONS)))
+      sessionStorage.setItem('__yokebot_annotations_redo', JSON.stringify(redoStack.slice(-MAX_ANNOTATIONS)))
+    } catch { /* storage full */ }
+  }, [annotations, redoStack])
 
   // Keyboard shortcuts: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo
   useEffect(() => {

@@ -203,6 +203,16 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
   const tasksByStatus = (status: string) => sortedTasks.filter(t => t.status === status)
   const doneCount = tasks.filter(t => t.status === 'done').length
 
+  const handleStatusChange = useCallback(async (taskId: string, newStatus: string) => {
+    // Optimistic update
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus as engine.EngineTask['status'] } : t))
+    try {
+      await engine.updateTask(taskId, { status: newStatus })
+    } catch {
+      loadTasks() // revert on failure
+    }
+  }, [loadTasks])
+
   return (
     <div className="flex flex-col h-full">
       {/* Slim toolbar — no title (tab above already says "Tasks") */}
@@ -366,6 +376,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
           <KanbanView
             tasksByStatus={tasksByStatus}
             onTaskClick={handleTaskClick}
+            onStatusChange={handleStatusChange}
             unreadTaskIds={unreadTaskIds}
             agents={agents}
           />
@@ -496,21 +507,37 @@ function ListView({
 function KanbanView({
   tasksByStatus,
   onTaskClick,
+  onStatusChange,
   unreadTaskIds,
   agents,
 }: {
   tasksByStatus: (status: string) => engine.EngineTask[]
   onTaskClick: (id: string) => void
+  onStatusChange: (taskId: string, newStatus: string) => void
   unreadTaskIds?: Set<string>
   agents: engine.EngineAgent[]
 }) {
   const agentMap = new Map(agents.map(a => [a.id, a]))
   const columns = STATUS_ORDER.filter(s => tasksByStatus(s).length > 0 || s === 'todo' || s === 'in_progress')
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
+  const dragTaskIdRef = useRef<string | null>(null)
 
   return (
     <div className="flex gap-2 p-2 overflow-x-auto h-full">
       {columns.map(status => (
-        <div key={status} className="flex flex-col w-44 shrink-0">
+        <div
+          key={status}
+          className={`flex flex-col w-44 shrink-0 rounded-lg transition-colors ${dragOverColumn === status ? 'bg-forest-green/10' : ''}`}
+          onDragOver={(e) => { e.preventDefault(); setDragOverColumn(status) }}
+          onDragLeave={() => setDragOverColumn(null)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragOverColumn(null)
+            const taskId = dragTaskIdRef.current || e.dataTransfer.getData('text/plain')
+            if (taskId) onStatusChange(taskId, status)
+            dragTaskIdRef.current = null
+          }}
+        >
           {/* Column header */}
           <div className="flex items-center gap-1.5 px-2 py-1.5 mb-1">
             <span className={`h-2 w-2 rounded-full ${STATUS_DOTS[status]}`} />
@@ -520,7 +547,7 @@ function KanbanView({
             <span className="text-[10px] text-text-muted">{tasksByStatus(status).length}</span>
           </div>
           {/* Cards */}
-          <div className="flex-1 overflow-y-auto space-y-1.5">
+          <div className="flex-1 overflow-y-auto space-y-1.5 min-h-[40px]">
             {tasksByStatus(status).map(task => {
               const agent = task.assignedAgentId ? agentMap.get(task.assignedAgentId) : null
               const isUnread = unreadTaskIds?.has(task.id)
@@ -528,8 +555,14 @@ function KanbanView({
               return (
                 <button
                   key={task.id}
+                  draggable
+                  onDragStart={(e) => {
+                    dragTaskIdRef.current = task.id
+                    e.dataTransfer.setData('text/plain', task.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
                   onClick={() => onTaskClick(task.id)}
-                  className={`w-full rounded-lg border bg-white p-2 text-left hover:border-forest-green/30 hover:shadow-sm transition-all ${isDone ? 'opacity-60 border-border-subtle' : task.status === 'blocked' ? 'border-red-300' : 'border-border-subtle'}`}
+                  className={`w-full rounded-lg border bg-white p-2 text-left hover:border-forest-green/30 hover:shadow-sm transition-all cursor-grab active:cursor-grabbing ${isDone ? 'opacity-60 border-border-subtle' : task.status === 'blocked' ? 'border-red-300' : 'border-border-subtle'}`}
                 >
                   <p className={`text-xs leading-snug ${isDone ? 'line-through text-text-muted' : isUnread ? 'font-semibold text-text-main' : 'text-text-main'} line-clamp-2`}>
                     {isDone && <span className="material-symbols-outlined text-[13px] text-green-500 mr-0.5 align-middle">check_circle</span>}

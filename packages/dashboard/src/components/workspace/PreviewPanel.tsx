@@ -42,6 +42,7 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
   const [canRedo, setCanRedo] = useState(false)
   const [wakingUp, setWakingUp] = useState(false)
   const [wakeProgress, setWakeProgress] = useState(0)
+  const [saveToast, setSaveToast] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const previewContainerRef = useRef<HTMLDivElement>(null)
 
@@ -151,15 +152,46 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
       }
 
       if (data.type === 'yokebot:text-changed') {
-        // Persist text change to source
-        if (data.sourceFile && data.sourceLine) {
-          engine.applyTextToSource({
-            sourceFile: data.sourceFile,
-            sourceLine: data.sourceLine,
-            oldText: data.oldText || '',
-            newText: data.newText,
-          }).catch(err => console.warn('[PreviewPanel] Failed to persist text change:', err.message))
+        const persistText = async () => {
+          // Try direct source file edit first
+          if (data.sourceFile && data.sourceLine) {
+            try {
+              const result = await engine.applyTextToSource({
+                sourceFile: data.sourceFile,
+                sourceLine: data.sourceLine,
+                oldText: data.oldText || '',
+                newText: data.newText,
+              })
+              if (result.ok && result.replaced !== false) {
+                setSaveToast(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+                setTimeout(() => setSaveToast(null), 3000)
+                return
+              }
+            } catch (err) {
+              console.warn('[PreviewPanel] Direct text persist failed:', (err as Error).message)
+            }
+          }
+
+          // Fallback: send change to BuilderBot via chat
+          if (channelId && userId) {
+            let mention = ''
+            try {
+              const completions = await engine.getMentionCompletions()
+              const builder = completions.agents.find(a => a.name.toLowerCase().includes('builderbot') || a.name.toLowerCase().includes('builder bot'))
+              if (builder) mention = `@[${builder.name}](agent:${builder.id}) `
+            } catch { /* proceed without mention */ }
+
+            const oldSnippet = data.oldText ? `"${data.oldText}"` : 'the text'
+            await engine.sendMessage(channelId, {
+              senderType: 'human',
+              senderId: userId,
+              content: `${mention}Please change ${oldSnippet} to "${data.newText}" in the app. I edited it visually in the preview but need you to update the source code.`,
+            })
+            setSaveToast(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' (via BuilderBot)')
+            setTimeout(() => setSaveToast(null), 3000)
+          }
         }
+        persistText()
       }
     }
     window.addEventListener('message', handler)
@@ -212,7 +244,7 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
   }, [editMode, handleUndo, handleRedo])
 
   // ---- Annotation: send to bot ----
-  const handleSendAnnotations = useCallback((annotations: Array<{
+  const handleSendAnnotations = useCallback(async (annotations: Array<{
     type: string; startX: number; startY: number; endX: number; endY: number; text?: string
   }>) => {
     if (!channelId || !userId) return
@@ -220,10 +252,19 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
     const w = container?.clientWidth ?? 800
     const h = container?.clientHeight ?? 600
     const message = buildAnnotationMessage(annotations, w, h)
+
+    // Find BuilderBot agent to @mention it
+    let mention = ''
+    try {
+      const completions = await engine.getMentionCompletions()
+      const builder = completions.agents.find(a => a.name.toLowerCase().includes('builderbot') || a.name.toLowerCase().includes('builder bot'))
+      if (builder) mention = `@[${builder.name}](agent:${builder.id}) `
+    } catch { /* proceed without mention */ }
+
     engine.sendMessage(channelId, {
       senderType: 'human',
       senderId: userId,
-      content: message,
+      content: mention + message,
     })
     setEditMode('none')
   }, [channelId, userId])
@@ -662,6 +703,14 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
                 </div>
                 <span className="text-sm text-text-muted">Loading preview...</span>
               </div>
+            </div>
+          )}
+
+          {/* Autosave toast */}
+          {saveToast && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-forest-green/90 backdrop-blur-sm text-white text-xs font-medium shadow-lg transition-opacity duration-300">
+              <span className="material-symbols-outlined text-[14px]">check_circle</span>
+              Autosaved {saveToast}
             </div>
           )}
 

@@ -148,6 +148,7 @@ export interface EngineTask {
   status: 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'blocked' | 'archived'
   priority: 'low' | 'medium' | 'high' | 'urgent'
   assignedAgentId: string | null
+  assignedUserId: string | null
   parentTaskId: string | null
   deadline: string | null
   headerImage: string | null
@@ -1993,7 +1994,7 @@ export async function applyTextToSource(opts: {
   sourceLine: number
   oldText: string
   newText: string
-}): Promise<{ ok: boolean }> {
+}): Promise<{ ok: boolean; replaced?: boolean }> {
   return request('/api/sandbox/apply-text', {
     method: 'POST',
     body: JSON.stringify(opts),

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
 import { ResizablePanel } from '@/components/workspace/ResizablePanel'
 import { FilesPanel } from '@/components/workspace/FilesPanel'
@@ -97,6 +97,8 @@ export function WorkspacePage() {
   // Unread tracking
   const [unreadFileIds, setUnreadFileIds] = useState<Set<string>>(new Set())
   const [unreadTaskIds, setUnreadTaskIds] = useState<Set<string>>(new Set())
+  // Track recently-read files to prevent SSE re-fetch from re-adding them
+  const recentlyReadRef = useRef<Set<string>>(new Set())
 
   // Fetch team channel, agents, unread state — wait for activeTeam so X-Team-Id header is set
   useEffect(() => {
@@ -110,8 +112,14 @@ export function WorkspacePage() {
   }, [activeTeam])
 
   // SSE: refresh unread state when files or tasks change
+  // Filter out recently-read files so the re-fetch doesn't undo local mark-read
   useRealtimeEvent('file_written', () => {
-    engine.getUnreadFileIds().then(res => setUnreadFileIds(new Set(res.fileIds))).catch(() => {})
+    engine.getUnreadFileIds().then(res => {
+      const serverSet = new Set(res.fileIds)
+      // Remove files the user just read (race window with server)
+      for (const path of recentlyReadRef.current) serverSet.delete(path)
+      setUnreadFileIds(serverSet)
+    }).catch(() => {})
   })
   useRealtimeEvent('task_updated', () => {
     engine.getUnreadTaskIds().then(res => setUnreadTaskIds(new Set(res.taskIds))).catch(() => {})
@@ -132,35 +140,40 @@ export function WorkspacePage() {
     })
   })
 
-  const handleMarkFileRead = useCallback((path: string) => {
-    engine.markFileRead(path).catch(() => {})
+  const markFileReadLocally = useCallback((path: string) => {
+    // Track as recently-read so SSE re-fetches don't re-add it
+    recentlyReadRef.current.add(path)
+    // Clear from recently-read after 10s (server should be consistent by then)
+    setTimeout(() => recentlyReadRef.current.delete(path), 10000)
     setUnreadFileIds(prev => {
+      if (!prev.has(path)) return prev
       const next = new Set(prev)
       next.delete(path)
       return next
     })
   }, [])
 
+  const handleMarkFileRead = useCallback((path: string) => {
+    engine.markFileRead(path).catch(() => {})
+    markFileReadLocally(path)
+  }, [markFileReadLocally])
+
   // Listen for file-read events from FileViewer (so opening a file in the viewer clears its unread dot)
   useEffect(() => {
     const handler = (e: Event) => {
       const path = (e as CustomEvent).detail?.path
-      if (path) {
-        setUnreadFileIds(prev => {
-          if (!prev.has(path)) return prev
-          const next = new Set(prev)
-          next.delete(path)
-          return next
-        })
-      }
+      if (path) markFileReadLocally(path)
     }
     window.addEventListener('yokebot:file-read', handler)
     return () => window.removeEventListener('yokebot:file-read', handler)
-  }, [])
+  }, [markFileReadLocally])
 
   const handleMarkAllFilesRead = useCallback(() => {
-    // Mark each unread file as read on the server
-    unreadFileIds.forEach(path => engine.markFileRead(path).catch(() => {}))
+    unreadFileIds.forEach(path => {
+      engine.markFileRead(path).catch(() => {})
+      recentlyReadRef.current.add(path)
+      setTimeout(() => recentlyReadRef.current.delete(path), 10000)
+    })
     setUnreadFileIds(new Set())
   }, [unreadFileIds])
 
