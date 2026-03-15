@@ -308,23 +308,30 @@ async function main() {
 
       // Forward response headers
       res.status(proxyRes.status)
-      const fwdHeaders = ['content-type', 'cache-control', 'etag', 'content-length']
-      for (const h of fwdHeaders) {
-        const val = proxyRes.headers.get(h)
-        if (val) res.setHeader(h, val)
-      }
+      const contentType = proxyRes.headers.get('content-type') ?? ''
+      if (contentType) res.setHeader('Content-Type', contentType)
+      const cacheControl = proxyRes.headers.get('cache-control')
+      if (cacheControl) res.setHeader('Cache-Control', cacheControl)
 
-      // Pipe body
-      if (proxyRes.body) {
-        const reader = proxyRes.body.getReader()
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) { res.end(); break }
-          res.write(value)
-        }
+      // For HTML responses, inject <base> tag so absolute paths resolve through proxy
+      if (contentType.includes('text/html')) {
+        let html = await proxyRes.text()
+        const baseTag = `<base href="/api/sandbox/proxy/${token}/">`
+        html = html.replace('<head>', `<head>\n${baseTag}`)
+        res.send(html)
       } else {
-        const body = await proxyRes.text()
-        res.send(body)
+        // Pipe non-HTML body directly
+        if (proxyRes.body) {
+          const reader = proxyRes.body.getReader()
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) { res.end(); break }
+            res.write(value)
+          }
+        } else {
+          const body = await proxyRes.text()
+          res.send(body)
+        }
       }
     } catch (err) {
       if (!res.headersSent) {
