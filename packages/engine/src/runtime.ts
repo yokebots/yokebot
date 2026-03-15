@@ -1439,10 +1439,16 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_write_file': {
       const { sandboxWriteFile } = await import('./sandbox.ts')
-      const path = normalizeSandboxPath(args.path as string)
-      const content = args.content as string
-      if (content.length > 200_000) return `Error: File content too large (${content.length} chars). Maximum is 200,000 characters.`
-      await sandboxWriteFile(ctx.db, ctx.teamId, path, content)
+      // Defensive: ensure path is a string
+      const rawPath = args.path
+      if (!rawPath || typeof rawPath !== 'string') return 'Error: "path" must be a string (e.g. "/home/daytona/app/src/App.tsx")'
+      const path = normalizeSandboxPath(rawPath)
+      // Defensive: ensure content is a string
+      let content = args.content
+      if (content === undefined || content === null) return 'Error: "content" is required'
+      if (typeof content !== 'string') content = JSON.stringify(content, null, 2)
+      if ((content as string).length > 200_000) return `Error: File content too large (${(content as string).length} chars). Maximum is 200,000 characters.`
+      await sandboxWriteFile(ctx.db, ctx.teamId, path, content as string)
       await logActivity(ctx.db, 'sandbox_write', ctx.agentId, `Sandbox: wrote ${path}`, undefined, ctx.teamId)
       return `File written: ${path}`
     }
@@ -1489,10 +1495,24 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_write_files': {
       const { sandboxWriteFile } = await import('./sandbox.ts')
-      const files = (args.files as Array<{ path: string; content: string }>).map(f => ({
-        ...f, path: normalizeSandboxPath(f.path),
+      // Defensive: ensure files is an array
+      let rawFileList = args.files as Array<{ path: string; content: string }>
+      if (!rawFileList) return 'Error: "files" array is required.'
+      if (typeof rawFileList === 'string') {
+        try { rawFileList = JSON.parse(rawFileList) } catch { return 'Error: "files" must be a JSON array.' }
+      }
+      if (!Array.isArray(rawFileList)) {
+        if (typeof rawFileList === 'object' && (rawFileList as Record<string, unknown>).path) {
+          rawFileList = [rawFileList as unknown as { path: string; content: string }]
+        } else {
+          return 'Error: "files" must be an array of { path, content } objects.'
+        }
+      }
+      const files = rawFileList.map(f => ({
+        path: typeof f.path === 'string' ? normalizeSandboxPath(f.path) : String(f.path ?? ''),
+        content: typeof f.content === 'string' ? f.content : JSON.stringify(f.content, null, 2),
       }))
-      if (!files?.length) return 'Error: No files provided.'
+      if (!files.length) return 'Error: No files provided.'
       const results: string[] = []
       for (const file of files) {
         if (file.content.length > 200_000) {
@@ -1512,17 +1532,32 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_setup': {
       const { sandboxWriteFile, execCommand: sbExec, getPreviewUrl, setStartupCommand } = await import('./sandbox.ts')
-      const rawFiles = args.files as Array<{ path: string; content: string }>
+      // Defensive: ensure files is an array
+      let rawFiles = args.files as Array<{ path: string; content: string }>
+      if (!rawFiles) return 'Error: "files" array is required. Pass an array of { path, content } objects.'
+      if (typeof rawFiles === 'string') {
+        try { rawFiles = JSON.parse(rawFiles) } catch { return 'Error: "files" must be a JSON array of { path, content } objects.' }
+      }
+      if (!Array.isArray(rawFiles)) {
+        // If it's a single object with path+content, wrap in array
+        if (typeof rawFiles === 'object' && (rawFiles as Record<string, unknown>).path) {
+          rawFiles = [rawFiles as unknown as { path: string; content: string }]
+        } else {
+          return 'Error: "files" must be an array of { path, content } objects.'
+        }
+      }
       const previewPort = (args.preview_port as number) || 5173
 
       // Hardcoded project directory — agents cannot choose a different location
       const PROJECT_DIR = '/home/daytona/app'
       const output: string[] = []
 
-      // Normalize all file paths to use the canonical project directory
+      // Normalize all file paths and content types
       // Agents may pass paths like /home/daytona/booking-app/src/App.tsx — rewrite them
+      // Content may come as objects from XML parser — coerce to strings
       const files = rawFiles.map(f => {
-        let path = f.path
+        let path = typeof f.path === 'string' ? f.path : String(f.path ?? '')
+        const content = typeof f.content === 'string' ? f.content : JSON.stringify(f.content, null, 2)
         // If path starts with /home/daytona/<something>/, rewrite to PROJECT_DIR
         const homeMatch = path.match(/^\/home\/daytona\/[^/]+\/(.+)$/)
         if (homeMatch) {
@@ -1531,7 +1566,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           // Relative paths or other absolute paths — prefix with PROJECT_DIR
           path = `${PROJECT_DIR}/${path.replace(/^\/+/, '')}`
         }
-        return { path, content: f.content }
+        return { path, content }
       })
 
       // Hardcoded install and start commands — ignore what the agent passes
