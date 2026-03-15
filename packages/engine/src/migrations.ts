@@ -1918,6 +1918,29 @@ const migrations: Migration[] = [
       await db.exec(`ALTER TABLE sandbox_sessions ADD COLUMN IF NOT EXISTS startup_command TEXT`)
     },
   },
+  {
+    version: 43,
+    name: 'seed_new_model_credit_costs',
+    async up(db: Db) {
+      // Add credit costs for 4 new models added to MODEL_CATALOG
+      // Pricing: Qwen 3.5 9B = 3 (84% margin @ Power), Step 3.5 Flash = 5 (72%), Mercury 2 = 8 (57%), Grok 4.1 Fast = 8 (69%)
+      const newModels = [
+        { id: 'qwen-3.5-9b', credits: 3, type: 'chat', si: 3, sp: 3, ss: 5, desc: 'Budget powerhouse — 80% cheaper than DeepSeek V3.2, great for simple agent tasks', tag: 'Cheapest workhorse', pros: '["80% cheaper than DeepSeek V3.2","262K context","Apache 2.0 license","Fast inference"]', cons: '["9B params limits complex reasoning","Tool calling unproven at this scale"]', date: '2026-03-01', pop: 50 },
+        { id: 'step-3.5-flash', credits: 5, type: 'chat', si: 4, sp: 4, ss: 5, desc: 'Best price-to-performance — 66% cheaper than DS V3.2, faster, 256K context, strong tool calling', tag: 'Budget all-star', pros: '["Better benchmarks than DeepSeek V3.2","66% cheaper","148 tps","256K context","Open weights"]', cons: '["Less established provider","Chinese lab"]', date: '2026-02-15', pop: 60 },
+        { id: 'mercury-2', credits: 8, type: 'chat', si: 3, sp: 3, ss: 5, desc: 'Speed king — 1000 tokens/sec, diffusion-based architecture, great for real-time interactions', tag: 'Speed demon', pros: '["1000 tps — 10x faster than traditional models","Great for real-time/voice agents"]', cons: '["Lower benchmarks than DS V3.2","New architecture (diffusion LLM)","Limited providers"]', date: '2026-01-15', pop: 45 },
+        { id: 'grok-4.1-fast', credits: 8, type: 'chat', si: 3, sp: 4, ss: 4, desc: 'xAI agentic model — 2M context window, optimized for tool calling', tag: 'Long context specialist', pros: '["2M token context window","Good tool calling","33% cheaper than DS V3.2"]', cons: '["Below DS V3.2 on non-reasoning benchmarks","Proprietary"]', date: '2026-02-01', pop: 55 },
+      ]
+
+      for (const m of newModels) {
+        await db.run(
+          `INSERT INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT (model_id) DO NOTHING`,
+          [m.id, m.credits, m.type, m.si, m.sp, m.ss, m.desc, m.tag, m.pros, m.cons, m.date, m.pop],
+        )
+      }
+    },
+  },
 ]
 
 /**

@@ -37,6 +37,11 @@ const modelCards = [
   { icon: 'view_in_ar', color: 'teal', tag: '3D Gen', name: 'Hunyuan 3D v3.1', desc: 'High-quality 3D model generation with PBR materials from text prompts.', stars: { i: 0, p: 4, s: 2 }, credits: 1300 },
   { icon: 'music_note', color: 'purple', tag: 'Music Gen', name: 'ACE-Step 1.5', desc: 'Full AI songs with lyrics in any genre. From lo-fi to orchestral.', stars: { i: 0, p: 4, s: 3 }, credits: 100 },
   { icon: 'graphic_eq', color: 'indigo', tag: 'Sound FX', name: 'Mirelo SFX', desc: 'Premium sound effects and foley. 70% win rate in blind tests.', stars: { i: 0, p: 4, s: 4 }, credits: 120 },
+  // New efficient & frontier models
+  { icon: 'speed', color: 'green', tag: 'Efficient', name: 'Step 3.5 Flash', desc: '66% cheaper than DeepSeek V3.2 with better benchmarks. 256K context, 148 tps.', stars: { i: 4, p: 4, s: 5 }, credits: 5 },
+  { icon: 'savings', color: 'teal', tag: 'Budget', name: 'Qwen 3.5 9B', desc: 'Incredible value at 9B params. 262K context, Apache 2.0, 80% cheaper.', stars: { i: 3, p: 3, s: 5 }, credits: 3 },
+  { icon: 'rocket_launch', color: 'rose', tag: 'Speed', name: 'Mercury 2', desc: 'Diffusion LLM — 1,000 tps. 10x faster than traditional models.', stars: { i: 3, p: 3, s: 5 }, credits: 8 },
+  { icon: 'visibility', color: 'blue', tag: 'Long Context', name: 'Grok 4.1 Fast', desc: '2M token context window. Built for massive document processing.', stars: { i: 3, p: 4, s: 4 }, credits: 8 },
 ]
 
 function StarRow({ stars }: { stars: { i: number; p: number; s: number } }) {
@@ -225,7 +230,7 @@ export function HomePage() {
           <div className="organic-shader" />
           <div className="relative z-10 mx-auto mb-10 max-w-7xl px-6 text-center">
             <div className="mb-3 inline-flex items-center gap-2">
-              <span className="rounded-full border border-green-100 bg-green-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-forest-green">25+ Models</span>
+              <span className="rounded-full border border-green-100 bg-green-50 px-3 py-1 text-xs font-bold uppercase tracking-wider text-forest-green">30+ Models</span>
             </div>
             <h2 className="mb-4 font-display text-3xl font-bold text-text-main md:text-4xl">The Engine Behind Your Workforce</h2>
             <p className="mx-auto max-w-2xl text-lg text-text-muted">
@@ -273,7 +278,7 @@ export function HomePage() {
                   </div>
                   <h3 className="mb-3 font-display text-2xl font-bold text-text-main">YokeBot Cloud</h3>
                   <p className="mb-2 text-sm font-medium text-forest-green">From $29/mo</p>
-                  <p className="mb-8 flex-grow text-text-muted">Instant access to 25+ models, 40+ pre-built agents, 75+ native skills, fully autonomous browser automation, and a unified workspace to manage everything. Fully managed &amp; ready to go.</p>
+                  <p className="mb-8 flex-grow text-text-muted">Instant access to 30+ models, 40+ pre-built agents, 75+ native skills, fully autonomous browser automation, and a unified workspace to manage everything. Fully managed &amp; ready to go.</p>
                   <button onClick={goToLogin} className="primary-btn flex w-full items-center justify-center gap-2 rounded-lg bg-forest-green py-3.5 font-bold text-white shadow-md transition-all hover:bg-forest-green-hover hover:shadow-lg">
                     Start Free
                     <span className="material-symbols-outlined text-sm">arrow_forward</span>
