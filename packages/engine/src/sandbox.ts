@@ -160,7 +160,7 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
     autoArchiveInterval: AUTO_ARCHIVE_MINUTES,
   }, { timeout: 60 })
 
-  const previewLink = await sandbox.getPreviewLink(5173).catch(() => null)
+  const previewLink = await sandbox.getSignedPreviewUrl(5173, 86400).catch(() => null)
 
   // Save to DB
   const sandboxId = `sb_${teamId.slice(0, 8)}_${Date.now()}`
@@ -313,18 +313,19 @@ export async function getPreviewUrl(db: Db, teamId: string, port: number): Promi
     const session = await getOrCreateSandbox(db, teamId)
     resetIdleTimer(session)
     try {
-      const link = await session.sandbox.getPreviewLink(port)
+      // Use signed URL to skip Daytona's interstitial warning page
+      const signed = await session.sandbox.getSignedPreviewUrl(port, 86400)
 
       // Update preview URL in DB
       await db.run(
         `UPDATE sandbox_sessions SET preview_url = $1, last_activity = ${db.now()} WHERE team_id = $2`,
-        [link.url, teamId],
+        [signed.url, teamId],
       )
 
       // Broadcast to dashboard so PreviewPanel auto-opens
-      if (sandboxBroadcast) sandboxBroadcast(teamId, link.url)
+      if (sandboxBroadcast) sandboxBroadcast(teamId, signed.url)
 
-      return link.url
+      return signed.url
     } catch (err) {
       if (isSandboxNotStartedError(err) && attempt === 0) {
         console.log(`[sandbox] Sandbox not started for team ${teamId}, evicting and retrying...`)
