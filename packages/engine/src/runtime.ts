@@ -2180,14 +2180,16 @@ export async function runReactLoop(
         } catch { /* ignore parse errors */ }
         emitProgress('tool_start', toolLabel, i + 1, argPreview)
 
-        // Timeout tool execution at 30 seconds to prevent hung tools from blocking the loop
+        // Timeout tool execution — sandbox/browser tools get longer (may need to resume/start containers)
+        const isSandboxTool = toolCall.function.name.startsWith('sandbox_')
+        const toolTimeoutMs = isSandboxTool ? 180_000 : 30_000 // 3 min for sandbox, 30s for others
         let result: string
         let toolTimedOut = false
         const toolStartTime = Date.now()
         try {
           result = await Promise.race([
             executeToolCall(toolCall, toolCtx),
-            new Promise<string>((_, reject) => setTimeout(() => { toolTimedOut = true; reject(new Error('Tool execution timed out')) }, 30_000)),
+            new Promise<string>((_, reject) => setTimeout(() => { toolTimedOut = true; reject(new Error('Tool execution timed out')) }, toolTimeoutMs)),
           ])
         } catch (err) {
           result = `Error: ${err instanceof Error ? err.message : 'Tool execution failed'}`
