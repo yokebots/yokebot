@@ -33,6 +33,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
   const [agentColorMap, setAgentColorMap] = useState<Map<string, { color: string; icon: string; name: string }>>(new Map())
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [uploadingFile, setUploadingFile] = useState(false)
+  const [fileDragOver, setFileDragOver] = useState(false)
   const [agentStatuses, setAgentStatuses] = useState<Map<string, { agentName: string; status: 'typing' | 'working' | 'idle' }>>(new Map())
   const { progressMap } = useAgentProgress()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -161,6 +162,40 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
     }
     setMessages(prev => [...prev, localMsg])
   }, [teamChannelId])
+
+  const handleFileDragOver = useCallback((e: React.DragEvent) => {
+    // Only show drop zone if dragging a yokebot file (not external files)
+    if (e.dataTransfer.types.includes('application/yokebot-file')) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      setFileDragOver(true)
+    }
+  }, [])
+
+  const handleFileDragLeave = useCallback(() => {
+    setFileDragOver(false)
+  }, [])
+
+  const handleFileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setFileDragOver(false)
+    const raw = e.dataTransfer.getData('application/yokebot-file')
+    if (!raw) return
+    try {
+      const data = JSON.parse(raw) as { path: string; name: string; isDirectory: boolean }
+      const ext = data.name.split('.').pop()?.toLowerCase() ?? ''
+      const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'])
+      let ref: string
+      if (data.isDirectory) {
+        ref = `[\u{1F4C1} ${data.name}](/workspace/${data.path})`
+      } else if (imageExts.has(ext)) {
+        ref = `[\u{1F5BC}\uFE0F ${data.name}](/workspace/${data.path})`
+      } else {
+        ref = `[\u{1F4C4} ${data.name}](/workspace/${data.path})`
+      }
+      setMessageText(prev => prev ? `${prev} ${ref}` : ref)
+    } catch { /* ignore bad data */ }
+  }, [])
 
   const sendMessage = async () => {
     const text = messageText.trim()
@@ -337,7 +372,22 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
       )}
 
       {/* Message input */}
-      <div className="px-3 py-2 border-t border-border-subtle shrink-0">
+      <div
+        className={`px-3 py-2 border-t shrink-0 transition-colors ${
+          fileDragOver
+            ? 'border-blue-400 bg-blue-50/60 ring-2 ring-inset ring-blue-300'
+            : 'border-border-subtle'
+        }`}
+        onDragOver={handleFileDragOver}
+        onDragLeave={handleFileDragLeave}
+        onDrop={handleFileDrop}
+      >
+        {fileDragOver && (
+          <div className="flex items-center justify-center gap-1.5 py-1 mb-1.5 rounded-md bg-blue-100/80 text-blue-600 text-xs font-medium">
+            <span className="material-symbols-outlined text-[14px]">attach_file</span>
+            Drop file to reference
+          </div>
+        )}
         <MentionInput
           value={messageText}
           onChange={setMessageText}

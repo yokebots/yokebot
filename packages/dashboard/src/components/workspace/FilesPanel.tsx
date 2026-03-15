@@ -822,11 +822,24 @@ function TreeNodeRow({
         <button
           onClick={() => node.isDirectory ? toggleDir(node.path) : openFile(node.path)}
           onContextMenu={(e) => onContextMenu(e, node.path, node.isDirectory)}
-          draggable={!node.isDirectory && !movingFile}
+          draggable={!movingFile}
           onDragStart={(e) => {
-            if (node.isDirectory) return
+            e.dataTransfer.setData('application/yokebot-file', JSON.stringify({
+              path: node.path,
+              name: node.name,
+              isDirectory: node.isDirectory,
+            }))
             e.dataTransfer.setData('text/plain', node.path)
-            e.dataTransfer.effectAllowed = 'move'
+            e.dataTransfer.effectAllowed = 'copyMove'
+            // Visual drag feedback
+            if (e.currentTarget instanceof HTMLElement) {
+              e.currentTarget.style.opacity = '0.5'
+              requestAnimationFrame(() => {
+                if (e.currentTarget instanceof HTMLElement) {
+                  e.currentTarget.style.opacity = ''
+                }
+              })
+            }
           }}
           onDragOver={(e) => {
             if (!node.isDirectory) return

@@ -133,6 +133,8 @@ const OFFLOAD_SKIP = new Set([
   'browser_snapshot',
   'sandbox_read_file', 'sandbox_list_files', 'sandbox_preview',
   'sandbox_write_files', 'sandbox_setup',
+  // Compound tools — results are short summaries
+  'create_tasks', 'write_workspace_files', 'add_source_of_record_rows',
 ])
 
 async function maybeOffloadResult(result: string, toolName: string, ctx: ToolContext): Promise<string> {
@@ -252,6 +254,10 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   sandbox_install: 'sandbox',
   sandbox_write_files: 'sandbox',
   sandbox_setup: 'sandbox',
+  // Compound tools — batch operations to save credits
+  create_tasks: 'tasks',
+  write_workspace_files: 'workspace',
+  add_source_of_record_rows: 'data',
 }
 
 export const ALL_CATEGORIES: ToolCategory[] = ['core', 'workspace', 'tasks', 'chat', 'approvals', 'data', 'media', 'browser', 'workflows', 'team', 'skills', 'sandbox']
@@ -335,6 +341,9 @@ const TOOL_LABELS: Record<string, string> = {
   sandbox_install: 'Installing packages',
   sandbox_write_files: 'Writing multiple files',
   sandbox_setup: 'Setting up project',
+  create_tasks: 'Creating multiple tasks',
+  write_workspace_files: 'Writing multiple files',
+  add_source_of_record_rows: 'Adding multiple rows',
 }
 
 function getToolLabel(toolName: string): string {
@@ -669,6 +678,32 @@ function getBuiltinTools(): ToolDef[] {
       start_command: { type: 'string', description: 'Dev server start command (e.g. "cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &")' },
       preview_port: { type: 'number', description: 'Port the dev server listens on (e.g. 5173)' },
     }, ['files', 'install_command', 'start_command', 'preview_port']),
+
+    // ---- Compound tools — batch operations to save credits ----
+    toolDef('create_tasks', 'Create MULTIPLE tasks in Mission Control in a single call. MUCH more efficient than calling create_task repeatedly. Use this whenever you need to create 2+ tasks.', {
+      tasks: { type: 'array', items: { type: 'object', properties: {
+        title: { type: 'string', description: 'Task title' },
+        description: { type: 'string', description: 'Task description' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Task priority' },
+        status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'Initial status (defaults to backlog)' },
+        assignedAgentId: { type: 'string', description: 'Agent ID to assign the task to (defaults to self)' },
+        assignedUserId: { type: 'string', description: 'Human team member user ID to assign the task to' },
+        deadline: { type: 'string', description: 'Deadline in ISO 8601 format (e.g. 2026-03-15)' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tag names to apply' },
+      }, required: ['title'] }, description: 'Array of task objects to create' },
+    }, ['tasks']),
+
+    toolDef('write_workspace_files', 'Write MULTIPLE files to the workspace in a single call. MUCH more efficient than calling write_workspace_file repeatedly. Use this whenever you need to create or update 2+ files.', {
+      files: { type: 'array', items: { type: 'object', properties: {
+        path: { type: 'string', description: 'File path relative to workspace root' },
+        content: { type: 'string', description: 'The file content to write' },
+      }, required: ['path', 'content'] }, description: 'Array of { path, content } objects' },
+    }, ['files']),
+
+    toolDef('add_source_of_record_rows', 'Add MULTIPLE rows to a Source of Record data table in a single call. MUCH more efficient than calling add_source_of_record_row repeatedly. Use this whenever you need to add 2+ rows.', {
+      tableName: { type: 'string', description: 'The table name to add rows to' },
+      rows: { type: 'array', items: { type: 'object', description: 'Key-value pairs for a row (keys should match table column names)' }, description: 'Array of row data objects' },
+    }, ['tableName', 'rows']),
 
   ]
 }
@@ -1499,6 +1534,138 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
       await logActivity(ctx.db, 'sandbox_setup', ctx.agentId, `Sandbox: scaffolded project (${files.length} files)`, undefined, ctx.teamId)
       return output.join('\n')
+    }
+
+    // ---- Compound tools — batch operations to save credits ----
+
+    case 'create_tasks': {
+      const tasks = args.tasks as Array<Record<string, unknown>>
+      if (!Array.isArray(tasks) || tasks.length === 0) return 'Error: tasks array is required and must not be empty.'
+      const callerAgent = await getAgent(ctx.db, ctx.agentId)
+      const results: string[] = []
+      let created = 0
+      for (const t of tasks) {
+        // Validate deadline
+        if (t.deadline) {
+          const dl = new Date(t.deadline as string)
+          const today = new Date(); today.setHours(0, 0, 0, 0)
+          if (!isNaN(dl.getTime()) && dl < today) {
+            results.push(`Skipped "${t.title}": deadline "${t.deadline}" is in the past`)
+            continue
+          }
+        }
+        // Validate assignedAgentId
+        let targetAgentId = (t.assignedAgentId as string) ?? ctx.agentId
+        if (targetAgentId === ctx.agentId && callerAgent?.templateId === 'advisor-bot') {
+          results.push(`Skipped "${t.title}": as team manager, you must delegate to other agents`)
+          continue
+        }
+        if (targetAgentId && targetAgentId !== ctx.agentId) {
+          const targetAgent = await getAgent(ctx.db, targetAgentId)
+          if (!targetAgent || targetAgent.teamId !== ctx.teamId) {
+            results.push(`Skipped "${t.title}": agent "${targetAgentId}" not found or not on this team`)
+            continue
+          }
+        }
+        const task = await createTask(ctx.db, ctx.teamId, t.title as string, {
+          description: t.description as string | undefined,
+          priority: (t.priority as 'low' | 'medium' | 'high' | 'urgent') ?? 'medium',
+          status: (t.status as 'backlog' | 'todo' | 'in_progress' | 'review' | 'done') || undefined,
+          assignedAgentId: targetAgentId,
+          assignedUserId: t.assignedUserId as string | undefined,
+          deadline: t.deadline as string | undefined,
+        })
+        // Apply tags if provided
+        const tagNames = Array.isArray(t.tags) ? (t.tags as string[]).filter(Boolean) : []
+        let appliedTags: string[] = []
+        if (tagNames.length > 0) {
+          const tags = await applyTagsByName(ctx.db, ctx.teamId, tagNames, 'task', task.id)
+          appliedTags = tags.map((tg) => tg.name)
+        }
+        // Auto-create task thread (best-effort)
+        try {
+          const thread = await getTaskThread(ctx.db, task.id, ctx.teamId)
+          const parts = [`**${task.title}**`]
+          if (task.description) parts.push(task.description)
+          parts.push(`Priority: ${task.priority}`)
+          if (task.deadline) parts.push(`Deadline: ${task.deadline}`)
+          if (appliedTags.length > 0) parts.push(`Tags: ${appliedTags.join(', ')}`)
+          parts.push(`Status: ${task.status}`)
+          await sendMessage(ctx.db, thread.id, 'agent', ctx.agentId, parts.join('\n'), undefined, ctx.teamId)
+        } catch { /* best-effort */ }
+        await logActivity(ctx.db, 'task_created', ctx.agentId, `Created task: ${task.title}`, undefined, ctx.teamId)
+        results.push(`Created "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${appliedTags.length ? `, tags: ${appliedTags.join(', ')}` : ''})`)
+        created++
+      }
+      return `${created}/${tasks.length} tasks created:\n${results.join('\n')}`
+    }
+
+    case 'write_workspace_files': {
+      const files = args.files as Array<{ path: string; content: string }>
+      if (!Array.isArray(files) || files.length === 0) return 'Error: files array is required and must not be empty.'
+      const results: string[] = []
+      let written = 0
+      for (const f of files) {
+        const content = f.content
+        const filePath = f.path
+        if (content.length > 100_000) {
+          results.push(`Skipped "${filePath}": content too large (${content.length} chars, max 100,000)`)
+          continue
+        }
+        // CSV files auto-import as SOR data tables
+        if (filePath.toLowerCase().endsWith('.csv')) {
+          const tableName = filePath.split('/').pop()!.replace(/\.csv$/i, '')
+          const tableId = await importCsvAsTable(ctx.db, ctx.teamId, tableName, content)
+          if (!tableId) {
+            results.push(`Failed "${filePath}": could not parse CSV`)
+            continue
+          }
+          results.push(`CSV imported as data table "${tableName}" (id: ${tableId})`)
+          written++
+          continue
+        }
+        const result = await writeFile(ctx.db, ctx.teamId, filePath, content, ctx.agentId, ctx.currentTaskId)
+        if (result.success) {
+          ctx.onFileWritten?.(ctx.teamId, filePath)
+          await logActivity(ctx.db, 'file_written', ctx.agentId, `Wrote file: ${filePath}`, undefined, ctx.teamId)
+          results.push(`Written: ${filePath}`)
+          written++
+        } else {
+          results.push(`Failed "${filePath}": ${result.error}`)
+        }
+      }
+      return `${written}/${files.length} files written:\n${results.join('\n')}`
+    }
+
+    case 'add_source_of_record_rows': {
+      const tableName = args.tableName as string
+      const rows = args.rows as Array<Record<string, unknown>>
+      if (!Array.isArray(rows) || rows.length === 0) return 'Error: rows array is required and must not be empty.'
+      const table = await getSorTableByName(ctx.db, tableName, ctx.teamId)
+      if (!table) return `Table not found: "${tableName}"`
+      const perm = await checkSorPermission(ctx.db, ctx.agentId, table.id)
+      if (!perm || !perm.canWrite) return `Access denied: you do not have write permission on table "${table.name}".`
+      const results: string[] = []
+      let added = 0
+      for (const rowData of rows) {
+        const newRow = await addSorRow(ctx.db, table.id, rowData)
+        // Fire row_added workflows (best-effort)
+        try {
+          const { findWorkflowsByTableTrigger, startRun, listRuns } = await import('./workflows.ts')
+          const { advanceWorkflow } = await import('./workflow-executor.ts')
+          const triggered = await findWorkflowsByTableTrigger(ctx.db, ctx.teamId, table.id, 'row_added')
+          for (const wf of triggered) {
+            const active = await listRuns(ctx.db, { workflowId: wf.id, status: 'running' as const })
+            if (active.length > 0) continue
+            const run = await startRun(ctx.db, ctx.teamId, wf.id, 'table_trigger', { tableName: table.name, row: newRow.data, triggerType: 'row_added' })
+            await advanceWorkflow(ctx.db, run.id)
+          }
+        } catch { /* best-effort */ }
+        results.push(`Row ${newRow.id}: ${JSON.stringify(newRow.data)}`)
+        added++
+      }
+      await logActivity(ctx.db, 'row_added', ctx.agentId, `Added ${added} rows to table: ${table.name}`, undefined, ctx.teamId)
+      return `${added}/${rows.length} rows added to "${table.name}":\n${results.join('\n')}`
     }
 
     default: {

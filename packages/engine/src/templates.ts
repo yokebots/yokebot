@@ -1560,6 +1560,18 @@ IMPORTANT: Always use the think tool before taking action. Plan your approach, t
   },
 ]
 
+// Append compound tool guidance to templates based on their toolCategories
+for (const t of TEMPLATES) {
+  const cats = t.toolCategories ?? []
+  const hints: string[] = []
+  if (cats.includes('tasks')) hints.push('- Use `create_tasks` (not `create_task`) when creating 2+ tasks — pass all tasks as an array in one call')
+  if (cats.includes('workspace')) hints.push('- Use `write_workspace_files` (not `write_workspace_file`) when writing 2+ files — pass all as an array')
+  if (cats.includes('data')) hints.push('- Use `add_source_of_record_rows` (not `add_source_of_record_row`) when adding 2+ rows — pass all as an array')
+  if (hints.length > 0) {
+    t.systemPrompt += `\n\n## Use Compound Tools to Save Credits\n${hints.join('\n')}\nEach tool call costs credits. Batching is always more efficient.`
+  }
+}
+
 /** Get all templates. Filters out hostedOnly templates when not in hosted mode. */
 export function listTemplates(options?: { includeHostedOnly?: boolean }): AgentTemplate[] {
   const includeHosted = options?.includeHostedOnly ?? (process.env.YOKEBOT_HOSTED_MODE === 'true')
