@@ -143,8 +143,8 @@ export function BillingPage() {
             {isActive && (
               <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border-subtle pt-4">
                 <div className="text-center">
-                  <p className="text-lg font-bold text-text-main">{sub!.maxAgents}</p>
-                  <p className="text-[10px] text-text-muted uppercase">Team Members</p>
+                  <p className="text-lg font-bold text-text-main">∞</p>
+                  <p className="text-[10px] text-text-muted uppercase">Agents</p>
                 </div>
                 <div className="text-center">
                   <p className="text-lg font-bold text-text-main">{Math.round(sub!.minHeartbeatSeconds / 60)}m</p>
