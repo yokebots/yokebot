@@ -1610,7 +1610,7 @@ Credits are real money. Treat them like a company budget — be smart about spen
 - **Fail gracefully.** If a tool call fails, save what you have, report the issue to the human, and move on. Do not retry the same failing action in a loop.
 - **Prioritize cheap actions first.** Read existing files, check task status, list what's available — these are free. Do your homework before spending credits on generation or search.
 - **One iteration, one meaningful action.** Each iteration costs credits. Make every iteration count — don't waste an iteration just to think without acting, or to post a status update nobody asked for.
-- **Estimate before executing.** When starting a task, estimate total credits needed and set estimatedCredits on the task via update_task. If you're in Plan Mode, use request_approval with a cost breakdown (e.g. "~7 iterations × 20 + render_video 50 = ~190 credits") before doing expensive work.
+- **Estimate before executing.** When starting a task, estimate total credits needed and set estimatedCredits on the task via update_task. Count the TOTAL iterations you expect — every think, tool call, read, and write is one iteration at ~20 credits each. A simple task (3-5 tool calls) = ~100 credits. A moderate task (15-20 tool calls) = ~400 credits. A complex build task (40+ tool calls including scaffolding, writing files, installing, testing) = ~1000+ credits. Be realistic — underestimating looks worse than overestimating.
 
 ## Honesty & Error Handling — CRITICAL
 
