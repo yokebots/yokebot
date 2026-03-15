@@ -640,44 +640,40 @@ function getBuiltinTools(): ToolDef[] {
     }, ['description']),
 
     // Sandbox tools — app-building in Daytona sandboxes
-    toolDef('sandbox_exec', 'Run a shell command in the team sandbox (isolated dev environment). The sandbox persists between calls. IMPORTANT: Always prefix CI=true for npm create/init commands to avoid interactive prompts. Use /home/daytona/ as the working directory. For long-running processes like dev servers, append & to run in background.', {
-      command: { type: 'string', description: 'Shell command to execute (e.g. "cd /home/daytona && CI=true npm create vite@latest app -- --template react-ts")' },
-      cwd: { type: 'string', description: 'Working directory (default: /home/daytona)' },
+    toolDef('sandbox_exec', 'Run a shell command in the team sandbox. Project lives at /home/daytona/app. For long-running processes (dev servers), append & to run in background. Do NOT use "npm create vite" or "npx create-vite" — use sandbox_setup instead.', {
+      command: { type: 'string', description: 'Shell command (e.g. "cd /home/daytona/app && npm run build")' },
     }, ['command']),
 
-    toolDef('sandbox_write_file', 'Write or create a file in the team sandbox. Use for writing source code, config files, etc.', {
-      path: { type: 'string', description: 'Absolute path in the sandbox (e.g. "/app/src/App.tsx")' },
+    toolDef('sandbox_write_file', 'Write or create a file in the team sandbox.', {
+      path: { type: 'string', description: 'Absolute path (e.g. "/home/daytona/app/src/App.tsx")' },
       content: { type: 'string', description: 'File content to write' },
     }, ['path', 'content']),
 
     toolDef('sandbox_read_file', 'Read a file from the team sandbox.', {
-      path: { type: 'string', description: 'Absolute path in the sandbox (e.g. "/app/package.json")' },
+      path: { type: 'string', description: 'Absolute path (e.g. "/home/daytona/app/package.json")' },
     }, ['path']),
 
     toolDef('sandbox_list_files', 'List files and directories in the team sandbox.', {
-      directory: { type: 'string', description: 'Directory path (default: "/")' },
+      directory: { type: 'string', description: 'Directory path (default: "/home/daytona/app")' },
     }, []),
 
     toolDef('sandbox_preview', 'Get the public preview URL for a dev server running in the sandbox. The URL is accessible from the browser.', {
-      port: { type: 'number', description: 'Port number the dev server is listening on (e.g. 5173 for Vite, 3000 for Next.js)' },
-    }, ['port']),
+      port: { type: 'number', description: 'Port number (default: 5173 for Vite, 3000 for Next.js)' },
+    }, []),
 
-    toolDef('sandbox_install', 'Install packages in the sandbox using the appropriate package manager.', {
-      command: { type: 'string', description: 'Install command (e.g. "npm install react-router-dom", "pip install flask")' },
-      cwd: { type: 'string', description: 'Working directory (default: sandbox root)' },
+    toolDef('sandbox_install', 'Install packages in the sandbox. Runs in /home/daytona/app automatically.', {
+      command: { type: 'string', description: 'Install command (e.g. "npm install react-router-dom")' },
     }, ['command']),
 
     // Compound tools — do more per iteration to save credits
     toolDef('sandbox_write_files', 'Write MULTIPLE files to the sandbox in a single call. MUCH more efficient than calling sandbox_write_file repeatedly. Use this whenever you need to create or update 2+ files.', {
-      files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'Absolute path' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'Array of { path, content } objects' },
+      files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'Absolute path (e.g. "/home/daytona/app/src/App.tsx")' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'Array of { path, content } objects' },
     }, ['files']),
 
-    toolDef('sandbox_setup', 'Create a complete project in one call: creates directories, writes all files, installs dependencies, and starts the dev server. Returns the preview URL. Use this instead of multiple sandbox_exec + sandbox_write_file + sandbox_install + sandbox_preview calls.', {
-      files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'Absolute path (e.g. "/home/daytona/app/src/App.tsx")' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'All project files to write' },
-      install_command: { type: 'string', description: 'Package install command (e.g. "cd /home/daytona/app && npm install")' },
-      start_command: { type: 'string', description: 'Dev server start command (e.g. "cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &")' },
-      preview_port: { type: 'number', description: 'Port the dev server listens on (e.g. 5173)' },
-    }, ['files', 'install_command', 'start_command', 'preview_port']),
+    toolDef('sandbox_setup', 'Create a complete project in one call: writes all files, installs deps, starts dev server, returns preview URL. Project is always created at /home/daytona/app. Install and start commands are handled automatically — just provide the files.', {
+      files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'File path (e.g. "/home/daytona/app/src/App.tsx" or "src/App.tsx")' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'All project files to write' },
+      preview_port: { type: 'number', description: 'Port the dev server listens on (default: 5173)' },
+    }, ['files']),
 
     // ---- Compound tools — batch operations to save credits ----
     toolDef('create_tasks', 'Create MULTIPLE tasks in Mission Control in a single call. MUCH more efficient than calling create_task repeatedly. Use this whenever you need to create 2+ tasks.', {
@@ -1422,9 +1418,19 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     case 'sandbox_exec': {
       const { execCommand: sbExec } = await import('./sandbox.ts')
       // Normalize any non-standard project paths in the command to /home/daytona/app
-      const command = normalizeSandboxCommand(args.command as string)
-      const cwd = args.cwd as string | undefined
-      const result = await sbExec(ctx.db, ctx.teamId, command, cwd)
+      let command = normalizeSandboxCommand(args.command as string)
+
+      // Intercept interactive project scaffolding commands — they hang in the sandbox
+      if (/\b(npm\s+create|npx\s+create-|npm\s+init)\b/i.test(command)) {
+        return 'Error: Do not use "npm create" or "npx create-*" — they require interactive prompts that fail in the sandbox. Use sandbox_setup instead to create a project with all files at once.'
+      }
+
+      // If the command doesn't reference a directory, prefix with cd to project dir
+      if (!command.includes('/home/daytona') && !command.startsWith('cd ')) {
+        command = `cd ${SANDBOX_PROJECT_DIR} && ${command}`
+      }
+
+      const result = await sbExec(ctx.db, ctx.teamId, command)
       await logActivity(ctx.db, 'sandbox_exec', ctx.agentId, `Sandbox: ${command.slice(0, 100)}`, undefined, ctx.teamId)
       return result.exitCode === 0
         ? result.stdout || '(no output)'
@@ -1458,10 +1464,10 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_preview': {
       const { getPreviewUrl, setStartupCommand } = await import('./sandbox.ts')
-      const port = args.port as number
+      const port = (args.port as number) || 5173
       const url = await getPreviewUrl(ctx.db, ctx.teamId, port)
       // Auto-save a startup command so the dev server restarts on sandbox resume
-      const defaultCmd = `cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &`
+      const defaultCmd = `cd ${SANDBOX_PROJECT_DIR} && npm run dev -- --host 0.0.0.0 &`
       await setStartupCommand(ctx.db, ctx.teamId, defaultCmd)
       await logActivity(ctx.db, 'sandbox_preview', ctx.agentId, `Sandbox preview: port ${port}`, undefined, ctx.teamId)
       return `Preview URL: ${url}\n\nThe preview is now accessible in the dashboard.`
@@ -1469,9 +1475,12 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_install': {
       const { execCommand: sbExec } = await import('./sandbox.ts')
-      const command = normalizeSandboxCommand(args.command as string)
-      const cwd = args.cwd as string | undefined
-      const result = await sbExec(ctx.db, ctx.teamId, command, cwd)
+      let command = normalizeSandboxCommand(args.command as string)
+      // Always run install from the project directory
+      if (!command.includes('/home/daytona') && !command.startsWith('cd ')) {
+        command = `cd ${SANDBOX_PROJECT_DIR} && ${command}`
+      }
+      const result = await sbExec(ctx.db, ctx.teamId, command)
       await logActivity(ctx.db, 'sandbox_install', ctx.agentId, `Sandbox install: ${command.slice(0, 100)}`, undefined, ctx.teamId)
       return result.exitCode === 0
         ? `Packages installed successfully.\n${result.stdout.slice(-500)}`
@@ -1575,8 +1584,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       // 6. Save startup command for auto-restart on resume
       await setStartupCommand(ctx.db, ctx.teamId, startCmd)
 
-      // 7. Wait a moment for dev server to be ready, then get preview URL
-      await new Promise(resolve => setTimeout(resolve, 3000))
+      // 7. Wait for dev server to be ready, then get preview URL
+      await new Promise(resolve => setTimeout(resolve, 5000))
       try {
         const url = await getPreviewUrl(ctx.db, ctx.teamId, previewPort)
         output.push(`Preview URL: ${url}`)
