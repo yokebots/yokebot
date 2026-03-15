@@ -2621,6 +2621,56 @@ async function main() {
     }
   })
 
+  // Persist inline text edits to sandbox source files
+  app.post('/api/sandbox/apply-text', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    const { sourceFile, sourceLine, newText } = req.body as {
+      sourceFile: string
+      sourceLine: number
+      newText: string
+    }
+    if (!sourceFile || !sourceLine || newText == null) {
+      return res.status(400).json({ error: 'sourceFile, sourceLine, and newText are required' })
+    }
+    try {
+      const { sandboxReadFile, sandboxWriteFile } = await import('./sandbox.ts')
+
+      let filePath = sourceFile
+      if (!filePath.startsWith('/')) filePath = `/home/daytona/app/${filePath}`
+
+      const content = await sandboxReadFile(db, teamId, filePath)
+      const lines = content.split('\n')
+
+      // Find the text content near the source line and replace it
+      const targetIdx = sourceLine - 1
+      if (targetIdx >= 0 && targetIdx < lines.length) {
+        const searchRange = lines.slice(Math.max(0, targetIdx - 2), Math.min(lines.length, targetIdx + 3))
+        const rangeStart = Math.max(0, targetIdx - 2)
+
+        // Look for text between > and < on nearby lines
+        for (let i = 0; i < searchRange.length; i++) {
+          const line = searchRange[i]
+          // Match text content between JSX tags: >text<
+          const textMatch = line.match(/(>[^<]*<)/)
+          if (textMatch) {
+            const oldText = textMatch[1].slice(1, -1).trim()
+            if (oldText.length > 0) {
+              const newLine = line.replace(textMatch[1], '>' + newText + '<')
+              lines[rangeStart + i] = newLine
+              break
+            }
+          }
+        }
+
+        await sandboxWriteFile(db, teamId, filePath, lines.join('\n'))
+      }
+
+      res.json({ ok: true })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
   // Import an external project (GitHub/GitLab URL) into sandbox
   app.post('/api/sandbox/import', async (req, res) => {
     const teamId = req.user!.activeTeamId!

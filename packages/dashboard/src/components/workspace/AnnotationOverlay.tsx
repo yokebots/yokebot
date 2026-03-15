@@ -36,6 +36,44 @@ export function AnnotationOverlay({ width, height, onSendToBot, onClose }: Annot
   const [textInput, setTextInput] = useState<{ x: number; y: number } | null>(null)
   const [textValue, setTextValue] = useState('')
   const textInputRef = useRef<HTMLInputElement>(null)
+  const [redoStack, setRedoStack] = useState<Annotation[]>([])
+
+  // Keyboard shortcuts: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) {
+          // Redo
+          setRedoStack(prev => {
+            if (prev.length === 0) return prev
+            const restored = prev[prev.length - 1]
+            setAnnotations(a => [...a, restored])
+            return prev.slice(0, -1)
+          })
+        } else {
+          // Undo
+          setAnnotations(prev => {
+            if (prev.length === 0) return prev
+            const removed = prev[prev.length - 1]
+            setRedoStack(r => [...r, removed])
+            return prev.slice(0, -1)
+          })
+        }
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
+        e.preventDefault()
+        setRedoStack(prev => {
+          if (prev.length === 0) return prev
+          const restored = prev[prev.length - 1]
+          setAnnotations(a => [...a, restored])
+          return prev.slice(0, -1)
+        })
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   // Get mouse position relative to canvas
   const getPos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -163,12 +201,26 @@ export function AnnotationOverlay({ width, height, onSendToBot, onClose }: Annot
   // ---- Actions ----
 
   const handleUndo = useCallback(() => {
-    setAnnotations(prev => prev.slice(0, -1))
+    setAnnotations(prev => {
+      if (prev.length === 0) return prev
+      setRedoStack(r => [...r, prev[prev.length - 1]])
+      return prev.slice(0, -1)
+    })
+  }, [])
+
+  const handleRedo = useCallback(() => {
+    setRedoStack(prev => {
+      if (prev.length === 0) return prev
+      const restored = prev[prev.length - 1]
+      setAnnotations(a => [...a, restored])
+      return prev.slice(0, -1)
+    })
   }, [])
 
   const handleClear = useCallback(() => {
+    setRedoStack(prev => [...prev, ...annotations])
     setAnnotations([])
-  }, [])
+  }, [annotations])
 
   const handleSend = useCallback(() => {
     onSendToBot(annotations)
@@ -204,8 +256,8 @@ export function AnnotationOverlay({ width, height, onSendToBot, onClose }: Annot
           onChange={e => setTextValue(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') commitText(); if (e.key === 'Escape') setTextInput(null) }}
           onBlur={commitText}
-          className="absolute bg-white/90 border border-red-400 rounded px-1 py-0.5 text-sm text-red-600 outline-none"
-          style={{ left: textInput.x, top: textInput.y - 20, minWidth: 100 }}
+          className="absolute z-50 bg-white/90 border-2 border-red-400 rounded px-2 py-1 text-sm text-red-600 outline-none shadow-lg"
+          style={{ left: textInput.x, top: Math.max(40, textInput.y - 20), minWidth: 150 }}
           placeholder="Add comment..."
         />
       )}
@@ -233,9 +285,17 @@ export function AnnotationOverlay({ width, height, onSendToBot, onClose }: Annot
           onClick={handleUndo}
           disabled={annotations.length === 0}
           className="flex items-center px-2 py-1 rounded text-xs text-text-muted hover:text-text-main hover:bg-white/10 disabled:opacity-30 transition-colors"
-          title="Undo"
+          title="Undo (Ctrl+Z)"
         >
           <span className="material-symbols-outlined text-[14px]">undo</span>
+        </button>
+        <button
+          onClick={handleRedo}
+          disabled={redoStack.length === 0}
+          className="flex items-center px-2 py-1 rounded text-xs text-text-muted hover:text-text-main hover:bg-white/10 disabled:opacity-30 transition-colors"
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          <span className="material-symbols-outlined text-[14px]">redo</span>
         </button>
         <button
           onClick={handleClear}

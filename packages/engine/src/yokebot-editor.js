@@ -4,6 +4,8 @@
  * Features:
  *  - Element hover highlight (blue outline)
  *  - Click to select element → postMessage with element data
+ *  - Double-click for inline text editing
+ *  - Undo/redo support for style and text changes
  *  - React _debugSource → file:line mapping (Vite dev mode only)
  *  - Receives style/class updates from parent
  *
@@ -11,9 +13,13 @@
  *  iframe → parent:
  *    yokebot:element-selected  { tagName, id, className, textContent, computedStyles, rect, sourceFile, sourceLine, selector }
  *    yokebot:element-hovered   { rect }
+ *    yokebot:text-changed      { selector, newText, sourceFile, sourceLine }
+ *    yokebot:history-state     { canUndo, canRedo }
  *  parent → iframe:
  *    yokebot:apply-style       { selector, className } — add Tailwind classes
  *    yokebot:toggle-picker     { enabled }
+ *    yokebot:undo-change       — undo last change
+ *    yokebot:redo-change       — redo last undone change
  */
 (function () {
   'use strict'
@@ -24,6 +30,26 @@
   let pickerEnabled = false
   let highlightEl = null
   let lastHovered = null
+
+  // ---- Undo/redo history ----
+  var changeHistory = []
+  var historyIndex = -1
+
+  function recordChange(entry) {
+    // Truncate any redo entries beyond current index
+    changeHistory = changeHistory.slice(0, historyIndex + 1)
+    changeHistory.push(entry)
+    historyIndex = changeHistory.length - 1
+    window.parent.postMessage({
+      type: 'yokebot:history-state',
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    }, '*')
+  }
+
+  // ---- Click vs double-click disambiguation ----
+  var clickTimer = null
+  var pendingClickEvent = null
 
   // ---- Highlight overlay ----
 
@@ -165,21 +191,102 @@
     var target = e.target
     if (target === highlightEl || target.id === '__yokebot-highlight') return
 
-    var rect = target.getBoundingClientRect()
-    var source = getReactSource(target)
+    // Defer to disambiguate click vs double-click
+    pendingClickEvent = { target: target }
+    if (clickTimer) clearTimeout(clickTimer)
+    clickTimer = setTimeout(function () {
+      clickTimer = null
+      if (!pendingClickEvent) return
+      var t = pendingClickEvent.target
+      pendingClickEvent = null
 
-    window.parent.postMessage({
-      type: 'yokebot:element-selected',
-      tagName: target.tagName,
-      id: target.id || '',
-      className: target.className || '',
-      textContent: (target.textContent || '').slice(0, 200),
-      computedStyles: getComputedSubset(target),
-      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-      sourceFile: source ? source.fileName : null,
-      sourceLine: source ? source.lineNumber : null,
-      selector: buildSelector(target),
-    }, '*')
+      var rect = t.getBoundingClientRect()
+      var source = getReactSource(t)
+
+      window.parent.postMessage({
+        type: 'yokebot:element-selected',
+        tagName: t.tagName,
+        id: t.id || '',
+        className: t.className || '',
+        textContent: (t.textContent || '').slice(0, 200),
+        computedStyles: getComputedSubset(t),
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        sourceFile: source ? source.fileName : null,
+        sourceLine: source ? source.lineNumber : null,
+        selector: buildSelector(t),
+      }, '*')
+    }, 250)
+  }
+
+  function onDblClick(e) {
+    if (!pickerEnabled) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+
+    // Cancel pending single-click
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
+    pendingClickEvent = null
+
+    var target = e.target
+    if (target === highlightEl || target.id === '__yokebot-highlight') return
+
+    // Only allow text editing on elements with direct text content
+    var hasDirectText = false
+    for (var i = 0; i < target.childNodes.length; i++) {
+      if (target.childNodes[i].nodeType === 3 && target.childNodes[i].textContent.trim()) {
+        hasDirectText = true
+        break
+      }
+    }
+    if (!hasDirectText) return
+
+    var selector = buildSelector(target)
+    var source = getReactSource(target)
+    var oldText = target.textContent
+
+    // Enter inline text editing mode
+    pickerEnabled = false
+    hideHighlight()
+    target.contentEditable = 'true'
+    target.style.outline = '2px dashed #22c55e'
+    target.style.outlineOffset = '2px'
+    target.focus()
+
+    // Select all text for easy replacement
+    var range = document.createRange()
+    range.selectNodeContents(target)
+    var sel = window.getSelection()
+    sel.removeAllRanges()
+    sel.addRange(range)
+
+    function onBlur() {
+      target.removeEventListener('blur', onBlur)
+      target.contentEditable = 'false'
+      target.style.outline = ''
+      target.style.outlineOffset = ''
+      pickerEnabled = true
+
+      var newText = target.textContent
+      if (newText !== oldText) {
+        // Record in history
+        recordChange({
+          selector: selector,
+          property: '__text__',
+          oldValue: oldText,
+          newValue: newText,
+        })
+
+        window.parent.postMessage({
+          type: 'yokebot:text-changed',
+          selector: selector,
+          newText: newText,
+          sourceFile: source ? source.fileName : null,
+          sourceLine: source ? source.lineNumber : null,
+        }, '*')
+      }
+    }
+
+    target.addEventListener('blur', onBlur)
   }
 
   // ---- Apply styles from parent ----
@@ -212,7 +319,15 @@
 
     if (data.styles) {
       // Direct CSS style application for instant preview
+      var selector = data.selector
       for (var prop in data.styles) {
+        var oldVal = el.style[prop] || ''
+        recordChange({
+          selector: selector,
+          property: prop,
+          oldValue: oldVal,
+          newValue: data.styles[prop],
+        })
         el.style[prop] = data.styles[prop]
       }
     }
@@ -238,6 +353,36 @@
       case 'yokebot:apply-style':
         applyStyle(data)
         break
+      case 'yokebot:undo-change':
+        if (historyIndex >= 0) {
+          var entry = changeHistory[historyIndex]
+          var el = document.querySelector(entry.selector)
+          if (el) {
+            if (entry.property === '__text__') {
+              el.textContent = entry.oldValue
+            } else {
+              el.style[entry.property] = entry.oldValue
+            }
+          }
+          historyIndex--
+          window.parent.postMessage({ type: 'yokebot:history-state', canUndo: historyIndex >= 0, canRedo: historyIndex < changeHistory.length - 1 }, '*')
+        }
+        break
+      case 'yokebot:redo-change':
+        if (historyIndex < changeHistory.length - 1) {
+          historyIndex++
+          var entry = changeHistory[historyIndex]
+          var el = document.querySelector(entry.selector)
+          if (el) {
+            if (entry.property === '__text__') {
+              el.textContent = entry.newValue
+            } else {
+              el.style[entry.property] = entry.newValue
+            }
+          }
+          window.parent.postMessage({ type: 'yokebot:history-state', canUndo: historyIndex >= 0, canRedo: historyIndex < changeHistory.length - 1 }, '*')
+        }
+        break
     }
   })
 
@@ -246,6 +391,7 @@
   document.addEventListener('mousemove', onMouseMove, true)
   document.addEventListener('mouseleave', onMouseLeave, true)
   document.addEventListener('click', onClick, true)
+  document.addEventListener('dblclick', onDblClick, true)
 
   console.log('[yokebot-editor] Visual editor bridge loaded')
 })()

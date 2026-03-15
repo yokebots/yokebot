@@ -1988,6 +1988,17 @@ export async function applyStyleToSource(data: {
   })
 }
 
+export async function applyTextToSource(opts: {
+  sourceFile: string
+  sourceLine: number
+  newText: string
+}): Promise<{ ok: boolean }> {
+  return request('/api/sandbox/apply-text', {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  })
+}
+
 export async function importProject(url: string): Promise<{ status: string; framework: string; port: number; previewUrl?: string }> {
   return request('/api/sandbox/import', {
     method: 'POST',

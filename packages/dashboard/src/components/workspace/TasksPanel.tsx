@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { PanelHeader } from './PanelHeader'
+
 import { TaskDetail } from './TaskDetail'
 import TagFilterBar from '@/components/TagFilterBar'
 import { useAgentProgress } from '@/hooks/useAgentProgress'
@@ -205,12 +205,8 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
 
   return (
     <div className="flex flex-col h-full">
-      <PanelHeader
-        icon="task_alt"
-        title="Tasks"
-        badge={unreadTaskIds?.size}
-        actions={
-          <div className="flex items-center gap-1">
+      {/* Slim toolbar — no title (tab above already says "Tasks") */}
+      <div className="flex items-center gap-1 border-b border-border-subtle px-2 py-1.5 shrink-0">
             {doneCount > 0 && (
               <button
                 onClick={handleArchiveCompleted}
@@ -222,6 +218,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
                 Clear {doneCount} done
               </button>
             )}
+            <div className="flex-1" />
             <button
               onClick={() => switchView('list')}
               className={`rounded p-1 transition-colors ${view === 'list' ? 'bg-forest-green/10 text-forest-green' : 'text-text-muted hover:bg-light-surface-alt'}`}
@@ -243,9 +240,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
             >
               <span className="material-symbols-outlined text-[16px]">add</span>
             </button>
-          </div>
-        }
-      />
+      </div>
 
       {/* Agent filter */}
       {agents.length > 0 && (

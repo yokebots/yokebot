@@ -119,7 +119,7 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
                 <AgentDetailPanel agentId={activeTab.resourceId} />
               )}
               {activeTab?.type === 'sandbox-preview' && (
-                <PreviewPanel previewUrl={activeTab.resourceId} />
+                <PreviewPanel channelId={teamChannelId ?? undefined} />
               )}
               {!activeTab && (
                 <div className="flex-1 flex items-center justify-center text-sm text-text-muted">

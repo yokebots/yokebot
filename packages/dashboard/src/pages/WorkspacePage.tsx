@@ -121,17 +121,15 @@ export function WorkspacePage() {
   })
 
   // Auto-open sandbox preview tab when a preview URL is generated
-  useRealtimeEvent('sandbox_preview', (data: Record<string, unknown>) => {
-    const url = data?.url as string
-    if (url) {
-      addViewerTab({
-        id: 'sandbox-preview',
-        type: 'sandbox-preview',
-        label: 'Preview',
-        icon: 'preview',
-        resourceId: url,
-      })
-    }
+  useRealtimeEvent('sandbox_preview', () => {
+    // Don't pass the raw Daytona URL — PreviewPanel fetches its own proxy token
+    addViewerTab({
+      id: 'sandbox-preview',
+      type: 'sandbox-preview',
+      label: 'Preview',
+      icon: 'preview',
+      resourceId: '',
+    })
   })
 
   const handleMarkFileRead = useCallback((path: string) => {
@@ -141,6 +139,23 @@ export function WorkspacePage() {
       next.delete(path)
       return next
     })
+  }, [])
+
+  // Listen for file-read events from FileViewer (so opening a file in the viewer clears its unread dot)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const path = (e as CustomEvent).detail?.path
+      if (path) {
+        setUnreadFileIds(prev => {
+          if (!prev.has(path)) return prev
+          const next = new Set(prev)
+          next.delete(path)
+          return next
+        })
+      }
+    }
+    window.addEventListener('yokebot:file-read', handler)
+    return () => window.removeEventListener('yokebot:file-read', handler)
   }, [])
 
   const handleMarkAllFilesRead = useCallback(() => {

@@ -100,6 +100,33 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
   const [creatingBrowser, setCreatingBrowser] = useState(false)
   const [vaultSessions, setVaultSessions] = useState<engine.VaultSessionInfo[]>([])
 
+  // Section expand/collapse + resizable heights (persisted to localStorage)
+  const [sandboxExpanded, setSandboxExpanded] = useState(false)
+  const [browserHeight, setBrowserHeight] = useState(() => {
+    const saved = localStorage.getItem('workspace-browser-height')
+    return saved ? Number(saved) : 160
+  })
+  const [sandboxHeight, setSandboxHeight] = useState(() => {
+    const saved = localStorage.getItem('workspace-sandbox-height')
+    return saved ? Number(saved) : 192
+  })
+
+  const handleBrowserResize = useCallback((delta: number) => {
+    setBrowserHeight(h => {
+      const next = Math.max(60, Math.min(400, h + delta))
+      localStorage.setItem('workspace-browser-height', String(next))
+      return next
+    })
+  }, [])
+
+  const handleSandboxResize = useCallback((delta: number) => {
+    setSandboxHeight(h => {
+      const next = Math.max(60, Math.min(400, h + delta))
+      localStorage.setItem('workspace-sandbox-height', String(next))
+      return next
+    })
+  }, [])
+
   const loadBrowserSessions = useCallback(async () => {
     try {
       const [active, vault] = await Promise.all([
@@ -565,7 +592,7 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
       </div>
 
       {/* Search */}
-      <div className="px-2 py-1.5 shrink-0">
+      <div className="px-1 py-1.5 shrink-0">
         <input
           type="text"
           value={search}
@@ -684,11 +711,17 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
         )}
       </div>
 
+      {/* Draggable divider: Files ↔ Browser */}
+      <DragDivider
+        collapsed={!browserExpanded}
+        onHeightChange={handleBrowserResize}
+      />
+
       {/* Browser Sessions Section */}
-      <div className="border-t border-border-subtle shrink-0">
+      <div className="shrink-0 flex flex-col" style={{ height: browserExpanded ? browserHeight : undefined }}>
         <button
           onClick={() => setBrowserExpanded(!browserExpanded)}
-          className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold text-text-muted hover:bg-light-surface-alt transition-colors"
+          className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold text-text-muted hover:bg-light-surface-alt transition-colors shrink-0"
         >
           <span className="material-symbols-outlined text-[14px] transition-transform" style={{ transform: browserExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
             chevron_right
@@ -710,7 +743,7 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
           </button>
         </button>
         {browserExpanded && (
-          <div className="px-2 pb-2 max-h-40 overflow-y-auto">
+          <div className="px-2 pb-2 overflow-y-auto flex-1 min-h-0">
             {browserSessions.length === 0 && vaultSessions.length === 0 && (
               <p className="px-2 py-2 text-center text-[10px] text-text-muted">No active sessions</p>
             )}
@@ -745,8 +778,14 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
         )}
       </div>
 
+      {/* Draggable divider: Browser ↔ Sandbox */}
+      <DragDivider
+        collapsed={!sandboxExpanded}
+        onHeightChange={handleSandboxResize}
+      />
+
       {/* Sandbox Section */}
-      <SandboxSection workspace={workspace} />
+      <SandboxSection workspace={workspace} height={sandboxHeight} expanded={sandboxExpanded} setExpanded={setSandboxExpanded} />
 
       {/* Context Menu */}
       {contextMenu && (
@@ -884,7 +923,7 @@ function TreeNodeRow({
           </span>
 
           {/* Unread dot */}
-          {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />}
+          {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />}
 
           {/* Recently modified dot (only if not already showing unread) */}
           {isRecent && !isUnread && (
@@ -1111,8 +1150,61 @@ function ExportTablesDropdown({
 
 // ---- Sandbox file explorer section ----
 
-function SandboxSection({ workspace }: { workspace: WorkspaceState }) {
-  const [expanded, setExpanded] = useState(false)
+/** Draggable horizontal divider for resizing sections vertically. */
+function DragDivider({ onHeightChange, collapsed }: {
+  onHeightChange: (delta: number) => void
+  collapsed?: boolean
+}) {
+  const dragging = useRef(false)
+  const lastY = useRef(0)
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragging.current = true
+    lastY.current = e.clientY
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+  }, [])
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging.current) return
+      const delta = lastY.current - e.clientY // negative = drag down = grow section below
+      lastY.current = e.clientY
+      onHeightChange(delta)
+    }
+    const onMouseUp = () => {
+      if (!dragging.current) return
+      dragging.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [onHeightChange])
+
+  if (collapsed) return <div className="border-t border-border-subtle" />
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      className="group relative z-10 h-1.5 shrink-0 cursor-row-resize border-t border-border-subtle hover:bg-forest-green/20 active:bg-forest-green/40 transition-colors"
+    >
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-0.5 w-8 rounded-full bg-border-subtle group-hover:bg-forest-green/50 transition-colors" />
+    </div>
+  )
+}
+
+function SandboxSection({ workspace, height, expanded, setExpanded }: {
+  workspace: WorkspaceState
+  height: number
+  expanded: boolean
+  setExpanded: (v: boolean) => void
+}) {
   const [status, setStatus] = useState<engine.SandboxStatus | null>(null)
   const [files, setFiles] = useState<engine.SandboxFileEntry[]>([])
   const [currentDir, setCurrentDir] = useState('/')
@@ -1182,10 +1274,10 @@ function SandboxSection({ workspace }: { workspace: WorkspaceState }) {
   }, [importUrl, openPreview])
 
   return (
-    <div className="border-t border-border-subtle shrink-0">
+    <div className="shrink-0 flex flex-col" style={{ height: expanded ? height : undefined }}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold text-text-muted hover:bg-light-surface-alt transition-colors"
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold text-text-muted hover:bg-light-surface-alt transition-colors shrink-0"
       >
         <span className="material-symbols-outlined text-[14px] transition-transform" style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
           chevron_right
@@ -1198,7 +1290,7 @@ function SandboxSection({ workspace }: { workspace: WorkspaceState }) {
       </button>
 
       {expanded && (
-        <div className="px-2 pb-2 max-h-48 overflow-y-auto">
+        <div className="px-2 pb-2 overflow-y-auto flex-1 min-h-0">
           {/* Import Project button — always visible */}
           <div className="px-2 py-1">
             {!showImport ? (

@@ -335,15 +335,15 @@ export async function markFileRead(db: Db, userId: string, fileId: string): Prom
   }
 }
 
-/** Get IDs of files updated since user last read them. */
+/** Get paths of files updated since user last read them. */
 export async function getUnreadFileIds(db: Db, userId: string, teamId: string): Promise<string[]> {
   const rows = await db.query<Record<string, unknown>>(
-    `SELECT f.id FROM workspace_files f
+    `SELECT f.path FROM workspace_files f
      LEFT JOIN workspace_file_reads fr ON fr.file_id = f.id AND fr.user_id = $1
      WHERE f.team_id = $2 AND f.updated_at > COALESCE(fr.last_read_at, '1970-01-01')`,
     [userId, teamId],
   )
-  return rows.map(r => r.id as string)
+  return rows.map(r => r.path as string)
 }
 
 /** Get file metadata by path (for read tracking). */

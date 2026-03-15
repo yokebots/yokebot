@@ -49,9 +49,10 @@ export function FileViewer({ filePath, onTaskClick }: FileViewerProps) {
 
   useEffect(() => { loadFile() }, [loadFile])
 
-  // Mark file as read
+  // Mark file as read (persist to server + notify parent to update unread state)
   useEffect(() => {
     engine.markFileRead(filePath).catch(() => {})
+    window.dispatchEvent(new CustomEvent('yokebot:file-read', { detail: { path: filePath } }))
   }, [filePath])
 
   const handleSave = async () => {

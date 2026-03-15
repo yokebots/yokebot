@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as engine from '@/lib/engine'
+import { useAuth } from '@/lib/auth'
 import { AnnotationOverlay, buildAnnotationMessage } from './AnnotationOverlay'
 import { StyleEditorPanel, type SelectedElement, type StyleChange } from './StyleEditorPanel'
 
@@ -7,8 +8,6 @@ interface PreviewPanelProps {
   previewUrl?: string
   /** Channel ID for sending annotation messages to the bot */
   channelId?: string
-  /** Current user ID for message sender */
-  userId?: string
 }
 
 type ViewportMode = 'desktop' | 'tablet' | 'mobile'
@@ -20,7 +19,15 @@ const VIEWPORT_WIDTHS: Record<ViewportMode, number | null> = {
   mobile: 375,
 }
 
-export function PreviewPanel({ previewUrl: initialUrl, channelId, userId }: PreviewPanelProps) {
+const VIEWPORT_PREFIX: Record<ViewportMode, string> = {
+  desktop: 'lg:',
+  tablet: 'md:',
+  mobile: '',  // mobile-first = no prefix
+}
+
+export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanelProps) {
+  const { user } = useAuth()
+  const userId = user?.id
   const [url, setUrl] = useState<string | null>(initialUrl || null)
   const [loading, setLoading] = useState(!initialUrl)
   const [iframeLoaded, setIframeLoaded] = useState(false)
@@ -31,6 +38,8 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, userId }: Prev
   const [zoom, setZoom] = useState(100)
   const [editMode, setEditMode] = useState<EditMode>('none')
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
   const [wakingUp, setWakingUp] = useState(false)
   const [wakeProgress, setWakeProgress] = useState(0)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -135,6 +144,22 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, userId }: Prev
           selector: data.selector,
         })
       }
+
+      if (data.type === 'yokebot:history-state') {
+        setCanUndo(data.canUndo)
+        setCanRedo(data.canRedo)
+      }
+
+      if (data.type === 'yokebot:text-changed') {
+        // Persist text change to source
+        if (data.sourceFile && data.sourceLine) {
+          engine.applyTextToSource({
+            sourceFile: data.sourceFile,
+            sourceLine: data.sourceLine,
+            newText: data.newText,
+          }).catch(err => console.warn('[PreviewPanel] Failed to persist text change:', err.message))
+        }
+      }
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
@@ -157,6 +182,33 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, userId }: Prev
       iframeRef.current.src = url
     }
   }, [url])
+
+  // ---- Undo/redo ----
+  const handleUndo = useCallback(() => {
+    iframeRef.current?.contentWindow?.postMessage({ type: 'yokebot:undo-change' }, '*')
+  }, [])
+
+  const handleRedo = useCallback(() => {
+    iframeRef.current?.contentWindow?.postMessage({ type: 'yokebot:redo-change' }, '*')
+  }, [])
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    if (editMode !== 'edit') return
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) handleRedo()
+        else handleUndo()
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
+        e.preventDefault()
+        handleRedo()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [editMode, handleUndo, handleRedo])
 
   // ---- Annotation: send to bot ----
   const handleSendAnnotations = useCallback((annotations: Array<{
@@ -189,17 +241,18 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, userId }: Prev
       }, '*')
     }
 
-    // 2. Persist to source file via engine API
+    // 2. Persist to source file via engine API (with responsive breakpoint prefix)
     if (selectedElement?.sourceFile && selectedElement.sourceLine) {
+      const prefix = VIEWPORT_PREFIX[viewport]
       engine.applyStyleToSource({
         sourceFile: selectedElement.sourceFile,
         sourceLine: selectedElement.sourceLine,
-        changes: changes.map(c => ({ property: c.property, value: c.value, tailwindClass: c.tailwindClass })),
+        changes: changes.map(c => ({ property: c.property, value: c.value, tailwindClass: prefix + c.tailwindClass })),
       }).catch(err => {
         console.warn('[PreviewPanel] Failed to persist style change:', err.message)
       })
     }
-  }, [selectedElement])
+  }, [selectedElement, viewport])
 
   const handlePublish = async () => {
     if (!publishName.trim() || !publishSubdomain.trim()) return
@@ -370,6 +423,31 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, userId }: Prev
             <span className="material-symbols-outlined text-[14px]">edit</span>
             Edit
           </button>
+
+          {editMode === 'edit' && (
+            <>
+              <div className="h-4 w-px bg-border-subtle mx-1" />
+              <button
+                onClick={handleUndo}
+                disabled={!canUndo}
+                className="flex items-center px-1.5 py-1 rounded text-xs text-text-muted hover:text-text-main hover:bg-light-surface-alt disabled:opacity-30 transition-colors"
+                title="Undo (Ctrl+Z)"
+              >
+                <span className="material-symbols-outlined text-[14px]">undo</span>
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={!canRedo}
+                className="flex items-center px-1.5 py-1 rounded text-xs text-text-muted hover:text-text-main hover:bg-light-surface-alt disabled:opacity-30 transition-colors"
+                title="Redo (Ctrl+Shift+Z)"
+              >
+                <span className="material-symbols-outlined text-[14px]">redo</span>
+              </button>
+              <span className="text-[9px] text-text-muted ml-0.5">
+                {viewport === 'mobile' ? 'base' : viewport === 'tablet' ? 'md:' : 'lg:'}
+              </span>
+            </>
+          )}
 
           <div className="flex-1" />
 
