@@ -1508,8 +1508,16 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       }
       output.push(`Written ${written}/${files.length} files`)
 
-      // 3. Install dependencies
-      const installResult = await sbExec(ctx.db, ctx.teamId, installCmd)
+      // 3. Install dependencies (with auto-retry if node_modules is corrupted)
+      let installResult = await sbExec(ctx.db, ctx.teamId, installCmd)
+      if (installResult.exitCode !== 0) {
+        // Detect project dir from install command
+        const cdMatch = installCmd.match(/cd\s+(\/[^\s&]+)/)
+        const projectDir = cdMatch?.[1] ?? '/home/daytona/app'
+        output.push('Install failed, cleaning node_modules and retrying...')
+        await sbExec(ctx.db, ctx.teamId, `rm -rf ${projectDir}/node_modules ${projectDir}/package-lock.json`)
+        installResult = await sbExec(ctx.db, ctx.teamId, installCmd)
+      }
       if (installResult.exitCode === 0) {
         output.push('Dependencies installed')
       } else {

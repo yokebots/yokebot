@@ -658,8 +658,27 @@ export async function chatCompletion(
   tools?: ToolDef[],
 ): Promise<CompletionResponse> {
   const url = `${config.endpoint}/chat/completions`
-  const body: Record<string, unknown> = { model: config.model, messages, stream: false }
-  if (tools && tools.length > 0) { body.tools = tools; body.tool_choice = 'required' }
+
+  // Check for native tool format adapter (e.g. Qwen 3.5, DeepSeek DSML)
+  const adapter = getToolAdapter(config.model)
+  let actualMessages = messages
+  let useNativeTools = true // true = send tools in OpenAI API format
+
+  if (adapter && tools && tools.length > 0) {
+    const result = applyNativeToolFormat(adapter, messages, tools)
+    actualMessages = result.messages
+    useNativeTools = result.useNativeTools
+    if (!useNativeTools) {
+      console.log(`[model] Using native tool format adapter: ${adapter.id} for ${config.model}`)
+    }
+  }
+
+  const body: Record<string, unknown> = { model: config.model, messages: actualMessages, stream: false }
+  if (tools && tools.length > 0 && useNativeTools) {
+    body.tools = tools
+    // OpenRouter: many providers don't support tool_choice 'required' — use 'auto'
+    body.tool_choice = config.endpoint.includes('openrouter.ai') ? 'auto' : 'required'
+  }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
 
@@ -690,14 +709,31 @@ export async function chatCompletion(
       let content = choice.message.content
       let toolCalls = choice.message.tool_calls ?? []
 
-      // If the model dumped tool calls as DSML text instead of proper tool_calls, parse them out
-      if (content && toolCalls.length === 0 && content.includes('DSML')) {
-        const parsed = parseDSMLToolCalls(content)
+      // Try to recover tool calls from text content using the adapter's parser
+      if (adapter && content && toolCalls.length === 0) {
+        const parsed = adapter.parseToolCalls(content)
         if (parsed.length > 0) {
           toolCalls = parsed
-          // Remove the DSML markup from content so it doesn't leak into chat
-          content = content.replace(/<[｜|]DSML[｜|][^>]*>[\s\S]*$/g, '').trim() || null
-          console.log(`[model] Recovered ${parsed.length} tool call(s) from DSML text content`)
+          content = adapter.stripMarkup(content) || null
+          console.log(`[model] ${adapter.id} adapter recovered ${parsed.length} tool call(s) from text content`)
+        }
+      }
+
+      // Safety net: strip any leaked XML tool markup from content before returning
+      // This prevents raw tags like <function=think> from appearing in chat
+      if (content && (content.includes('<function=') || content.includes('<tool_call>') || content.includes('<parameter='))) {
+        if (adapter) {
+          content = adapter.stripMarkup(content) || null
+        } else {
+          // Generic cleanup for models without an adapter
+          content = content
+            .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+            .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '')
+            .replace(/<function=[^>]*>/g, '')
+            .replace(/<\/function>/g, '')
+            .replace(/<tool_call>/g, '')
+            .replace(/<\/tool_call>/g, '')
+            .trim() || null
         }
       }
 
@@ -717,41 +753,260 @@ export async function chatCompletion(
   throw lastErr ?? new Error('Chat completion failed')
 }
 
-// ---- DSML recovery ----
+// ---- Native Tool Format Adapters ----
+// Many models are trained on specific tool-call formats (Hermes, Qwen3-Coder XML, DSML, etc.)
+// that differ from the OpenAI standard. When these models are served through proxies like
+// OpenRouter, the provider may not translate correctly — causing tool calls to fail silently.
+//
+// Adapters solve this by:
+//   1. Injecting tool definitions into the system prompt in the model's native format
+//   2. Sending the request WITHOUT the OpenAI `tools` parameter (plain text completion)
+//   3. Parsing tool calls from the model's text output back into standard ToolCall[]
+//
+// This gives us reliable tool calling on cheap models that otherwise choke on OpenAI format.
+
+interface ToolFormatAdapter {
+  id: string
+  /** Returns true if this adapter should handle the given provider model ID */
+  matches(providerModelId: string): boolean
+  /** Build a system prompt section describing available tools in the model's native format */
+  formatToolPrompt(tools: ToolDef[]): string
+  /** Parse tool calls from model text output; returns parsed calls and cleaned content */
+  parseToolCalls(text: string): ToolCall[]
+  /** Regex or marker to strip parsed tool call markup from content */
+  stripMarkup(text: string): string
+}
+
+// ---- Qwen 3.5 Adapter (qwen3-coder XML format) ----
+// Qwen 3.5 models were trained on the qwen3-coder format, NOT Hermes or OpenAI.
+// Format: <tool_call><function=name><parameter=key>value</parameter></function></tool_call>
+
+const qwen35Adapter: ToolFormatAdapter = {
+  id: 'qwen3_coder',
+
+  matches(modelId: string): boolean {
+    const id = modelId.toLowerCase()
+    return id.includes('qwen3.5') || id.includes('qwen3-5')
+  },
+
+  formatToolPrompt(tools: ToolDef[]): string {
+    const toolDescs = tools.map((t) => {
+      const fn = t.function
+      const props = (fn.parameters as { properties?: Record<string, { type?: string; description?: string; enum?: string[] }> })?.properties ?? {}
+      const required = (fn.parameters as { required?: string[] })?.required ?? []
+      const paramLines = Object.entries(props).map(([name, schema]) => {
+        const req = required.includes(name) ? 'required' : 'optional'
+        const type = schema.type ?? 'string'
+        const desc = schema.description ? ` — ${schema.description}` : ''
+        const enumVals = schema.enum ? ` (one of: ${schema.enum.join(', ')})` : ''
+        return `  - ${name} (${type}, ${req})${desc}${enumVals}`
+      }).join('\n')
+      return `### ${fn.name}\n${fn.description}\nParameters:\n${paramLines}`
+    }).join('\n\n')
+
+    return `# Available Tools
+
+You have access to the following tools. To call a tool, you MUST output a tool_call block in EXACTLY this XML format:
+
+<tool_call>
+<function=tool_name>
+<parameter=param_name>param_value</parameter>
+</function>
+</tool_call>
+
+## CRITICAL FORMAT RULES — follow these EXACTLY:
+1. Every tool call MUST be wrapped in <tool_call>...</tool_call> tags.
+2. Inside, use <function=TOOL_NAME>...</function> with the exact tool name.
+3. Every parameter MUST use <parameter=PARAM_NAME>value</parameter> tags.
+4. You MUST include ALL required parameters. Do NOT leave any empty.
+5. The </function> closing tag is REQUIRED before </tool_call>.
+6. For JSON values (objects, arrays), output valid JSON as the parameter value.
+7. You may call multiple tools by outputting multiple <tool_call> blocks.
+8. ALWAYS call at least one tool when you have a task to do. Never just describe what you would do — ACT by calling tools.
+9. When you want to respond to the user, call the "respond" tool with a "message" parameter.
+
+## Example — calling a tool:
+
+<tool_call>
+<function=think>
+<parameter=thought>I need to check the current files before making changes.</parameter>
+</function>
+</tool_call>
+
+## Example — responding to the user:
+
+<tool_call>
+<function=respond>
+<parameter=message>I've completed the task! Here's what I did...</parameter>
+</function>
+</tool_call>
+
+${toolDescs}`
+  },
+
+  parseToolCalls(text: string): ToolCall[] {
+    const calls: ToolCall[] = []
+    // Match <function=name>...</function> or <function=name>...</tool_call> (model sometimes omits </function>)
+    const funcRegex = /<function=([^>]+)>([\s\S]*?)(?:<\/function>|<\/tool_call>)/g
+    let match
+    while ((match = funcRegex.exec(text)) !== null) {
+      const toolName = match[1].trim()
+      const body = match[2]
+      const params: Record<string, unknown> = {}
+
+      const paramRegex = /<parameter=([^>]+)>([\s\S]*?)<\/parameter>/g
+      let paramMatch
+      while ((paramMatch = paramRegex.exec(body)) !== null) {
+        const paramName = paramMatch[1].trim()
+        let paramValue: unknown = paramMatch[2].trim()
+        // Try to parse as JSON for objects/arrays/numbers/booleans
+        if (typeof paramValue === 'string') {
+          if (paramValue.startsWith('{') || paramValue.startsWith('[')) {
+            try { paramValue = JSON.parse(paramValue) } catch { /* keep as string */ }
+          } else if (paramValue === 'true') { paramValue = true }
+          else if (paramValue === 'false') { paramValue = false }
+          else if (/^-?\d+(\.\d+)?$/.test(paramValue)) { paramValue = Number(paramValue) }
+        }
+        params[paramName] = paramValue
+      }
+
+      calls.push({
+        id: `qwen35-${Date.now()}-${calls.length}`,
+        type: 'function',
+        function: { name: toolName, arguments: JSON.stringify(params) },
+      })
+    }
+    return calls
+  },
+
+  stripMarkup(text: string): string {
+    return text
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')  // closed blocks
+      .replace(/<tool_call>[\s\S]*$/g, '')                // unclosed trailing block
+      .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '') // standalone function blocks
+      .replace(/<function=[^>]*>[\s\S]*$/g, '')           // unclosed trailing function
+      .replace(/<\/function>/g, '')                       // orphaned closing tags
+      .replace(/<\/tool_call>/g, '')                      // orphaned closing tags
+      .replace(/<parameter=[^>]*>[\s\S]*?<\/parameter>/g, '') // orphaned parameter tags
+      .replace(/<\/parameter>/g, '')                      // orphaned closing parameter tags
+      .trim()
+  },
+}
+
+// ---- DSML Adapter (DeepSeek internal format) ----
 // DeepSeek models sometimes output their internal function-call format (DSML tags) as text
 // instead of proper OpenAI-compatible tool_calls. This parser recovers them.
+// Unlike Qwen 3.5, DeepSeek DOES support OpenAI tools natively — DSML is just a fallback
+// for when it glitches and dumps internal format as text. So this adapter only parses responses,
+// it doesn't inject tools into the system prompt.
 
-function parseDSMLToolCalls(text: string): ToolCall[] {
-  const calls: ToolCall[] = []
-  // Match <｜DSML｜invoke name="toolName"> ... </｜DSML｜invoke> or similar patterns
-  // The DSML format uses fullwidth ｜ (U+FF5C) but sometimes regular | too
-  const invokeRegex = /<[｜|]DSML[｜|]invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)(?:<[｜|]DSML[｜|]\/invoke>|<\/[｜|]DSML[｜|]invoke>|$)/g
-  let match
-  while ((match = invokeRegex.exec(text)) !== null) {
-    const toolName = match[1]
-    const body = match[2]
-    const params: Record<string, unknown> = {}
+const dsmlAdapter: ToolFormatAdapter = {
+  id: 'dsml',
 
-    // Extract parameters: <｜DSML｜parameter name="paramName" string="true">value</｜DSML｜parameter>
-    const paramRegex = /<[｜|]DSML[｜|]parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)(?:<[｜|]DSML[｜|]\/parameter>|<\/[｜|]DSML[｜|]parameter>)/g
-    let paramMatch
-    while ((paramMatch = paramRegex.exec(body)) !== null) {
-      const paramName = paramMatch[1]
-      let paramValue: unknown = paramMatch[2].trim()
-      // Try to parse as JSON if it looks like an object or array
-      if (typeof paramValue === 'string' && (paramValue.startsWith('{') || paramValue.startsWith('['))) {
-        try { paramValue = JSON.parse(paramValue) } catch { /* keep as string */ }
+  matches(modelId: string): boolean {
+    return modelId.toLowerCase().includes('deepseek')
+  },
+
+  formatToolPrompt(_tools: ToolDef[]): string {
+    // DeepSeek supports OpenAI tools natively — no system prompt injection needed
+    return ''
+  },
+
+  parseToolCalls(text: string): ToolCall[] {
+    const calls: ToolCall[] = []
+    const invokeRegex = /<[｜|]DSML[｜|]invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)(?:<[｜|]DSML[｜|]\/invoke>|<\/[｜|]DSML[｜|]invoke>|$)/g
+    let match
+    while ((match = invokeRegex.exec(text)) !== null) {
+      const toolName = match[1]
+      const body = match[2]
+      const params: Record<string, unknown> = {}
+
+      const paramRegex = /<[｜|]DSML[｜|]parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)(?:<[｜|]DSML[｜|]\/parameter>|<\/[｜|]DSML[｜|]parameter>)/g
+      let paramMatch
+      while ((paramMatch = paramRegex.exec(body)) !== null) {
+        const paramName = paramMatch[1]
+        let paramValue: unknown = paramMatch[2].trim()
+        if (typeof paramValue === 'string' && (paramValue.startsWith('{') || paramValue.startsWith('['))) {
+          try { paramValue = JSON.parse(paramValue) } catch { /* keep as string */ }
+        }
+        params[paramName] = paramValue
       }
-      params[paramName] = paramValue
-    }
 
-    calls.push({
-      id: `dsml-recovery-${Date.now()}-${calls.length}`,
-      type: 'function',
-      function: { name: toolName, arguments: JSON.stringify(params) },
-    })
+      calls.push({
+        id: `dsml-recovery-${Date.now()}-${calls.length}`,
+        type: 'function',
+        function: { name: toolName, arguments: JSON.stringify(params) },
+      })
+    }
+    return calls
+  },
+
+  stripMarkup(text: string): string {
+    return text.replace(/<[｜|]DSML[｜|][^>]*>[\s\S]*$/g, '').trim()
+  },
+}
+
+// Registry of all adapters — checked in order
+const TOOL_ADAPTERS: ToolFormatAdapter[] = [qwen35Adapter, dsmlAdapter]
+
+/** Find the native tool format adapter for a given model ID, if any */
+function getToolAdapter(providerModelId: string): ToolFormatAdapter | null {
+  for (const adapter of TOOL_ADAPTERS) {
+    if (adapter.matches(providerModelId)) return adapter
   }
-  return calls
+  return null
+}
+
+/**
+ * For models with native tool format adapters:
+ * - Inject tool definitions into the system prompt
+ * - Rewrite tool_calls/tool messages into text format the model understands
+ * - Return modified messages WITHOUT tools in the API body
+ * For models without adapters (or DSML which uses OpenAI natively):
+ * - Return messages unchanged, tools stay in the API body
+ */
+function applyNativeToolFormat(
+  adapter: ToolFormatAdapter,
+  messages: ChatMessage[],
+  tools: ToolDef[],
+): { messages: ChatMessage[]; useNativeTools: boolean } {
+  const toolPrompt = adapter.formatToolPrompt(tools)
+
+  // DSML adapter returns empty prompt — it uses OpenAI tools natively, only parses responses
+  if (!toolPrompt) return { messages, useNativeTools: true }
+
+  // Rewrite messages: convert OpenAI tool_calls/tool messages into plain text
+  // so the model sees its own native format in the conversation history
+  const modified: ChatMessage[] = []
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+      // Convert assistant tool_calls into text showing what tools were called
+      const callText = msg.tool_calls.map((tc) => {
+        const args = JSON.parse(tc.function.arguments) as Record<string, unknown>
+        const paramTags = Object.entries(args).map(([k, v]) => {
+          const val = typeof v === 'string' ? v : JSON.stringify(v)
+          return `<parameter=${k}>${val}</parameter>`
+        }).join('\n')
+        return `<tool_call>\n<function=${tc.function.name}>\n${paramTags}\n</function>\n</tool_call>`
+      }).join('\n')
+      const content = msg.content ? `${msg.content}\n\n${callText}` : callText
+      modified.push({ role: 'assistant', content })
+    } else if (msg.role === 'tool') {
+      // Convert tool result into a user message showing the result
+      modified.push({ role: 'user', content: `[Tool Result]: ${msg.content}` })
+    } else {
+      modified.push(msg)
+    }
+  }
+
+  // Inject tool definitions into the system prompt
+  if (modified.length > 0 && modified[0].role === 'system') {
+    modified[0] = { ...modified[0], content: modified[0].content + '\n\n' + toolPrompt }
+  } else {
+    modified.unshift({ role: 'system', content: toolPrompt })
+  }
+
+  return { messages: modified, useNativeTools: false }
 }
 
 // ---- Fallback support ----

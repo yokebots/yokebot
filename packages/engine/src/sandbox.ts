@@ -139,11 +139,34 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
         sessions.set(teamId, session)
 
         // Re-run startup command after resume (e.g. restart dev server)
+        // If it fails with a module error, auto-repair by reinstalling dependencies
         if (wasResumed && row.startup_command) {
           console.log(`[sandbox] Re-running startup command for team ${teamId}: ${row.startup_command}`)
-          session.sandbox.process.executeCommand(row.startup_command, undefined, undefined, 10).catch(err => {
+          try {
+            const startResult = await session.sandbox.process.executeCommand(row.startup_command, undefined, undefined, 15)
+            const output = startResult.artifacts?.stdout ?? startResult.result ?? ''
+            const isModuleError = output.includes('Cannot find module') || output.includes('MODULE_NOT_FOUND')
+              || startResult.exitCode !== 0 && output.includes('node_modules')
+
+            if (isModuleError) {
+              console.log(`[sandbox] Startup failed with module error for team ${teamId}, auto-repairing...`)
+              // Detect project dir from the startup command (e.g. "cd /home/daytona/app && npm run dev")
+              const cdMatch = row.startup_command.match(/cd\s+(\/[^\s&]+)/)
+              const projectDir = cdMatch?.[1] ?? '/home/daytona/app'
+              // Nuke corrupted node_modules and reinstall
+              await session.sandbox.process.executeCommand(`rm -rf ${projectDir}/node_modules`, undefined, undefined, 30)
+              console.log(`[sandbox] Reinstalling dependencies in ${projectDir}...`)
+              const installResult = await session.sandbox.process.executeCommand(`cd ${projectDir} && npm install`, undefined, undefined, 120)
+              if (installResult.exitCode === 0) {
+                console.log(`[sandbox] Dependencies reinstalled, retrying startup command...`)
+                session.sandbox.process.executeCommand(row.startup_command, undefined, undefined, 10).catch(() => {})
+              } else {
+                console.error(`[sandbox] npm install failed for team ${teamId}`)
+              }
+            }
+          } catch (err) {
             console.error(`[sandbox] Startup command failed for team ${teamId}:`, (err as Error).message)
-          })
+          }
         }
 
         // Update DB status

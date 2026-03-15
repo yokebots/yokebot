@@ -1529,7 +1529,8 @@ Do NOT use "npm create vite" or "npx create-vite" — these have interactive pro
    import tailwindcss from '@tailwindcss/vite'
    export default defineConfig({ plugins: [react(), tailwindcss()] })
    \`\`\`
-- src/index.css — just: @import "tailwindcss"; (NO postcss.config.js or tailwind.config.js)
+- src/index.css — just: @import "tailwindcss";
+**NEVER create postcss.config.js or tailwind.config.js — Tailwind v4 does NOT use PostCSS. Use the @tailwindcss/vite plugin ONLY.**
 - index.html, tsconfig.json, src/main.tsx, src/App.tsx, and all other component files
 - install_command: "cd /home/daytona/app && npm install"
 - start_command: "cd /home/daytona/app && npm run dev -- --host 0.0.0.0 &"
