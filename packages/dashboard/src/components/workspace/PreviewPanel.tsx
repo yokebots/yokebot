@@ -14,7 +14,7 @@ const VIEWPORT_WIDTHS: Record<ViewportMode, number | null> = {
 }
 
 export function PreviewPanel({ previewUrl: initialUrl }: PreviewPanelProps) {
-  const [url, setUrl] = useState<string | null>(initialUrl ?? null)
+  const [url, setUrl] = useState<string | null>(initialUrl || null)
   const [loading, setLoading] = useState(!initialUrl)
   const [error, setError] = useState<string | null>(null)
   const [viewport, setViewport] = useState<ViewportMode>('desktop')

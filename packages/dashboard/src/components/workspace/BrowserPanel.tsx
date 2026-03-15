@@ -26,6 +26,7 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(isAgentSession ? null : sessionId)
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const urlInputRef = useRef<HTMLInputElement>(null)
 
   // Initialize session
   useEffect(() => {
@@ -246,10 +247,12 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
           </button>
           <form onSubmit={handleNavigate} className="flex-1 flex">
             <input
+              ref={urlInputRef}
               type="text"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
               placeholder="Enter URL..."
+              autoFocus={!currentUrl || currentUrl === 'about:blank'}
               className="flex-1 bg-white border border-border-subtle rounded px-2 py-1 text-xs focus:border-forest-green focus:outline-none"
             />
           </form>
@@ -282,7 +285,7 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
-        {screenshot ? (
+        {screenshot && currentUrl && currentUrl !== 'about:blank' ? (
           <img
             ref={imgRef}
             src={`data:image/png;base64,${screenshot}`}
@@ -297,8 +300,15 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
           />
         ) : (
           <div className="text-center text-text-muted text-sm">
-            <span className="material-symbols-outlined text-3xl block mb-2 text-text-muted/50">language</span>
-            <p>{isAgentSession ? 'Waiting for agent to start browsing...' : 'No browser view available'}</p>
+            <span className="material-symbols-outlined text-4xl block mb-3 text-forest-green/40">language</span>
+            {isAgentSession ? (
+              <p>Waiting for agent to start browsing...</p>
+            ) : (
+              <>
+                <p className="font-medium text-text-main mb-1">Browser ready</p>
+                <p>Type a URL in the address bar above to get started</p>
+              </>
+            )}
           </div>
         )}
       </div>

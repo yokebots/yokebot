@@ -179,6 +179,7 @@ export function TopBar({ onRestartTour }: { onRestartTour?: () => void }) {
           {/* Credits */}
           <button
             onClick={() => navigate('/settings/billing')}
+            title="Credits are reserved while agents work and refunded for unused iterations"
             className={`flex items-center gap-1.5 md:gap-2 rounded-full border px-2.5 md:px-3 py-1.5 shadow-sm transition-colors ${
               credits !== null && credits <= 0
                 ? 'border-red-300 bg-red-50 hover:border-red-400'

@@ -1127,7 +1127,7 @@ function SandboxSection({ workspace }: { workspace: WorkspaceState }) {
       type: 'sandbox-preview' as import('@/pages/WorkspacePage').ViewerTabType,
       label: 'Preview',
       icon: 'preview',
-      resourceId: status?.previewUrl ?? '',
+      resourceId: '',
     })
   }, [workspace, status])
 
