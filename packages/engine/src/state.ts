@@ -518,6 +518,53 @@ const SQLITE_DDL = `
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Skill execution logging
+  CREATE TABLE IF NOT EXISTS skill_runs (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL,
+    skill_name TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'success',
+    error_message TEXT,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    user_feedback TEXT,
+    args_preview TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Skill version history
+  CREATE TABLE IF NOT EXISTS skill_versions (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    skill_name TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    content TEXT NOT NULL,
+    diff_from_previous TEXT,
+    change_description TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    suggested_by_agent_id TEXT,
+    approved_by_user_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(team_id, skill_name, version)
+  );
+
+  -- Skill improvement proposals
+  CREATE TABLE IF NOT EXISTS skill_improvement_proposals (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    skill_name TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    proposed_content TEXT NOT NULL,
+    reasoning TEXT NOT NULL,
+    failure_run_ids TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -537,6 +584,13 @@ const SQLITE_DDL = `
   CREATE INDEX IF NOT EXISTS idx_sor_rows_table ON sor_rows(table_id);
   CREATE INDEX IF NOT EXISTS idx_published_apps_team ON published_apps(team_id);
   CREATE INDEX IF NOT EXISTS idx_published_apps_subdomain ON published_apps(subdomain);
+  CREATE INDEX IF NOT EXISTS idx_skill_runs_team ON skill_runs(team_id);
+  CREATE INDEX IF NOT EXISTS idx_skill_runs_skill ON skill_runs(team_id, skill_name);
+  CREATE INDEX IF NOT EXISTS idx_skill_runs_agent ON skill_runs(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_skill_runs_created ON skill_runs(team_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_skill_versions_team_skill ON skill_versions(team_id, skill_name);
+  CREATE INDEX IF NOT EXISTS idx_skill_proposals_team ON skill_improvement_proposals(team_id);
+  CREATE INDEX IF NOT EXISTS idx_skill_proposals_status ON skill_improvement_proposals(team_id, status);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_notifications_team ON notifications(team_id, user_id);
   CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
@@ -1098,6 +1152,53 @@ const POSTGRES_DDL = `
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- Skill execution logging
+  CREATE TABLE IF NOT EXISTS skill_runs (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL,
+    skill_name TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'success',
+    error_message TEXT,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    user_feedback TEXT,
+    args_preview TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Skill version history
+  CREATE TABLE IF NOT EXISTS skill_versions (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    skill_name TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    content TEXT NOT NULL,
+    diff_from_previous TEXT,
+    change_description TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    suggested_by_agent_id TEXT,
+    approved_by_user_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(team_id, skill_name, version)
+  );
+
+  -- Skill improvement proposals
+  CREATE TABLE IF NOT EXISTS skill_improvement_proposals (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL DEFAULT '',
+    skill_name TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    proposed_content TEXT NOT NULL,
+    reasoning TEXT NOT NULL,
+    failure_run_ids TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_agents_team ON agents(team_id);
   CREATE INDEX IF NOT EXISTS idx_messages_team ON messages(team_id);
@@ -1117,6 +1218,13 @@ const POSTGRES_DDL = `
   CREATE INDEX IF NOT EXISTS idx_sor_rows_table ON sor_rows(table_id);
   CREATE INDEX IF NOT EXISTS idx_published_apps_team ON published_apps(team_id);
   CREATE INDEX IF NOT EXISTS idx_published_apps_subdomain ON published_apps(subdomain);
+  CREATE INDEX IF NOT EXISTS idx_skill_runs_team ON skill_runs(team_id);
+  CREATE INDEX IF NOT EXISTS idx_skill_runs_skill ON skill_runs(team_id, skill_name);
+  CREATE INDEX IF NOT EXISTS idx_skill_runs_agent ON skill_runs(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_skill_runs_created ON skill_runs(team_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_skill_versions_team_skill ON skill_versions(team_id, skill_name);
+  CREATE INDEX IF NOT EXISTS idx_skill_proposals_team ON skill_improvement_proposals(team_id);
+  CREATE INDEX IF NOT EXISTS idx_skill_proposals_status ON skill_improvement_proposals(team_id, status);
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_notifications_team ON notifications(team_id, user_id);
   CREATE INDEX IF NOT EXISTS idx_credit_tx_team ON credit_transactions(team_id, created_at);
@@ -1207,6 +1315,9 @@ const POSTGRES_DDL = `
   ALTER TABLE IF EXISTS memory_nodes ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS sandbox_sessions ENABLE ROW LEVEL SECURITY;
   ALTER TABLE IF EXISTS published_apps ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS skill_runs ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS skill_versions ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE IF EXISTS skill_improvement_proposals ENABLE ROW LEVEL SECURITY;
 
   CREATE INDEX IF NOT EXISTS idx_memory_nodes_agent ON memory_nodes(agent_id, depth);
   CREATE INDEX IF NOT EXISTS idx_memory_nodes_team ON memory_nodes(team_id, agent_id);

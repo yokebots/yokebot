@@ -1615,6 +1615,7 @@ export type SseEventType =
   | 'browser_frame'
   | 'sandbox_preview'
   | 'app_published'
+  | 'skill_warning'
 
 type SseListener = (data: unknown) => void
 
@@ -2020,5 +2021,115 @@ export async function checkoutHostingAddon(appName: string, hostingType: 'custom
   return request('/api/billing/checkout/hosting', {
     method: 'POST',
     body: JSON.stringify({ appName, hostingType }),
+  })
+}
+
+// ---- Skill Health & Versioning ----
+
+export interface SkillRun {
+  id: string
+  teamId: string
+  agentId: string
+  skillName: string
+  toolName: string
+  status: 'success' | 'failure' | 'timeout'
+  errorMessage: string | null
+  durationMs: number
+  userFeedback: string | null
+  argsPreview: string | null
+  createdAt: string
+}
+
+export interface SkillHealthStats {
+  skillName: string
+  totalRuns: number
+  successes: number
+  failures: number
+  timeouts: number
+  successRate: number
+  avgDurationMs: number
+  lastRunAt: string | null
+}
+
+export interface FailingSkill {
+  skillName: string
+  recentFailures: number
+  recentRuns: number
+  failureRate: number
+  recentErrors: string[]
+}
+
+export interface SkillVersion {
+  id: string
+  teamId: string
+  skillName: string
+  version: number
+  content: string
+  diffFromPrevious: string | null
+  changeDescription: string | null
+  source: 'manual' | 'ai_suggested' | 'rollback'
+  status: 'active' | 'pending' | 'rejected' | 'rolled_back'
+  createdAt: string
+}
+
+export interface SkillProposal {
+  id: string
+  teamId: string
+  skillName: string
+  agentId: string
+  proposedContent: string
+  reasoning: string
+  failureRunIds: string[]
+  status: 'pending' | 'approved' | 'rejected' | 'applied'
+  reviewedBy: string | null
+  createdAt: string
+}
+
+export async function getSkillRuns(teamId: string, filters?: { skill?: string; agent?: string; status?: string; limit?: number; offset?: number }): Promise<SkillRun[]> {
+  const params = new URLSearchParams()
+  if (filters?.skill) params.set('skill', filters.skill)
+  if (filters?.agent) params.set('agent', filters.agent)
+  if (filters?.status) params.set('status', filters.status)
+  if (filters?.limit) params.set('limit', String(filters.limit))
+  if (filters?.offset) params.set('offset', String(filters.offset))
+  const qs = params.toString()
+  return request(`/api/teams/${teamId}/skill-runs${qs ? `?${qs}` : ''}`)
+}
+
+export async function getSkillRunStats(teamId: string): Promise<SkillHealthStats[]> {
+  return request(`/api/teams/${teamId}/skill-runs/stats`)
+}
+
+export async function submitSkillFeedback(teamId: string, runId: string, feedback: 'positive' | 'negative'): Promise<void> {
+  return request(`/api/teams/${teamId}/skill-runs/${runId}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ feedback }),
+  })
+}
+
+export async function getSkillWarnings(teamId: string): Promise<FailingSkill[]> {
+  return request(`/api/teams/${teamId}/skill-warnings`)
+}
+
+export async function getSkillVersions(teamId: string, skillName: string): Promise<SkillVersion[]> {
+  return request(`/api/teams/${teamId}/skill-versions/${encodeURIComponent(skillName)}`)
+}
+
+export async function rollbackSkillVersion(teamId: string, skillName: string, version: number): Promise<SkillVersion> {
+  return request(`/api/teams/${teamId}/skill-versions/${encodeURIComponent(skillName)}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({ version }),
+  })
+}
+
+export async function getSkillProposals(teamId: string, status?: string): Promise<SkillProposal[]> {
+  const qs = status ? `?status=${status}` : ''
+  return request(`/api/teams/${teamId}/skill-proposals${qs}`)
+}
+
+export async function reviewSkillProposal(teamId: string, proposalId: string, approved: boolean): Promise<{ ok: boolean; newVersion?: SkillVersion }> {
+  return request(`/api/teams/${teamId}/skill-proposals/${proposalId}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ approved }),
   })
 }

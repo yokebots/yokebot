@@ -1684,6 +1684,13 @@ export async function runReactLoop(
   const skillTools = getSkillTools(skillsDir, installedSkills)
   const mcpTools = await loadMcpTools(db, agentId)
 
+  // Build skill→tool mapping for execution logging
+  const skillToolMap = new Map<string, string>() // toolName → skillName
+  for (const sName of installedSkills) {
+    const sTools = getSkillTools(skillsDir, [sName])
+    for (const t of sTools) skillToolMap.set(t.function.name, sName)
+  }
+
   // Filter built-in tools by agent's template categories
   const agentRow = await getAgent(db, agentId)
   const template = agentRow?.templateId ? (await import('./templates.ts')).TEMPLATES.find((t: any) => t.id === agentRow.templateId) : null
@@ -1805,14 +1812,17 @@ export async function runReactLoop(
 
         // Timeout tool execution at 30 seconds to prevent hung tools from blocking the loop
         let result: string
+        let toolTimedOut = false
+        const toolStartTime = Date.now()
         try {
           result = await Promise.race([
             executeToolCall(toolCall, toolCtx),
-            new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Tool execution timed out')), 30_000)),
+            new Promise<string>((_, reject) => setTimeout(() => { toolTimedOut = true; reject(new Error('Tool execution timed out')) }, 30_000)),
           ])
         } catch (err) {
           result = `Error: ${err instanceof Error ? err.message : 'Tool execution failed'}`
         }
+        const toolDurationMs = Date.now() - toolStartTime
         // Offload large results to workspace files
         result = await maybeOffloadResult(result, toolCall.function.name, toolCtx)
         toolCallLog.push({ name: toolCall.function.name, result })
@@ -1826,6 +1836,19 @@ export async function runReactLoop(
             tool: toolCall.function.name,
             resultPreview: result.slice(0, 500),
           }, teamId)
+        }
+
+        // Log skill tool execution for health tracking (Layer 1)
+        const skillNameForTool = skillToolMap.get(toolCall.function.name)
+        if (skillNameForTool) {
+          const isToolError = result.startsWith('Error:') || result.startsWith('Error —') || result.includes('failed:') || result.includes('Failed:')
+          const runStatus = toolTimedOut ? 'timeout' as const : isToolError ? 'failure' as const : 'success' as const
+          const { logSkillRun } = await import('./skill-runs.ts')
+          void logSkillRun(
+            db, teamId, agentId, skillNameForTool, toolCall.function.name,
+            runStatus, isToolError || toolTimedOut ? result.slice(0, 1000) : undefined,
+            toolDurationMs, toolCall.function.arguments?.slice(0, 500),
+          ).catch(() => {}) // fire-and-forget, don't block the loop
         }
 
         // If this is a "respond" call, capture the response

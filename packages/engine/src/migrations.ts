@@ -1789,6 +1789,128 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 41,
+    name: 'add_skill_runs_and_versioning',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_runs (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            agent_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'success',
+            error_message TEXT,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            user_feedback TEXT,
+            args_preview TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_versions (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            skill_name TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            content TEXT NOT NULL,
+            diff_from_previous TEXT,
+            change_description TEXT,
+            source TEXT NOT NULL DEFAULT 'manual',
+            suggested_by_agent_id TEXT,
+            approved_by_user_id TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(team_id, skill_name, version)
+          )
+        `)
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_improvement_proposals (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            skill_name TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            proposed_content TEXT NOT NULL,
+            reasoning TEXT NOT NULL,
+            failure_run_ids TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reviewed_by TEXT,
+            reviewed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `)
+        // Indexes
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_runs_team ON skill_runs(team_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_runs_skill ON skill_runs(team_id, skill_name)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_runs_agent ON skill_runs(agent_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_runs_created ON skill_runs(team_id, created_at)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_versions_team_skill ON skill_versions(team_id, skill_name)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_proposals_team ON skill_improvement_proposals(team_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_proposals_status ON skill_improvement_proposals(team_id, status)`)
+        // RLS
+        await db.exec(`ALTER TABLE skill_runs ENABLE ROW LEVEL SECURITY`)
+        await db.exec(`ALTER TABLE skill_versions ENABLE ROW LEVEL SECURITY`)
+        await db.exec(`ALTER TABLE skill_improvement_proposals ENABLE ROW LEVEL SECURITY`)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_runs (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            agent_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'success',
+            error_message TEXT,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            user_feedback TEXT,
+            args_preview TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_versions (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            skill_name TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            content TEXT NOT NULL,
+            diff_from_previous TEXT,
+            change_description TEXT,
+            source TEXT NOT NULL DEFAULT 'manual',
+            suggested_by_agent_id TEXT,
+            approved_by_user_id TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(team_id, skill_name, version)
+          )
+        `)
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_improvement_proposals (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL DEFAULT '',
+            skill_name TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            proposed_content TEXT NOT NULL,
+            reasoning TEXT NOT NULL,
+            failure_run_ids TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reviewed_by TEXT,
+            reviewed_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_runs_team ON skill_runs(team_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_runs_skill ON skill_runs(team_id, skill_name)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_runs_agent ON skill_runs(agent_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_runs_created ON skill_runs(team_id, created_at)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_versions_team_skill ON skill_versions(team_id, skill_name)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_proposals_team ON skill_improvement_proposals(team_id)`)
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_skill_proposals_status ON skill_improvement_proposals(team_id, status)`)
+      }
+    },
+  },
 ]
 
 /**

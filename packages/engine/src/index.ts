@@ -513,6 +513,12 @@ async function main() {
     setPublishBroadcast((teamId, app) => {
       broadcastToTeam(teamId, 'app_published', app)
     })
+
+    // Wire skill warning broadcast for Layer 2 failure detection
+    const { setSkillWarningBroadcast } = await import('./skill-runs.ts')
+    setSkillWarningBroadcast((teamId, data) => {
+      broadcastToTeam(teamId, 'skill_warning', data)
+    })
   }
 
   // ===== Ollama Detection =====
@@ -2402,6 +2408,111 @@ async function main() {
       const app = await upgradeToFullStack(db, teamId, req.params.id)
       await logActivity(db, 'app_upgraded', null, `Upgraded app to full-stack: ${app.displayName}`, undefined, teamId)
       res.json(app)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  // ===== Skill Health & Versioning =====
+
+  // Layer 1: Skill run history
+  app.get('/api/teams/:id/skill-runs', async (req, res) => {
+    const teamId = req.params.id
+    try {
+      const { listSkillRuns } = await import('./skill-runs.ts')
+      const runs = await listSkillRuns(db, teamId, {
+        skillName: req.query.skill as string | undefined,
+        agentId: req.query.agent as string | undefined,
+        status: req.query.status as 'success' | 'failure' | 'timeout' | undefined,
+        limit: Number(req.query.limit) || 50,
+        offset: Number(req.query.offset) || 0,
+      })
+      res.json(runs)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/teams/:id/skill-runs/stats', async (req, res) => {
+    const teamId = req.params.id
+    try {
+      const { getSkillRunStats } = await import('./skill-runs.ts')
+      res.json(await getSkillRunStats(db, teamId))
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/teams/:id/skill-runs/:runId/feedback', async (req, res) => {
+    const { feedback } = req.body as { feedback: 'positive' | 'negative' }
+    if (!feedback || !['positive', 'negative'].includes(feedback)) {
+      res.status(400).json({ error: 'feedback must be "positive" or "negative"' }); return
+    }
+    try {
+      const { submitRunFeedback } = await import('./skill-runs.ts')
+      await submitRunFeedback(db, req.params.runId, feedback)
+      res.json({ ok: true })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  // Layer 2: Skill warnings
+  app.get('/api/teams/:id/skill-warnings', async (req, res) => {
+    const teamId = req.params.id
+    try {
+      const { getFailingSkills } = await import('./skill-runs.ts')
+      res.json(await getFailingSkills(db, teamId))
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  // Layer 3: Skill versions
+  app.get('/api/teams/:id/skill-versions/:skillName', async (req, res) => {
+    const teamId = req.params.id
+    try {
+      const { listSkillVersions } = await import('./skill-versions.ts')
+      res.json(await listSkillVersions(db, teamId, req.params.skillName))
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/teams/:id/skill-versions/:skillName/rollback', async (req, res) => {
+    const teamId = req.params.id
+    const { version } = req.body as { version: number }
+    if (!version) { res.status(400).json({ error: 'version is required' }); return }
+    try {
+      const { rollbackSkillVersion } = await import('./skill-versions.ts')
+      const result = await rollbackSkillVersion(db, teamId, req.params.skillName, version)
+      if (!result) { res.status(404).json({ error: 'Version not found' }); return }
+      res.json(result)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  // Layer 3: Skill improvement proposals
+  app.get('/api/teams/:id/skill-proposals', async (req, res) => {
+    const teamId = req.params.id
+    try {
+      const { listProposals } = await import('./skill-versions.ts')
+      const status = req.query.status as 'pending' | 'approved' | 'rejected' | 'applied' | undefined
+      res.json(await listProposals(db, teamId, status))
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/teams/:id/skill-proposals/:proposalId/review', async (req, res) => {
+    const userId = req.user!.id
+    const { approved } = req.body as { approved: boolean }
+    if (typeof approved !== 'boolean') { res.status(400).json({ error: 'approved must be a boolean' }); return }
+    try {
+      const { reviewProposal } = await import('./skill-versions.ts')
+      const result = await reviewProposal(db, req.params.proposalId, approved, userId)
+      res.json({ ok: true, newVersion: result })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }

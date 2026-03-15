@@ -183,6 +183,7 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
     sequenceTimer = setInterval(() => {
       void processEmailSequences(db)
       void processOnboardingDripEmails(db)
+      void checkSkillHealth(db)
     }, 5 * 60 * 1000)
     // Run once on startup after a short delay
     setTimeout(() => {
@@ -1151,5 +1152,47 @@ async function processScheduledWorkflows(db: Db): Promise<void> {
     }
   } catch (err) {
     console.error('[scheduler] Workflow schedule processing error:', err instanceof Error ? err.message : err)
+  }
+}
+
+// ---- Layer 2: Skill health check (runs every 5 min) ----
+
+const lastSkillCheckTs = new Map<string, number>()
+const SKILL_CHECK_INTERVAL = 15 * 60 * 1000 // at most once per 15 min per team
+
+async function checkSkillHealth(db: Db): Promise<void> {
+  try {
+    const { getFailingSkills, broadcastSkillWarning } = await import('./skill-runs.ts')
+
+    // Get all active teams
+    const teams = await db.query<Record<string, unknown>>(
+      `SELECT DISTINCT team_id FROM agents WHERE status = 'running'`,
+    )
+
+    const now = Date.now()
+    for (const row of teams) {
+      const teamId = row.team_id as string
+      const lastCheck = lastSkillCheckTs.get(teamId) ?? 0
+      if (now - lastCheck < SKILL_CHECK_INTERVAL) continue
+
+      lastSkillCheckTs.set(teamId, now)
+      const failing = await getFailingSkills(db, teamId)
+      if (failing.length > 0) {
+        // Broadcast via SSE
+        broadcastSkillWarning(teamId, failing)
+
+        // Push persistent notification for each failing skill
+        for (const skill of failing) {
+          await notifyTeam(
+            db, teamId, 'system',
+            `Skill "${skill.skillName}" is underperforming`,
+            `${skill.recentFailures}/${skill.recentRuns} recent runs failed. ${skill.recentErrors[0] ?? ''}`,
+          )
+        }
+        console.log(`[scheduler] Skill health warning for team ${teamId}: ${failing.map((s) => s.skillName).join(', ')}`)
+      }
+    }
+  } catch (err) {
+    console.error('[scheduler] Skill health check error:', err instanceof Error ? err.message : err)
   }
 }
