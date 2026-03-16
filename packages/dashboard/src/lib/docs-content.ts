@@ -70,7 +70,17 @@ export const docsSections: Array<{ title: string; icon: string; slugs: string[] 
   {
     title: 'Configuration',
     icon: 'tune',
-    slugs: ['notifications', 'teams-auth', 'billing'],
+    slugs: ['notifications', 'teams-auth', 'billing', 'integrations', 'brand-kit', 'api-keys'],
+  },
+  {
+    title: 'Workspace',
+    icon: 'workspaces',
+    slugs: ['workspace', 'workspace/files', 'workspace/visual-editor'],
+  },
+  {
+    title: 'Team Collaboration',
+    icon: 'groups',
+    slugs: ['team-collaboration', 'team-collaboration/chat', 'team-collaboration/roles'],
   },
   {
     title: 'Deployment',
@@ -2298,6 +2308,414 @@ Context: "I'm on the checkout page at example.com ordering the widgets you reque
         LI({ children: 'Use service accounts when possible \u2014 record logins for dedicated bot/service accounts rather than personal accounts.' }),
         LI({ children: 'Review the audit log \u2014 check which agents and users are accessing which saved sessions.' }),
       ] }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // KEYBOARD SHORTCUTS
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // INTEGRATIONS
+  // ---------------------------------------------------------------------------
+  'integrations': {
+    slug: 'integrations',
+    title: 'Integrations',
+    section: 'Configuration',
+    description: 'Connect third-party services and bring your own API keys.',
+    keywords: ['integrations', 'api keys', 'byok', 'third-party', 'connect', 'services', 'providers'],
+    content: () => [
+      H2({ children: 'Overview' }),
+      P({ children: 'YokeBot integrates with dozens of third-party services so your agents can search the web, send emails, query CRMs, and more. Manage all connections from Settings \u2192 Integrations.' }),
+
+      H2({ children: 'Integration Categories' }),
+      Table({
+        headers: ['Category', 'Examples'],
+        rows: [
+          ['Search', 'Tavily, Brave Search, Serper'],
+          ['Communication', 'Slack, Discord, Email (SMTP)'],
+          ['CRM', 'HubSpot, Salesforce, Pipedrive'],
+          ['Productivity', 'Notion, Google Workspace, Airtable'],
+          ['Development', 'GitHub, GitLab, Linear, Jira'],
+          ['Analytics', 'Google Analytics, Mixpanel, PostHog'],
+          ['Finance', 'Stripe, QuickBooks, Plaid'],
+          ['Media', 'Cloudinary, Unsplash, Pexels'],
+          ['AI Services', 'OpenAI, Anthropic, DeepInfra, OpenRouter'],
+        ],
+      }),
+
+      H2({ children: 'Connecting a Service' }),
+      OL({ children: [
+        LI({ children: 'Go to Settings \u2192 Integrations.' }),
+        LI({ children: 'Find the service you want to connect.' }),
+        LI({ children: 'Enter your API key or OAuth credentials.' }),
+        LI({ children: 'Click Save. The integration is now available to all agents on your team.' }),
+      ] }),
+
+      H2({ children: 'Bring Your Own Key (BYOK)' }),
+      P({ children: 'You can supply your own API keys for any supported provider. This is useful if you already have an account with a provider or want to use your own usage limits and billing.' }),
+      Warning({ children: 'Subscriptions like Claude Max or ChatGPT Pro do not include API access. You need a separate API-level account from the provider (e.g., console.anthropic.com or platform.openai.com) to obtain keys that work with YokeBot.' }),
+
+      H2({ children: 'Security' }),
+      P({ children: 'All credentials are encrypted at rest using AES-256-GCM with team-scoped encryption keys. Keys are never exposed in logs, API responses, or the browser \u2014 the dashboard only shows a masked preview.' }),
+
+      H2({ children: 'How Agents Use Integrations' }),
+      P({ children: 'When an agent invokes a skill that requires an external service (e.g., web search, sending a Slack message), the engine automatically resolves the correct credentials from the team\u2019s connected integrations. No manual wiring is needed \u2014 connect once and every agent on the team can use it.' }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // BRAND KIT
+  // ---------------------------------------------------------------------------
+  'brand-kit': {
+    slug: 'brand-kit',
+    title: 'Brand Kit',
+    section: 'Configuration',
+    description: 'Customize the look and feel of apps built by BuilderBot.',
+    keywords: ['brand', 'theme', 'colors', 'typography', 'fonts', 'design', 'brand kit', 'presets'],
+    content: () => [
+      H2({ children: 'What is the Brand Kit?' }),
+      P({ children: 'The Brand Kit controls the visual identity of sandbox apps created by BuilderBot. When BuilderBot generates a new app, it reads your team\u2019s Brand Kit settings and applies them automatically \u2014 colors, fonts, border radii, spacing, and more.' }),
+
+      H2({ children: 'Presets' }),
+      P({ children: 'Start with one of five built-in presets and customize from there:' }),
+      UL({ children: [
+        LI({ children: 'SaaS \u2014 clean and professional with a blue primary palette' }),
+        LI({ children: 'E-commerce \u2014 bold product-focused layout with accent highlights' }),
+        LI({ children: 'Portfolio \u2014 minimal and elegant with generous whitespace' }),
+        LI({ children: 'Dashboard \u2014 data-dense with muted tones and compact spacing' }),
+        LI({ children: 'Minimal \u2014 stripped-down black and white with a focus on typography' }),
+      ] }),
+
+      H2({ children: 'Customizable Properties' }),
+      H3({ children: 'Colors' }),
+      P({ children: 'Define up to six color roles that propagate throughout generated apps:' }),
+      Table({
+        headers: ['Role', 'Description'],
+        rows: [
+          ['Primary', 'Buttons, links, active states'],
+          ['Secondary', 'Secondary actions, badges, tags'],
+          ['Accent', 'Highlights, callouts, attention-grabbing elements'],
+          ['Background', 'Page and section backgrounds'],
+          ['Surface', 'Cards, modals, dropdown menus'],
+          ['Text', 'Default body text and headings'],
+        ],
+      }),
+
+      H3({ children: 'Typography' }),
+      UL({ children: [
+        LI({ children: '100+ Google Fonts available out of the box' }),
+        LI({ children: 'Custom font upload support (WOFF2, OTF, TTF)' }),
+        LI({ children: 'Separate heading and body font selections' }),
+        LI({ children: 'Configurable heading style: weight, letter-spacing, text-transform' }),
+      ] }),
+
+      H3({ children: 'Components' }),
+      UL({ children: [
+        LI({ children: 'Border radius \u2014 from sharp corners to fully rounded' }),
+        LI({ children: 'Spacing scale \u2014 compact, comfortable, or spacious' }),
+        LI({ children: 'Button style \u2014 filled, outlined, ghost, or gradient' }),
+        LI({ children: 'Card style \u2014 flat, elevated, bordered, or glass' }),
+      ] }),
+
+      H2({ children: 'Live Preview' }),
+      P({ children: 'All changes update in real-time in the preview panel on the right side of the Brand Kit page. You can see exactly how your choices affect a sample app layout before saving.' }),
+
+      H2({ children: 'Scope' }),
+      P({ children: 'Brand Kit settings are saved per-team. Each team can have its own visual identity, and changes apply to all future apps built by BuilderBot for that team. Existing apps are not retroactively changed.' }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // API KEYS
+  // ---------------------------------------------------------------------------
+  'api-keys': {
+    slug: 'api-keys',
+    title: 'API Keys',
+    section: 'Configuration',
+    description: 'Create and manage API keys for external integrations.',
+    keywords: ['api keys', 'tokens', 'zapier', 'ci/cd', 'automation', 'external', 'access'],
+    content: () => [
+      H2({ children: 'Overview' }),
+      P({ children: 'API keys let you connect external tools \u2014 Zapier, CI/CD pipelines, custom applications \u2014 to your YokeBot team programmatically. Manage keys from Settings \u2192 API Keys.' }),
+
+      H2({ children: 'Creating a Key' }),
+      OL({ children: [
+        LI({ children: 'Go to Settings \u2192 API Keys.' }),
+        LI({ children: 'Click "Create API Key".' }),
+        LI({ children: 'Give the key a descriptive label (e.g., "Zapier Production", "CI/CD Pipeline").' }),
+        LI({ children: 'Choose scoped permissions (see below).' }),
+        LI({ children: 'Click Create. The full key is displayed once \u2014 copy it immediately.' }),
+      ] }),
+      Warning({ children: 'The full API key is shown only at creation time. If you lose it, you must regenerate or create a new key.' }),
+
+      H2({ children: 'Key Format' }),
+      P({ children: ['All keys use the prefix ', Code({ children: 'yk_live_' }), ' followed by a random string. Example:'] }),
+      CodeBlock({ language: 'text', children: 'yk_live_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6' }),
+
+      H2({ children: 'Scoped Permissions' }),
+      P({ children: 'Each key can be scoped to specific resources and actions:' }),
+      Table({
+        headers: ['Scope', 'Description'],
+        rows: [
+          ['Full Access', 'Read and write all resources \u2014 equivalent to admin access'],
+          ['Agents (read)', 'List and view agent configurations'],
+          ['Agents (write)', 'Create, update, and delete agents'],
+          ['Tasks (read)', 'List and view tasks'],
+          ['Tasks (write)', 'Create, update, and delete tasks'],
+          ['Chat (read)', 'Read chat messages and history'],
+          ['Chat (write)', 'Send messages and mentions'],
+          ['Files (read)', 'List and download workspace files'],
+          ['Files (write)', 'Upload and delete workspace files'],
+        ],
+      }),
+
+      H2({ children: 'Security' }),
+      UL({ children: [
+        LI({ children: 'Keys are hashed with SHA-256 before storage \u2014 YokeBot never stores the raw key.' }),
+        LI({ children: 'Keys are shown once at creation and cannot be retrieved afterward.' }),
+        LI({ children: 'All API key operations (create, regenerate, revoke, delete) are logged in the activity log.' }),
+      ] }),
+
+      H2({ children: 'Key Rotation' }),
+      P({ children: 'To rotate a key, click "Regenerate" next to the key in the list. This invalidates the old key immediately and generates a new one. Update your external integrations with the new key before the old one stops working.' }),
+      Tip({ children: 'Consider creating a second key before revoking the old one to avoid downtime during rotation.' }),
+
+      H2({ children: 'Revoke vs Delete' }),
+      UL({ children: [
+        LI({ children: 'Revoke \u2014 disables the key immediately but keeps it in the list for audit purposes. You can re-enable a revoked key.' }),
+        LI({ children: 'Delete \u2014 permanently removes the key and its audit history. This action cannot be undone.' }),
+      ] }),
+
+      H2({ children: 'Permissions' }),
+      P({ children: 'Only team admins can create, regenerate, revoke, or delete API keys. Members and viewers cannot access the API Keys settings page.' }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // WORKSPACE
+  // ---------------------------------------------------------------------------
+  'workspace': {
+    slug: 'workspace',
+    title: 'Workspace Overview',
+    section: 'Workspace',
+    description: 'The unified command center for managing your AI workforce.',
+    keywords: ['workspace', 'command center', 'dashboard', 'panels', 'overview'],
+    content: () => [
+      H2({ children: 'Your Command Center' }),
+      P({ children: 'The Workspace is a single-screen hub where you manage your entire AI workforce. Instead of switching between separate pages for chat, tasks, files, and data, everything lives in one resizable, multi-panel layout.' }),
+
+      H2({ children: 'Panels' }),
+      Table({
+        headers: ['Panel', 'Description'],
+        rows: [
+          ['Team Chat', 'Communicate with agents and team members in real time'],
+          ['Tasks', 'View and manage tasks in list or kanban mode'],
+          ['Files', 'Browse, upload, and preview workspace files'],
+          ['Data Tables', 'View and edit structured data created by agents'],
+          ['Browser', 'Watch or control live browser automation sessions'],
+          ['Activity Log', 'Audit trail of every agent action and system event'],
+        ],
+      }),
+      P({ children: 'Click any panel tab to switch views, or drag panel dividers to resize them to your liking.' }),
+
+      H2({ children: 'Real-Time Updates' }),
+      P({ children: 'The Workspace uses Server-Sent Events (SSE) to stream updates in real time. When an agent completes a task, posts a message, or creates a file, you see it immediately without refreshing the page.' }),
+
+      H2({ children: 'Sandbox App Preview' }),
+      P({ children: 'When BuilderBot creates or updates a sandbox app, the preview panel renders it live inside the Workspace. You can interact with the app, annotate it with the visual editor, or send feedback directly to the agent.' }),
+
+      H2({ children: 'Related Pages' }),
+      UL({ children: [
+        LI({ children: A({ href: '/docs/workspace/files', children: 'Workspace Files' }) }),
+        LI({ children: A({ href: '/docs/workspace/visual-editor', children: 'Visual Editor' }) }),
+        LI({ children: A({ href: '/docs/team-collaboration/chat', children: 'Team Chat' }) }),
+      ] }),
+    ],
+  },
+
+  'workspace/files': {
+    slug: 'workspace/files',
+    title: 'Workspace Files',
+    section: 'Workspace',
+    description: 'Manage files uploaded by humans and generated by agents.',
+    keywords: ['files', 'upload', 'workspace', 'file viewer', 'documents', 'search'],
+    content: () => [
+      H2({ children: 'File Management' }),
+      P({ children: 'The Files panel in the Workspace shows every file associated with your team \u2014 documents uploaded by humans, code generated by agents, images, spreadsheets, and more. Files are organized in a tree view with directories and search.' }),
+
+      H2({ children: 'Uploading Files' }),
+      P({ children: 'Click the upload button (top-right of the Files panel) to upload files from your computer. You can also drag and drop files directly into the panel. Uploaded files are immediately available to all agents and team members.' }),
+
+      H2({ children: 'File Viewer' }),
+      P({ children: 'Click any file to open it in the built-in viewer. Supported preview types include:' }),
+      UL({ children: [
+        LI({ children: 'Code \u2014 syntax-highlighted preview for all common languages' }),
+        LI({ children: 'Images \u2014 PNG, JPG, SVG, GIF, and WebP' }),
+        LI({ children: 'Markdown \u2014 rendered with full formatting support' }),
+        LI({ children: 'Plain text \u2014 text files, logs, CSVs' }),
+      ] }),
+
+      H2({ children: 'Unread Notifications' }),
+      P({ children: 'When an agent creates or modifies a file, a blue dot appears next to it in the file tree. This makes it easy to spot new output without scrolling through the activity log.' }),
+
+      H2({ children: 'Search' }),
+      P({ children: 'Use the search bar at the top of the Files panel to filter files by name. You can also use the global search (Cmd+K) and type "in:files" to search workspace files from anywhere in the app.' }),
+    ],
+  },
+
+  'workspace/visual-editor': {
+    slug: 'workspace/visual-editor',
+    title: 'Visual Editor',
+    section: 'Workspace',
+    description: 'Annotate and edit sandbox apps visually from the Workspace.',
+    keywords: ['visual editor', 'annotation', 'edit', 'draw', 'design', 'sandbox', 'css'],
+    content: () => [
+      H2({ children: 'Overview' }),
+      P({ children: 'The Visual Editor lets you interact with sandbox apps directly inside the Workspace preview panel. It has two modes: Annotation mode for giving feedback, and Edit mode for making live style changes.' }),
+
+      H2({ children: 'Annotation Mode' }),
+      P({ children: 'Use annotation mode to mark up the app preview and send visual feedback to your agents:' }),
+      UL({ children: [
+        LI({ children: 'Draw rectangles to highlight areas of interest' }),
+        LI({ children: 'Add arrows to point at specific elements' }),
+        LI({ children: 'Freehand drawing for quick sketches and circles' }),
+        LI({ children: 'Text comments placed directly on the preview' }),
+        LI({ children: '"Send to Bot" button \u2014 captures annotations as a screenshot and posts it to the agent in chat' }),
+      ] }),
+
+      H2({ children: 'Edit Mode' }),
+      P({ children: 'Edit mode lets you modify the app\u2019s visual styles without writing code:' }),
+      OL({ children: [
+        LI({ children: 'Hover over elements to see a highlight outline.' }),
+        LI({ children: 'Click an element to select it.' }),
+        LI({ children: 'Use the style panel to adjust typography, colors, spacing, and borders.' }),
+        LI({ children: 'Changes persist to the app source and are visible on reload.' }),
+      ] }),
+
+      H3({ children: 'Editable Styles' }),
+      UL({ children: [
+        LI({ children: 'Typography \u2014 font family, size, weight, line height, color' }),
+        LI({ children: 'Colors \u2014 background, text, border colors with a color picker' }),
+        LI({ children: 'Spacing \u2014 margin and padding on all four sides' }),
+        LI({ children: 'Borders \u2014 width, style, radius, and color' }),
+      ] }),
+
+      H2({ children: 'Autosave' }),
+      P({ children: 'Changes are saved automatically. A timestamp toast appears in the bottom-right corner confirming when the last save occurred.' }),
+
+      H2({ children: 'Undo / Redo' }),
+      P({ children: 'The editor maintains a 50-step undo/redo history that persists across page refreshes. Use Cmd+Z to undo and Cmd+Shift+Z to redo.' }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // TEAM COLLABORATION
+  // ---------------------------------------------------------------------------
+  'team-collaboration': {
+    slug: 'team-collaboration',
+    title: 'Team Collaboration',
+    section: 'Team Collaboration',
+    description: 'Work together with multiple humans and AI agents on a shared team.',
+    keywords: ['team', 'collaboration', 'invite', 'members', 'shared', 'multi-user'],
+    content: () => [
+      H2({ children: 'Overview' }),
+      P({ children: 'YokeBot teams are shared workspaces where multiple humans and AI agents collaborate side by side. Every team member sees the same chat, tasks, files, and agents \u2014 so everyone stays in sync.' }),
+
+      H2({ children: 'Inviting Members' }),
+      OL({ children: [
+        LI({ children: 'Go to Settings \u2192 Team.' }),
+        LI({ children: 'Click "Invite Member".' }),
+        LI({ children: 'Enter the person\u2019s email address.' }),
+        LI({ children: 'Choose a role: Admin, Member, or Viewer.' }),
+        LI({ children: 'The invitee receives an email with a link to join.' }),
+      ] }),
+
+      H2({ children: 'Plan Limits' }),
+      P({ children: 'All plans include unlimited agents and unlimited team members. There is no per-seat charge \u2014 invite as many people as you need.' }),
+
+      H2({ children: 'Shared Workspace' }),
+      P({ children: 'Team members share access to:' }),
+      UL({ children: [
+        LI({ children: 'Team Chat \u2014 a single channel visible to all members and agents' }),
+        LI({ children: 'Tasks \u2014 assign, track, and manage work across the team' }),
+        LI({ children: 'Files \u2014 upload and access shared workspace files' }),
+        LI({ children: 'Agents \u2014 create, configure, and interact with all agents on the team' }),
+      ] }),
+
+      H2({ children: 'Related Pages' }),
+      UL({ children: [
+        LI({ children: A({ href: '/docs/team-collaboration/chat', children: 'Team Chat' }) }),
+        LI({ children: A({ href: '/docs/team-collaboration/roles', children: 'Roles & Permissions' }) }),
+      ] }),
+    ],
+  },
+
+  'team-collaboration/chat': {
+    slug: 'team-collaboration/chat',
+    title: 'Team Chat',
+    section: 'Team Collaboration',
+    description: 'Communicate with agents and team members in real time.',
+    keywords: ['chat', 'messaging', 'mentions', 'dm', 'threads', 'reactions', 'team chat'],
+    content: () => [
+      H2({ children: 'Team-Wide Channel' }),
+      P({ children: 'Every team has a shared chat channel visible to all members and agents. This is the primary communication hub \u2014 post updates, ask questions, and coordinate work in one place.' }),
+
+      H2({ children: '@Mentions' }),
+      P({ children: 'Type @ followed by an agent\u2019s name to mention it. Mentioned agents wake up immediately \u2014 no need to wait for the next heartbeat cycle. You can also @mention human team members to notify them.' }),
+      Tip({ children: '@mentions are the fastest way to get an agent\u2019s attention. The agent receives the full message context and responds in the same thread.' }),
+
+      H2({ children: 'Human-to-Human Chat' }),
+      P({ children: 'Team members can chat with each other directly in the team channel. Agents only respond when explicitly @mentioned or when a message is relevant to their assigned tasks.' }),
+
+      H2({ children: 'Direct Messages' }),
+      P({ children: 'Click on any agent\u2019s name to open a direct message thread. DMs are private conversations between you and a single agent \u2014 other team members and agents cannot see them.' }),
+
+      H2({ children: 'Task-Specific Threads' }),
+      P({ children: 'When an agent is working on a task, a dedicated thread channel is created for that task. All updates, questions, and file outputs related to the task appear in the thread, keeping the main chat clean.' }),
+
+      H2({ children: 'Reactions & Threading' }),
+      P({ children: 'React to messages with emoji reactions and reply in threads to keep conversations organized. Threaded replies are nested under the original message.' }),
+    ],
+  },
+
+  'team-collaboration/roles': {
+    slug: 'team-collaboration/roles',
+    title: 'Roles & Permissions',
+    section: 'Team Collaboration',
+    description: 'Understand the Admin, Member, and Viewer roles and what each can do.',
+    keywords: ['roles', 'permissions', 'admin', 'member', 'viewer', 'access control'],
+    content: () => [
+      H2({ children: 'Role Overview' }),
+      Table({
+        headers: ['Role', 'Description'],
+        rows: [
+          ['Admin', 'Full control over the team \u2014 manage members, billing, API keys, integrations, and all workspace resources'],
+          ['Member', 'Create and manage agents, tasks, files, and chat \u2014 everything needed for day-to-day work'],
+          ['Viewer', 'Read-only access to the workspace \u2014 can view chat, tasks, files, and agents but cannot create or modify anything'],
+        ],
+      }),
+
+      H2({ children: 'Detailed Permissions' }),
+      Table({
+        headers: ['Action', 'Admin', 'Member', 'Viewer'],
+        rows: [
+          ['Create and manage agents', '\u2713', '\u2713', '\u2014'],
+          ['Create and manage tasks', '\u2713', '\u2713', '\u2014'],
+          ['Send chat messages', '\u2713', '\u2713', '\u2014'],
+          ['Upload and manage files', '\u2713', '\u2713', '\u2014'],
+          ['View workspace (chat, tasks, files)', '\u2713', '\u2713', '\u2713'],
+          ['Invite and remove members', '\u2713', '\u2014', '\u2014'],
+          ['Change member roles', '\u2713', '\u2014', '\u2014'],
+          ['Manage API keys', '\u2713', '\u2014', '\u2014'],
+          ['Manage integrations and credentials', '\u2713', '\u2014', '\u2014'],
+          ['Manage billing and subscriptions', '\u2713', '\u2014', '\u2014'],
+          ['Manage Session Vault recordings', '\u2713', '\u2014', '\u2014'],
+        ],
+      }),
+
+      H2({ children: 'Changing Roles' }),
+      P({ children: 'Admins can change any member\u2019s role from Settings \u2192 Team. Click the role badge next to a member\u2019s name to select a new role. Changes take effect immediately.' }),
+      Warning({ children: 'Every team must have at least one admin. You cannot remove the admin role from the last remaining admin.' }),
     ],
   },
 
