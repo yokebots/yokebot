@@ -85,7 +85,10 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
         const result = await engine.getBrowserScreenshot(activeSessionId)
         setScreenshot(result.screenshot)
         setCurrentUrl(result.url)
-        setUrlInput(result.url)
+        // Only update URL input if the user isn't actively editing it
+        if (document.activeElement !== urlInputRef.current) {
+          setUrlInput(result.url)
+        }
       } catch { /* ignore */ }
     }, 2000)
 
