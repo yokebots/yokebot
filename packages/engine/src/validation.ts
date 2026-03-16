@@ -67,6 +67,7 @@ export const CreateTaskSchema = z.object({
   description: z.string().max(5000).optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   assignedAgentId: z.string().max(200).optional(),
+  assignedUserId: z.string().max(200).optional(),
   parentTaskId: z.string().max(200).optional(),
   deadline: futureDeadline.optional(),
 })
@@ -78,6 +79,7 @@ export const UpdateTaskSchema = z.object({
   blockedReason: z.enum(['max_retries', 'approval_pending', 'dependency', 'manual']).optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   assignedAgentId: z.string().max(200).nullable().optional(),
+  assignedUserId: z.string().max(200).nullable().optional(),
   deadline: futureDeadline.nullable().optional(),
 })
 

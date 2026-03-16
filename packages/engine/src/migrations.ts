@@ -2004,6 +2004,22 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 45,
+    name: 'add_missing_rls_to_billing_tables',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        // These tables were created in migrations 4 and 5 without RLS.
+        // Supabase exposes public schema via PostgREST — without RLS anyone can read/write.
+        await db.run('ALTER TABLE IF EXISTS team_subscriptions ENABLE ROW LEVEL SECURITY')
+        await db.run('ALTER TABLE IF EXISTS team_credits ENABLE ROW LEVEL SECURITY')
+        await db.run('ALTER TABLE IF EXISTS credit_transactions ENABLE ROW LEVEL SECURITY')
+        await db.run('ALTER TABLE IF EXISTS model_credit_costs ENABLE ROW LEVEL SECURITY')
+        await db.run('ALTER TABLE IF EXISTS skill_credit_costs ENABLE ROW LEVEL SECURITY')
+      }
+      // SQLite does not have RLS — no-op
+    },
+  },
 ]
 
 /**

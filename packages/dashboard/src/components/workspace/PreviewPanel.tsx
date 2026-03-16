@@ -129,6 +129,10 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
   useEffect(() => {
     if (editMode !== 'edit') return
     const handler = (e: MessageEvent) => {
+      // Validate origin: only accept messages from our own engine proxy
+      const expectedOrigin = new URL(engine.getBaseUrl()).origin
+      if (e.origin !== expectedOrigin && e.origin !== window.location.origin) return
+
       const data = e.data
       if (!data || typeof data.type !== 'string') return
 

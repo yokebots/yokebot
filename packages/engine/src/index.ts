@@ -1061,6 +1061,14 @@ async function main() {
     if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const body = validate(CreateTaskSchema, req.body)
+
+    // Verify assignedUserId is a member of this team (prevent cross-team assignment)
+    if (body.assignedUserId) {
+      const { getMember } = await import('./teams.ts')
+      const member = await getMember(db, teamId, body.assignedUserId)
+      if (!member) return res.status(400).json({ error: 'Assigned user is not a member of this team' })
+    }
+
     const task = await createTask(db, teamId, body.title, body)
     res.status(201).json(task)
   })
@@ -1070,6 +1078,13 @@ async function main() {
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
     const body = validate(UpdateTaskSchema, req.body)
+
+    // Verify assignedUserId is a member of this team (prevent cross-team assignment)
+    if (body.assignedUserId) {
+      const { getMember } = await import('./teams.ts')
+      const member = await getMember(db, teamId, body.assignedUserId)
+      if (!member) return res.status(400).json({ error: 'Assigned user is not a member of this team' })
+    }
 
     // When unblocking (status changes FROM blocked to something else), clear blocked fields
     const existing = await getTask(db, req.params.id)
@@ -2578,8 +2593,11 @@ async function main() {
 
   // ===== Visual Editor: apply-style + import =====
 
+  const sandboxEditLimiter = rateLimit({ windowMs: 60_000, max: 60, keyGenerator: (req) => req.user?.activeTeamId ?? ipKeyGenerator(req.ip ?? '0.0.0.0') })
+
   // Persist visual style edits to sandbox source files
-  app.post('/api/sandbox/apply-style', async (req, res) => {
+  app.post('/api/sandbox/apply-style', sandboxEditLimiter, async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const { sourceFile, sourceLine, changes } = req.body as {
       sourceFile: string
@@ -2598,6 +2616,14 @@ async function main() {
       let filePath = sourceFile
       if (!filePath.startsWith('/')) filePath = `/home/daytona/app/${filePath}`
 
+      // Prevent path traversal — resolved path must stay inside /home/daytona/app/
+      const { resolve: pathResolve } = await import('node:path')
+      const resolved = pathResolve(filePath)
+      if (!resolved.startsWith('/home/daytona/app/')) {
+        return res.status(400).json({ error: 'Invalid source file path' })
+      }
+      filePath = resolved
+
       let content = await sandboxReadFile(db, teamId, filePath)
 
       for (const change of changes) {
@@ -2613,7 +2639,8 @@ async function main() {
   })
 
   // Persist inline text edits to sandbox source files
-  app.post('/api/sandbox/apply-text', async (req, res) => {
+  app.post('/api/sandbox/apply-text', sandboxEditLimiter, async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const { sourceFile, sourceLine, oldText, newText } = req.body as {
       sourceFile: string
@@ -2629,6 +2656,14 @@ async function main() {
 
       let filePath = sourceFile
       if (!filePath.startsWith('/')) filePath = `/home/daytona/app/${filePath}`
+
+      // Prevent path traversal — resolved path must stay inside /home/daytona/app/
+      const { resolve: pathResolve } = await import('node:path')
+      const resolved = pathResolve(filePath)
+      if (!resolved.startsWith('/home/daytona/app/')) {
+        return res.status(400).json({ error: 'Invalid source file path' })
+      }
+      filePath = resolved
 
       const content = await sandboxReadFile(db, teamId, filePath)
       const lines = content.split('\n')
@@ -2692,7 +2727,8 @@ async function main() {
   })
 
   // Import an external project (GitHub/GitLab URL) into sandbox
-  app.post('/api/sandbox/import', async (req, res) => {
+  app.post('/api/sandbox/import', sandboxEditLimiter, async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     const { url: repoUrl } = req.body as { url: string }
     if (!repoUrl) return res.status(400).json({ error: 'url is required' })

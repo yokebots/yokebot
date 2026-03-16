@@ -358,6 +358,9 @@
   // ---- Message listener ----
 
   window.addEventListener('message', function (e) {
+    // Only accept messages from the parent (dashboard) origin — reject cross-origin spoofing
+    if (e.source !== window.parent) return
+
     var data = e.data
     if (!data || typeof data.type !== 'string') return
 
