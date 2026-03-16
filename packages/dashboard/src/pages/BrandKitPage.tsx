@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import * as engine from '@/lib/engine'
 import type { BrandKit } from '@/lib/engine'
 import { SettingsLayout } from '@/components/SettingsLayout'
 
-type BrandKitForm = Omit<BrandKit, 'teamId'>
+type BrandKitForm = Omit<BrandKit, 'teamId'> & { preset?: string | null }
 
 const DEFAULT_KIT: BrandKitForm = {
   primaryColor: '#6366f1',
@@ -81,12 +81,34 @@ const PRESETS: { name: string; key: string; kit: BrandKitForm }[] = [
   },
 ]
 
-const FONT_OPTIONS = [
-  'Inter', 'DM Sans', 'Playfair Display', 'Poppins', 'Roboto',
-  'Space Grotesk', 'Montserrat', 'Lora',
+// Top Google Fonts sorted by popularity
+const GOOGLE_FONTS = [
+  'Inter', 'Roboto', 'Open Sans', 'Noto Sans', 'Montserrat', 'Lato', 'Poppins',
+  'Roboto Condensed', 'Source Sans 3', 'Oswald', 'Raleway', 'Nunito', 'Roboto Mono',
+  'Ubuntu', 'Nunito Sans', 'Rubik', 'Playfair Display', 'Merriweather', 'PT Sans',
+  'Roboto Slab', 'Noto Serif', 'Kanit', 'Work Sans', 'Lora', 'DM Sans', 'Fira Sans',
+  'Quicksand', 'Barlow', 'Mulish', 'Manrope', 'IBM Plex Sans', 'PT Serif', 'Karla',
+  'Heebo', 'Noto Sans JP', 'Libre Franklin', 'Libre Baskerville', 'Josefin Sans',
+  'Hind', 'Arimo', 'Cabin', 'Dosis', 'Fira Code', 'Titillium Web', 'Archivo',
+  'Mukta', 'Source Code Pro', 'Abel', 'Nanum Gothic', 'Exo 2', 'Overpass',
+  'Bitter', 'Assistant', 'Cairo', 'Varela Round', 'Maven Pro', 'Space Grotesk',
+  'Outfit', 'Comfortaa', 'Signika', 'Catamaran', 'Lexend', 'Crimson Text',
+  'Prompt', 'EB Garamond', 'Cormorant Garamond', 'Figtree', 'Sora', 'Plus Jakarta Sans',
+  'Jost', 'Urbanist', 'Red Hat Display', 'Geologica', 'Onest', 'Bricolage Grotesque',
+  'Geist', 'Space Mono', 'JetBrains Mono', 'Inconsolata', 'Anonymous Pro',
+  'IBM Plex Mono', 'Courier Prime', 'DM Mono',
+  // Display & decorative
+  'Bebas Neue', 'Righteous', 'Lobster', 'Pacifico', 'Permanent Marker',
+  'Satisfy', 'Dancing Script', 'Shadows Into Light', 'Great Vibes', 'Caveat',
+  'Architects Daughter', 'Sacramento', 'Abril Fatface', 'Alfa Slab One',
+  'Fredoka', 'Lilita One', 'Bungee', 'Bangers',
+  // Serif
+  'Spectral', 'Cardo', 'Old Standard TT', 'Vollkorn', 'Alegreya',
+  'Cormorant', 'Literata', 'Source Serif 4', 'Noto Serif Display',
+  'DM Serif Display', 'DM Serif Text', 'Zilla Slab',
 ]
 
-const FONT_SIZE_OPTIONS = ['14px', '16px', '18px']
+const FONT_SIZE_OPTIONS = ['12px', '14px', '16px', '18px', '20px']
 
 const COLOR_FIELDS: { key: keyof BrandKitForm; label: string }[] = [
   { key: 'primaryColor', label: 'Primary' },
@@ -96,6 +118,178 @@ const COLOR_FIELDS: { key: keyof BrandKitForm; label: string }[] = [
   { key: 'surfaceColor', label: 'Surface' },
   { key: 'textColor', label: 'Text' },
 ]
+
+// Load a Google Font dynamically
+const loadedFonts = new Set<string>()
+function loadGoogleFont(fontName: string) {
+  if (loadedFonts.has(fontName)) return
+  loadedFonts.add(fontName)
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontName)}:wght@300;400;500;600;700&display=swap`
+  document.head.appendChild(link)
+}
+
+// Searchable font picker component
+function FontPicker({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [customMode, setCustomMode] = useState(false)
+  const [customValue, setCustomValue] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+        setSearch('')
+        setCustomMode(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  useEffect(() => {
+    if (open && inputRef.current) inputRef.current.focus()
+  }, [open, customMode])
+
+  // Load currently selected font
+  useEffect(() => { loadGoogleFont(value) }, [value])
+
+  const filtered = GOOGLE_FONTS.filter((f) =>
+    f.toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-text-secondary">{label}</label>
+      <div ref={ref} className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex w-full items-center justify-between rounded-lg border border-border-subtle px-3 py-2 text-sm text-left focus:border-forest-green focus:outline-none hover:border-text-muted/40"
+        >
+          <span style={{ fontFamily: value }}>{value}</span>
+          <span className="material-symbols-outlined text-[16px] text-text-muted">
+            {open ? 'expand_less' : 'expand_more'}
+          </span>
+        </button>
+
+        {open && (
+          <div className="absolute z-50 mt-1 w-full rounded-lg border border-border-subtle bg-white shadow-lg">
+            <div className="border-b border-border-subtle p-2">
+              {customMode ? (
+                <div className="flex gap-1">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={customValue}
+                    onChange={(e) => setCustomValue(e.target.value)}
+                    placeholder="Enter any font name..."
+                    className="flex-1 rounded border border-border-subtle px-2 py-1.5 text-sm focus:border-forest-green focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && customValue.trim()) {
+                        loadGoogleFont(customValue.trim())
+                        onChange(customValue.trim())
+                        setOpen(false)
+                        setCustomMode(false)
+                        setCustomValue('')
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (customValue.trim()) {
+                        loadGoogleFont(customValue.trim())
+                        onChange(customValue.trim())
+                        setOpen(false)
+                        setCustomMode(false)
+                        setCustomValue('')
+                      }
+                    }}
+                    className="rounded bg-forest-green px-2 py-1 text-xs font-medium text-white"
+                  >
+                    Use
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setCustomMode(false); setCustomValue('') }}
+                    className="rounded border border-border-subtle px-2 py-1 text-xs text-text-muted"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-1">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search fonts..."
+                    className="flex-1 rounded border border-border-subtle px-2 py-1.5 text-sm focus:border-forest-green focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCustomMode(true)}
+                    className="shrink-0 rounded border border-border-subtle px-2 py-1 text-[11px] font-medium text-text-muted hover:bg-light-surface-alt"
+                  >
+                    Custom
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="max-h-64 overflow-y-auto py-1">
+              {filtered.length === 0 ? (
+                <div className="px-3 py-4 text-center text-xs text-text-muted">
+                  No fonts found.{' '}
+                  <button
+                    type="button"
+                    onClick={() => { setCustomMode(true); setCustomValue(search) }}
+                    className="text-forest-green underline"
+                  >
+                    Use custom font
+                  </button>
+                </div>
+              ) : (
+                filtered.map((f) => {
+                  // Preload font on hover for preview
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      onMouseEnter={() => loadGoogleFont(f)}
+                      onClick={() => {
+                        loadGoogleFont(f)
+                        onChange(f)
+                        setOpen(false)
+                        setSearch('')
+                      }}
+                      className={`flex w-full items-center justify-between px-3 py-2 text-sm transition-colors ${
+                        value === f
+                          ? 'bg-forest-green/10 text-forest-green font-medium'
+                          : 'text-text-main hover:bg-light-surface-alt'
+                      }`}
+                    >
+                      <span style={{ fontFamily: f }}>{f}</span>
+                      {value === f && (
+                        <span className="material-symbols-outlined text-[14px]">check</span>
+                      )}
+                    </button>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function PresetCard({ preset, active, onClick }: { preset: typeof PRESETS[number]; active: boolean; onClick: () => void }) {
   const k = preset.kit
@@ -151,7 +345,7 @@ function PresetCard({ preset, active, onClick }: { preset: typeof PRESETS[number
 }
 
 function LivePreview({ kit }: { kit: BrandKitForm }) {
-  const radius = kit.borderRadius
+  const radius = kit.borderRadius || '8px'
   const btnRadius = kit.buttonStyle === 'pill' ? '999px' : kit.buttonStyle === 'square' ? '0px' : radius
   const cardBorder = kit.cardStyle === 'bordered' ? `1px solid ${kit.primaryColor}33` : 'none'
   const cardShadow = kit.cardStyle === 'elevated'
@@ -166,10 +360,16 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
   const headingWeight = kit.headingStyle === 'bold' ? 700 : kit.headingStyle === 'light' ? 300 : 600
   const headingTransform = kit.headingStyle === 'uppercase' ? ('uppercase' as const) : ('none' as const)
 
+  // Load fonts for preview
+  useEffect(() => {
+    if (kit.headingFont) loadGoogleFont(kit.headingFont)
+    if (kit.bodyFont) loadGoogleFont(kit.bodyFont)
+  }, [kit.headingFont, kit.bodyFont])
+
   return (
     <div
       className="overflow-hidden rounded-lg border border-border-subtle"
-      style={{ backgroundColor: kit.backgroundColor, padding: spacing }}
+      style={{ backgroundColor: kit.backgroundColor || '#ffffff', padding: spacing }}
     >
       <p className="mb-3 text-xs font-medium text-text-muted">Live Preview</p>
       {/* Preview card */}
@@ -185,9 +385,9 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
       >
         <h3
           style={{
-            color: kit.textColor,
-            fontFamily: kit.headingFont,
-            fontSize: `calc(${kit.baseFontSize} * 1.25)`,
+            color: kit.textColor || '#0f172a',
+            fontFamily: `"${kit.headingFont}", sans-serif`,
+            fontSize: `calc(${kit.baseFontSize || '16px'} * 1.25)`,
             fontWeight: headingWeight,
             textTransform: headingTransform,
             marginBottom: '8px',
@@ -198,9 +398,9 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
         </h3>
         <p
           style={{
-            color: kit.textColor,
-            fontFamily: kit.bodyFont,
-            fontSize: kit.baseFontSize,
+            color: kit.textColor || '#0f172a',
+            fontFamily: `"${kit.bodyFont}", sans-serif`,
+            fontSize: kit.baseFontSize || '16px',
             opacity: 0.7,
             marginBottom: spacing,
             lineHeight: 1.5,
@@ -211,12 +411,12 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
         <div className="flex items-center gap-2">
           <button
             style={{
-              backgroundColor: kit.primaryColor,
+              backgroundColor: kit.primaryColor || '#6366f1',
               color: '#ffffff',
               borderRadius: btnRadius,
               padding: '8px 16px',
-              fontSize: kit.baseFontSize,
-              fontFamily: kit.bodyFont,
+              fontSize: kit.baseFontSize || '16px',
+              fontFamily: `"${kit.bodyFont}", sans-serif`,
               fontWeight: 500,
               border: 'none',
               cursor: 'pointer',
@@ -227,13 +427,13 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
           <button
             style={{
               backgroundColor: 'transparent',
-              color: kit.primaryColor,
+              color: kit.primaryColor || '#6366f1',
               borderRadius: btnRadius,
               padding: '8px 16px',
-              fontSize: kit.baseFontSize,
-              fontFamily: kit.bodyFont,
+              fontSize: kit.baseFontSize || '16px',
+              fontFamily: `"${kit.bodyFont}", sans-serif`,
               fontWeight: 500,
-              border: `1px solid ${kit.primaryColor}`,
+              border: `1px solid ${kit.primaryColor || '#6366f1'}`,
               cursor: 'pointer',
             }}
           >
@@ -247,9 +447,9 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
           <div key={c.key} className="flex flex-col items-center gap-1">
             <div
               className="h-5 w-5 rounded-full border border-black/10"
-              style={{ backgroundColor: kit[c.key] as string }}
+              style={{ backgroundColor: (kit[c.key] as string) || '#cccccc' }}
             />
-            <span style={{ fontSize: '9px', color: kit.textColor, opacity: 0.5 }}>{c.label}</span>
+            <span style={{ fontSize: '9px', color: kit.textColor || '#0f172a', opacity: 0.5 }}>{c.label}</span>
           </div>
         ))}
       </div>
@@ -271,7 +471,7 @@ export function BrandKitPage() {
   }, [])
 
   const updateField = <K extends keyof BrandKitForm>(key: K, value: BrandKitForm[K]) => {
-    setKit((prev) => ({ ...prev, [key]: value, preset: null }))
+    setKit((prev) => ({ ...prev, [key]: value, preset: 'custom' }))
   }
 
   const applyPreset = (preset: typeof PRESETS[number]) => {
@@ -327,13 +527,13 @@ export function BrandKitPage() {
                     <div className="flex items-center gap-2">
                       <input
                         type="color"
-                        value={kit[c.key] as string}
+                        value={(kit[c.key] as string) || '#000000'}
                         onChange={(e) => updateField(c.key, e.target.value)}
                         className="h-9 w-9 cursor-pointer rounded border border-border-subtle p-0.5"
                       />
                       <input
                         type="text"
-                        value={kit[c.key] as string}
+                        value={(kit[c.key] as string) || ''}
                         onChange={(e) => updateField(c.key, e.target.value)}
                         className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm font-mono focus:border-forest-green focus:outline-none"
                         maxLength={7}
@@ -347,33 +547,19 @@ export function BrandKitPage() {
             {/* Typography */}
             <div className="rounded-lg border border-border-subtle bg-white p-5">
               <h3 className="mb-1 text-sm font-bold text-text-main">Typography</h3>
-              <p className="mb-4 text-xs text-text-muted">Choose fonts and sizing for headings and body text.</p>
+              <p className="mb-4 text-xs text-text-muted">Choose from 100+ Google Fonts or enter any custom font name.</p>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">Heading Font</label>
-                    <select
-                      value={kit.headingFont}
-                      onChange={(e) => updateField('headingFont', e.target.value)}
-                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
-                    >
-                      {FONT_OPTIONS.map((f) => (
-                        <option key={f} value={f}>{f}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">Body Font</label>
-                    <select
-                      value={kit.bodyFont}
-                      onChange={(e) => updateField('bodyFont', e.target.value)}
-                      className="w-full rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
-                    >
-                      {FONT_OPTIONS.map((f) => (
-                        <option key={f} value={f}>{f}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <FontPicker
+                    label="Heading Font"
+                    value={kit.headingFont}
+                    onChange={(v) => updateField('headingFont', v)}
+                  />
+                  <FontPicker
+                    label="Body Font"
+                    value={kit.bodyFont}
+                    onChange={(v) => updateField('bodyFont', v)}
+                  />
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-text-secondary">Base Font Size</label>
