@@ -156,6 +156,64 @@ export async function sendWelcomeEmail(to: string, unsubscribeUrl: string): Prom
   })
 }
 
+// ---- Team invite email ----
+
+export async function sendInviteEmail(
+  to: string,
+  teamName: string,
+  inviterEmail: string,
+): Promise<{ id: string }> {
+  if (!RESEND_API_KEY) {
+    console.warn('[email] RESEND_API_KEY not set — skipping invite email to', to)
+    return { id: '' }
+  }
+
+  const dashboardUrl = process.env.DASHBOARD_URL ?? 'https://yokebot.com'
+  const signUpUrl = `${dashboardUrl}/signup`
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:32px 0;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;">
+        <tr><td style="background:#1a3a2a;padding:20px 24px;">
+          <span style="color:#ffffff;font-size:18px;font-weight:700;">YokeBot</span>
+        </td></tr>
+        <tr><td style="padding:24px;">
+          <h2 style="margin:0 0 12px;font-size:18px;color:#1a1a1a;">You've been invited to join ${escapeHtml(teamName)}</h2>
+          <p style="margin:0 0 8px;font-size:14px;color:#4a4a4a;line-height:1.6;">
+            ${escapeHtml(inviterEmail)} has invited you to collaborate on <strong>${escapeHtml(teamName)}</strong> on YokeBot.
+          </p>
+          <p style="margin:0 0 20px;font-size:14px;color:#4a4a4a;line-height:1.6;">
+            YokeBot lets teams work with AI agents that handle tasks across your business — from marketing to operations.
+          </p>
+          <a href="${signUpUrl}" style="display:inline-block;background:#1a3a2a;color:#ffffff;padding:12px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">Accept Invitation</a>
+          <p style="margin:16px 0 0;font-size:13px;color:#888888;">
+            Sign up with <strong>${escapeHtml(to)}</strong> to join the team automatically.
+          </p>
+        </td></tr>
+        <tr><td style="padding:16px 24px;border-top:1px solid #e5e5e5;">
+          <p style="margin:0;font-size:12px;color:#999999;">
+            If you weren't expecting this invitation, you can safely ignore this email.
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
+
+  return sendEmail({
+    to,
+    subject: `You've been invited to join ${teamName} on YokeBot`,
+    html,
+    from: 'YokeBot <noreply@mail.yokebot.com>',
+  })
+}
+
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }

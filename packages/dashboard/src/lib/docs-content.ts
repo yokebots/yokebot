@@ -30,7 +30,12 @@ export const docsSections: Array<{ title: string; icon: string; slugs: string[] 
   {
     title: 'Agents',
     icon: 'smart_toy',
-    slugs: ['agents', 'agents/heartbeat', 'agents/personality', 'agents/status'],
+    slugs: ['agents', 'agents/heartbeat', 'agents/personality', 'agents/status', 'agents/pre-built'],
+  },
+  {
+    title: 'Meetings',
+    icon: 'call',
+    slugs: ['meetings', 'meetings/meet-and-greet'],
   },
   {
     title: 'Skills',
@@ -70,7 +75,7 @@ export const docsSections: Array<{ title: string; icon: string; slugs: string[] 
   {
     title: 'Configuration',
     icon: 'tune',
-    slugs: ['notifications', 'teams-auth', 'billing', 'integrations', 'brand-kit', 'api-keys'],
+    slugs: ['notifications', 'teams-auth', 'billing', 'integrations', 'brand-kit', 'api-keys', 'model-providers'],
   },
   {
     title: 'Workspace',
@@ -479,6 +484,142 @@ After processing each document, post a summary in #data-imports.` }),
         LI({ children: 'Pause agents you are iterating on to avoid unexpected actions while you tweak the personality or skills.' }),
         LI({ children: 'Monitor the Error state in the agents list \u2014 it usually indicates a configuration problem that affects your whole team.' }),
         LI({ children: 'Use descriptive names and descriptions so it is easy to tell which agents are active and what they do.' }),
+      ] }),
+    ],
+  },
+
+  'agents/pre-built': {
+    slug: 'agents/pre-built',
+    title: 'Pre-Built Agents',
+    section: 'Agents',
+    description: 'Browse 40+ ready-made agent templates across every business function.',
+    keywords: ['pre-built', 'templates', 'marketplace', 'starter', 'advisorbot', 'categories'],
+    content: () => [
+      H2({ children: 'What Are Pre-Built Agents?' }),
+      P({ children: 'YokeBot ships with over 40 pre-built agent templates spanning every major business function. Each template is a fully configured starting point \u2014 complete with a personality prompt, recommended skills, and a suggested heartbeat interval \u2014 so you can deploy a capable agent in seconds instead of writing everything from scratch.' }),
+
+      H2({ children: 'Categories' }),
+      P({ children: 'Pre-built agents are organized into the following categories:' }),
+      UL({ children: [
+        LI({ children: 'Marketing' }),
+        LI({ children: 'Sales' }),
+        LI({ children: 'Customer Support' }),
+        LI({ children: 'HR' }),
+        LI({ children: 'Finance' }),
+        LI({ children: 'Operations' }),
+        LI({ children: 'Legal' }),
+        LI({ children: 'Engineering' }),
+        LI({ children: 'Design' }),
+        LI({ children: 'Content' }),
+        LI({ children: 'Analytics' }),
+        LI({ children: 'Strategy' }),
+      ] }),
+
+      H2({ children: 'What Each Template Includes' }),
+      UL({ children: [
+        LI({ children: 'Personality prompt \u2014 defines how the agent communicates and reasons.' }),
+        LI({ children: 'Recommended skills \u2014 the skill set best suited for the agent\'s role.' }),
+        LI({ children: 'Suggested heartbeat interval \u2014 how often the agent should check in autonomously.' }),
+      ] }),
+
+      H2({ children: 'How to Use a Pre-Built Agent' }),
+      OL({ children: [
+        LI({ children: 'Navigate to the Agents page and click "Add Agent".' }),
+        LI({ children: 'Browse the Pre-Built Agents catalog or search by name or category.' }),
+        LI({ children: 'Select a template to preview its personality, skills, and configuration.' }),
+        LI({ children: 'Customize the agent name, personality, or skills to fit your needs.' }),
+        LI({ children: 'Deploy the agent \u2014 it will begin working on its next heartbeat cycle.' }),
+      ] }),
+      Tip({ children: 'Templates are starting points. After creation, the agent is fully customizable \u2014 you can change its personality, swap skills, or adjust the heartbeat interval at any time.' }),
+
+      H2({ children: 'Availability' }),
+      P({ children: 'Some templates are free for all users (for example, AdvisorBot), while others require an active subscription. Templates marked as "Hosted Only" are available exclusively on YokeBot Cloud because they depend on cloud-specific infrastructure such as managed model providers or the Cartesia TTS pipeline.' }),
+    ],
+  },
+
+  // ---------------------------------------------------------------------------
+  // MEETINGS
+  // ---------------------------------------------------------------------------
+  'meetings': {
+    slug: 'meetings',
+    title: 'Meetings Overview',
+    section: 'Meetings',
+    description: 'Real-time voice collaboration between humans and AI agents.',
+    keywords: ['meetings', 'voice', 'real-time', 'tts', 'stt', 'cartesia', 'microphone'],
+    content: () => [
+      H2({ children: 'What Are Meetings?' }),
+      P({ children: 'Meetings bring humans and AI agents together in real-time voice conversations. Instead of reading and writing text, agents speak aloud using Cartesia Sonic 3 text-to-speech and humans participate via their microphone using speech-to-text.' }),
+      P({ children: 'This creates a natural, high-bandwidth collaboration experience \u2014 ideal for brainstorming sessions, team alignment, onboarding walkthroughs, and any scenario where back-and-forth conversation is more productive than async chat.' }),
+
+      H2({ children: 'How It Works' }),
+      UL({ children: [
+        LI({ children: 'Agents speak using Cartesia Sonic 3 TTS (text-to-speech) \u2014 each agent has a distinct voice.' }),
+        LI({ children: 'Humans speak via their device microphone. Speech is converted to text via STT (speech-to-text) so agents can understand and respond.' }),
+        LI({ children: 'Agents take turns speaking. The human can interrupt at any time using the "Raise Hand" button to cut the speaking queue.' }),
+      ] }),
+      Warning({ children: 'Meetings are available on YokeBot Cloud only. Self-hosted installations do not include the Cartesia TTS pipeline.' }),
+
+      H2({ children: 'Meeting Types' }),
+      Table({
+        headers: ['Type', 'Description'],
+        rows: [
+          ['Meet & Greet', 'All team agents + human in a single voice conversation. Great for onboarding and alignment.'],
+        ],
+      }),
+      P({ children: ['See ', A({ href: '/docs/meetings/meet-and-greet', children: 'Meet & Greet' }), ' for a detailed walkthrough.'] }),
+    ],
+  },
+
+  'meetings/meet-and-greet': {
+    slug: 'meetings/meet-and-greet',
+    title: 'Meet & Greet',
+    section: 'Meetings',
+    description: 'The flagship meeting experience: all team agents and a human in a live voice conversation.',
+    keywords: ['meet and greet', 'voice meeting', 'onboarding', 'brainstorming', 'raise hand', 'advisorbot'],
+    content: () => [
+      H2({ children: 'What Is the Meet & Greet?' }),
+      P({ children: 'The Meet & Greet is YokeBot\'s flagship meeting experience. It brings every active agent on your team into a single voice conversation with a human participant. Agents introduce themselves, discuss their current work, and respond to questions \u2014 all in real time via voice.' }),
+
+      H2({ children: 'Prerequisites' }),
+      UL({ children: [
+        LI({ children: 'AdvisorBot must be deployed and active on your team. AdvisorBot facilitates the conversation flow.' }),
+        LI({ children: 'At least one other agent must be active on the team.' }),
+        LI({ children: 'You must be a team admin to initiate a Meet & Greet.' }),
+        LI({ children: 'A working microphone is required for the human participant.' }),
+      ] }),
+
+      H2({ children: 'Starting a Meet & Greet' }),
+      OL({ children: [
+        LI({ children: 'Open the Meetings section from the sidebar.' }),
+        LI({ children: 'Click "Start Meet & Greet".' }),
+        LI({ children: 'Grant microphone access when prompted by your browser.' }),
+        LI({ children: 'AdvisorBot will begin the session by introducing the agenda and inviting agents to speak.' }),
+      ] }),
+
+      H2({ children: 'During the Meeting' }),
+      P({ children: 'Agents take turns speaking based on conversational context. The human can listen passively or participate actively:' }),
+      UL({ children: [
+        LI({ children: ['"Raise Hand" button \u2014 click this to cut the speaking queue and speak next. This is how the human interrupts or redirects the conversation.'] }),
+        LI({ children: 'Agents hear your speech via STT and respond accordingly.' }),
+        LI({ children: 'The conversation flows naturally \u2014 agents may ask you questions, build on each other\'s ideas, or debate approaches.' }),
+      ] }),
+      Tip({ children: 'The Meet & Greet is especially effective for onboarding new team members, aligning agents on a new project, or running collaborative brainstorming sessions.' }),
+
+      H2({ children: 'Rate Limits' }),
+      Table({
+        headers: ['Tier', 'Meet & Greet Frequency'],
+        rows: [
+          ['Starter Crew', '1 per week'],
+          ['Growth Crew', '1 per day'],
+          ['Power Crew', '1 per day'],
+        ],
+      }),
+
+      H2({ children: 'Best Practices' }),
+      UL({ children: [
+        LI({ children: 'Keep your team size manageable \u2014 meetings with 3\u20136 agents are the most productive.' }),
+        LI({ children: 'Use the Raise Hand button early if you want to steer the conversation. Agents will finish their current thought and yield to you.' }),
+        LI({ children: 'Review the meeting transcript afterward in the chat log \u2014 everything said is recorded as text.' }),
       ] }),
     ],
   },
@@ -2488,6 +2629,65 @@ Context: "I'm on the checkout page at example.com ordering the widgets you reque
 
       H2({ children: 'Permissions' }),
       P({ children: 'Only team admins can create, regenerate, revoke, or delete API keys. Members and viewers cannot access the API Keys settings page.' }),
+    ],
+  },
+
+  'model-providers': {
+    slug: 'model-providers',
+    title: 'Model Providers & Configuration',
+    section: 'Configuration',
+    description: 'Understand how YokeBot connects to LLM providers and how to configure your own API keys.',
+    keywords: ['model', 'provider', 'deepinfra', 'openrouter', 'llm', 'api key', 'byok', 'llama', 'qwen', 'gemma'],
+    content: () => [
+      H2({ children: 'Overview' }),
+      P({ children: 'YokeBot supports multiple large language model (LLM) providers via API. Each agent is backed by a model that handles its reasoning, conversation, and tool use. The platform routes requests to the optimal provider based on the agent\'s pre-built template configuration.' }),
+
+      H2({ children: 'Primary Providers' }),
+      Table({
+        headers: ['Provider', 'Role', 'Notes'],
+        rows: [
+          ['DeepInfra', 'Primary', 'Most cost-effective for agent workloads. Handles the majority of model requests.'],
+          ['OpenRouter', 'Fallback', 'Covers models not available on DeepInfra \u2014 GPT-4o, Grok, and others.'],
+        ],
+      }),
+
+      H2({ children: 'Available Models' }),
+      P({ children: 'Agents can use a wide range of open and proprietary models, including:' }),
+      UL({ children: [
+        LI({ children: 'Llama (Meta)' }),
+        LI({ children: 'Qwen (Alibaba)' }),
+        LI({ children: 'Gemma (Google)' }),
+        LI({ children: 'Mistral' }),
+        LI({ children: 'DeepSeek' }),
+        LI({ children: 'GPT-4o and GPT-4o Mini (via OpenRouter)' }),
+        LI({ children: 'Grok (via OpenRouter)' }),
+      ] }),
+      P({ children: 'Each pre-built agent template maps to an optimal model for its workload. You do not need to choose a model manually unless you want to override the default.' }),
+
+      H2({ children: 'Cloud vs Self-Hosted' }),
+      Table({
+        headers: ['', 'Cloud', 'Self-Hosted'],
+        rows: [
+          ['Model access', 'Pre-configured \u2014 all supported models available', 'Bring your own API keys'],
+          ['Billing', 'Credits cover all model usage', 'You pay providers directly'],
+          ['Configuration', 'Automatic', 'Set environment variables (e.g., DEEPINFRA_API_KEY)'],
+        ],
+      }),
+
+      H2({ children: 'Bring Your Own Key (BYOK)' }),
+      P({ children: 'Self-hosted users must configure at least one provider API key to use YokeBot. Set the appropriate environment variable in your engine configuration:' }),
+      CodeBlock({ language: 'bash', children: `# Primary provider
+DEEPINFRA_API_KEY=your_key_here
+
+# Fallback provider (optional)
+OPENROUTER_API_KEY=your_key_here` }),
+      P({ children: ['Cloud users can also connect their own provider keys via Settings \u2192 Integrations. See ', A({ href: '/docs/integrations', children: 'Integrations' }), ' for details.'] }),
+
+      H2({ children: 'Important: API Keys vs Consumer Subscriptions' }),
+      Warning({ children: 'Consumer subscriptions like Claude Max, ChatGPT Pro, or Gemini Advanced do NOT provide API access. You need an API-level account from the provider (e.g., platform.openai.com) to get a key that works with YokeBot.' }),
+
+      H2({ children: 'How Agents Select Models' }),
+      P({ children: 'When you create an agent from a pre-built template, the template specifies which model the agent should use. This mapping is optimized for cost and capability \u2014 lightweight agents use smaller, faster models while complex reasoning agents use more capable ones. You can override this in the agent\'s configuration at any time.' }),
     ],
   },
 

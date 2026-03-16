@@ -3171,6 +3171,14 @@ async function main() {
     }
     const member = await addMember(db, team.id, resolvedUserId, email, role)
     await logActivity(db, 'member_added', null, `${email} added to team "${team.name}"`, undefined, team.id)
+
+    // Send invite email (non-blocking, don't fail the request if email fails)
+    import('./email.ts').then(({ sendInviteEmail }) =>
+      sendInviteEmail(email, team.name, req.user!.email).catch(err =>
+        console.error('[teams] Failed to send invite email:', err)
+      )
+    )
+
     res.status(201).json(member)
   })
 
