@@ -1,7 +1,38 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Component, type ReactNode, type ErrorInfo } from 'react'
 import * as engine from '@/lib/engine'
 import type { BrandKit } from '@/lib/engine'
 import { SettingsLayout } from '@/components/SettingsLayout'
+
+// Error boundary to prevent white screen crashes
+class BrandKitErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
+  state = { hasError: false, error: '' }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message }
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[BrandKit] Render error:', error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SettingsLayout activeTab="brand-kit">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+            <span className="material-symbols-outlined text-red-500 text-[32px] mb-2">error</span>
+            <p className="text-sm font-medium text-red-700 mb-2">Something went wrong rendering the Brand Kit.</p>
+            <p className="text-xs text-red-500 mb-4">{this.state.error}</p>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: '' }) }}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            >
+              Try Again
+            </button>
+          </div>
+        </SettingsLayout>
+      )
+    }
+    return this.props.children
+  }
+}
 
 type BrandKitForm = Omit<BrandKit, 'teamId'> & { preset?: string | null }
 
@@ -458,6 +489,14 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
 }
 
 export function BrandKitPage() {
+  return (
+    <BrandKitErrorBoundary>
+      <BrandKitPageInner />
+    </BrandKitErrorBoundary>
+  )
+}
+
+function BrandKitPageInner() {
   const [kit, setKit] = useState<BrandKitForm>(DEFAULT_KIT)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
