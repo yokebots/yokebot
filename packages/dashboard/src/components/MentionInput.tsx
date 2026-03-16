@@ -84,7 +84,7 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
       icon: a.iconName ?? 'smart_toy', iconColor: a.iconColor, status: a.status,
     })),
     ...completions.users.map((u) => ({
-      type: 'user' as const, id: u.userId, label: u.email,
+      type: 'user' as const, id: u.userId, label: u.displayName || u.email.split('@')[0],
       icon: 'person',
     })),
     ...completions.documents.map((d) => ({

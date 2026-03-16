@@ -45,7 +45,7 @@ export async function getTask(db: Db, id: string): Promise<Task | null> {
   return task
 }
 
-export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; parentId?: string | null; teamId?: string; tags?: string }): Promise<Task[]> {
+export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; assignedUserId?: string; parentId?: string | null; teamId?: string; tags?: string }): Promise<Task[]> {
   const params: unknown[] = []
   let paramIdx = 1
 
@@ -59,6 +59,7 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   // Exclude archived tasks by default (unless explicitly filtering by 'archived' status)
   if (!filters?.status || filters.status !== 'archived') { sql += ` AND t.status != 'archived'` }
   if (filters?.agentId) { sql += ` AND t.assigned_agent_id = $${paramIdx++}`; params.push(filters.agentId) }
+  if (filters?.assignedUserId) { sql += ` AND t.assigned_user_id = $${paramIdx++}`; params.push(filters.assignedUserId) }
   if (filters?.parentId !== undefined) {
     if (filters.parentId === null) { sql += ' AND t.parent_task_id IS NULL' }
     else { sql += ` AND t.parent_task_id = $${paramIdx++}`; params.push(filters.parentId) }

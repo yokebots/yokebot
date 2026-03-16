@@ -326,7 +326,7 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
           </div>
           {/* Assigned human user */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted w-14">Owner</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted w-14">Assignee</span>
             <select
               value={task.assignedUserId ?? ''}
               onChange={(e) => updateField('assignedUserId', e.target.value || null!)}
@@ -334,7 +334,7 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
             >
               <option value="">Unassigned</option>
               {completions?.users.map(u => (
-                <option key={u.userId} value={u.userId}>{u.email}</option>
+                <option key={u.userId} value={u.userId}>{u.displayName || u.email.split('@')[0]}</option>
               ))}
             </select>
           </div>

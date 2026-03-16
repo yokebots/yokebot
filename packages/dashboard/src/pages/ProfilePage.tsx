@@ -55,6 +55,9 @@ export function ProfilePage() {
   const [selectedIcon, setSelectedIcon] = useState<string | null>(currentIcon)
   const [selectedColor, setSelectedColor] = useState<string | null>(currentColor)
   const [saving, setSaving] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState(displayName)
+  const [savingName, setSavingName] = useState(false)
 
   const avatar = getUserAvatar(user)
 
@@ -80,6 +83,21 @@ export function ProfilePage() {
     if (!selectedColor && !color) setSelectedColor('green')
     if (newIcon) {
       handleSave(newIcon, newColor)
+    }
+  }
+
+  const handleSaveName = async () => {
+    const trimmed = nameInput.trim()
+    if (!trimmed || trimmed === displayName) { setEditingName(false); return }
+    setSavingName(true)
+    try {
+      await updateUserProfile({ displayName: trimmed })
+      await supabase.auth.refreshSession()
+      setEditingName(false)
+    } catch (err) {
+      console.error('Failed to update display name:', err)
+    } finally {
+      setSavingName(false)
     }
   }
 
@@ -131,7 +149,43 @@ export function ProfilePage() {
           <div className="mt-6 border-t border-border-subtle pt-6 space-y-4">
             <div>
               <label className="mb-1 block text-xs font-medium text-text-secondary">Display Name</label>
-              <p className="text-sm text-text-main">{displayName}</p>
+              {editingName ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditingName(false) }}
+                    className="rounded-lg border border-border-subtle px-2.5 py-1 text-sm focus:border-forest-green focus:outline-none"
+                    autoFocus
+                    maxLength={50}
+                  />
+                  <button
+                    onClick={handleSaveName}
+                    disabled={savingName}
+                    className="rounded-lg bg-forest-green px-3 py-1 text-xs font-medium text-white hover:bg-forest-green/90 disabled:opacity-50"
+                  >
+                    {savingName ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => { setEditingName(false); setNameInput(displayName) }}
+                    className="rounded-lg px-2 py-1 text-xs text-text-muted hover:bg-light-surface-alt"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-text-main">{displayName}</p>
+                  <button
+                    onClick={() => { setNameInput(displayName); setEditingName(true) }}
+                    className="rounded p-0.5 text-text-muted hover:text-text-main hover:bg-light-surface-alt transition-colors"
+                    title="Edit display name"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">edit</span>
+                  </button>
+                </div>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-text-secondary">Email</label>

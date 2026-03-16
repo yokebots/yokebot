@@ -2020,6 +2020,21 @@ const migrations: Migration[] = [
       // SQLite does not have RLS — no-op
     },
   },
+  {
+    version: 46,
+    name: 'add_display_name_to_team_members',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run(`ALTER TABLE team_members ADD COLUMN IF NOT EXISTS display_name TEXT`)
+      } else {
+        // SQLite: check if column exists first
+        const cols = await db.query<Record<string, unknown>>(`PRAGMA table_info(team_members)`)
+        if (!cols.some((c) => c.name === 'display_name')) {
+          await db.exec(`ALTER TABLE team_members ADD COLUMN display_name TEXT`)
+        }
+      }
+    },
+  },
 ]
 
 /**

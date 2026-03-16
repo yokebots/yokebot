@@ -5,6 +5,7 @@ import TagFilterBar from '@/components/TagFilterBar'
 import { useAgentProgress } from '@/hooks/useAgentProgress'
 import type { AgentProgressEvent } from '@/hooks/useAgentProgress'
 import type { WorkspaceState } from '@/pages/WorkspacePage'
+import { useAuth } from '@/lib/auth'
 import * as engine from '@/lib/engine'
 
 const STATUS_ORDER = ['todo', 'in_progress', 'blocked', 'review', 'done', 'backlog', 'archived']
@@ -67,6 +68,7 @@ interface TasksPanelProps {
 }
 
 export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps) {
+  const { user } = useAuth()
   const [tasks, setTasks] = useState<engine.EngineTask[]>([])
   const { currentAction } = useAgentProgress()
   const [archiving, setArchiving] = useState(false)
@@ -74,6 +76,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
     return localStorage.getItem('workspace-tasks-view') as 'list' | 'kanban' ?? 'list'
   })
   const [filterAgent, setFilterAgent] = useState<string>('')
+  const [filterMyTasks, setFilterMyTasks] = useState(false)
   const [filterTags, setFilterTags] = useState<string[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -114,11 +117,12 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
     try {
       const filters: Parameters<typeof engine.listTasks>[0] = {}
       if (filterAgent) filters.agentId = filterAgent
+      if (filterMyTasks && user?.id) filters.assignedUserId = user.id
       if (filterTags.length > 0) filters.tags = filterTags.join(',')
       const result = await engine.listTasks(Object.keys(filters).length > 0 ? filters : undefined)
       setTasks(result)
     } catch { /* offline */ }
-  }, [filterAgent, filterTags])
+  }, [filterAgent, filterMyTasks, filterTags, user?.id])
 
   useEffect(() => { loadTasks() }, [loadTasks])
 
@@ -217,6 +221,14 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
     <div className="flex flex-col h-full">
       {/* Slim toolbar — no title (tab above already says "Tasks") */}
       <div className="flex items-center gap-1 border-b border-border-subtle px-2 py-1.5 shrink-0">
+            <button
+              onClick={() => setFilterMyTasks(v => !v)}
+              className={`flex items-center gap-1 rounded-lg px-2 py-0.5 text-[10px] font-medium transition-colors ${filterMyTasks ? 'bg-forest-green/10 text-forest-green' : 'text-text-muted hover:bg-light-surface-alt'}`}
+              title="Show only tasks assigned to me"
+            >
+              <span className="material-symbols-outlined text-[13px]">person</span>
+              My Tasks
+            </button>
             {doneCount > 0 && (
               <button
                 onClick={handleArchiveCompleted}

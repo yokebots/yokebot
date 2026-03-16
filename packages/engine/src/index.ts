@@ -27,7 +27,7 @@ import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from 
 import { logActivity, listActivity, countActivity } from './activity.ts'
 import { detectOllama, setFallbackConfig, setHostedResolver, resolveModelConfig, getAvailableModels, upsertProvider, listStoredProviders, PROVIDERS, chatCompletion, type ChatMessage as LlmMessage } from './model.ts'
 import { createSorTable, listSorTables, addSorColumn, listSorColumns, addSorRow, listSorRows, updateSorRow, deleteSorRow, getSorPermissions, setSorPermission, getSorTable, importCsvAsTable } from './sor.ts'
-import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, deleteTeam, getTeamAgentIds, findUserByEmail } from './teams.ts'
+import { createTeam, listTeams, getTeam, getUserTeams, addMember, removeMember, getTeamMembers, updateMemberRole, updateMemberDisplayName, deleteTeam, getTeamAgentIds, findUserByEmail } from './teams.ts'
 import { authMiddleware, setApiKeyDb } from './auth-middleware.ts'
 import { createApiKey, listApiKeys, revokeApiKey, regenerateApiKey, deleteApiKey, hasScope } from './api-keys.ts'
 import { createTeamMiddleware, requireRole } from './team-middleware.ts'
@@ -1021,6 +1021,7 @@ async function main() {
     const filters: Record<string, unknown> = { teamId }
     if (req.query.status) filters.status = req.query.status
     if (req.query.agentId) filters.agentId = req.query.agentId
+    if (req.query.assignedUserId) filters.assignedUserId = req.query.assignedUserId
     if (req.query.parentId === 'null') filters.parentId = null
     else if (req.query.parentId) filters.parentId = req.query.parentId
     if (req.query.tags) filters.tags = req.query.tags
@@ -1470,7 +1471,7 @@ async function main() {
     ])
     res.json({
       agents: agents.map((a) => ({ id: a.id, name: a.name, iconName: a.iconName, iconColor: a.iconColor, status: a.status })),
-      users: members.map((m) => ({ userId: m.userId, email: m.email })),
+      users: members.map((m) => ({ userId: m.userId, email: m.email, displayName: m.displayName ?? m.email.split('@')[0] })),
       documents: documents.map((d) => ({ id: d.id, title: d.title, fileType: d.fileType })),
     })
   })
@@ -4050,7 +4051,7 @@ ${truncated}`,
     }
 
     const userId = req.user!.id
-    const { iconName, iconColor } = req.body as { iconName?: string; iconColor?: string }
+    const { iconName, iconColor, displayName } = req.body as { iconName?: string; iconColor?: string; displayName?: string }
 
     try {
       // First, fetch existing user metadata so we don't overwrite other fields
@@ -4069,7 +4070,10 @@ ${truncated}`,
       const existingMeta = existing.user_metadata ?? {}
 
       // Merge new fields into existing metadata
-      const updatedMeta = { ...existingMeta, icon_name: iconName, icon_color: iconColor }
+      const updatedMeta: Record<string, unknown> = { ...existingMeta }
+      if (iconName !== undefined) updatedMeta.icon_name = iconName
+      if (iconColor !== undefined) updatedMeta.icon_color = iconColor
+      if (displayName !== undefined) updatedMeta.full_name = displayName
 
       const updateRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
         method: 'PUT',
@@ -4085,6 +4089,15 @@ ${truncated}`,
         res.status(500).json({ error: (err as Record<string, string>).msg ?? 'Failed to update user' })
         return
       }
+
+      // Sync display name to team_members for all teams this user belongs to
+      if (displayName !== undefined) {
+        const teams = await getUserTeams(db, userId)
+        for (const team of teams) {
+          await updateMemberDisplayName(db, team.id, userId, displayName)
+        }
+      }
+
       res.json({ success: true })
     } catch (err) {
       console.error('[user/profile] Error updating metadata:', err)

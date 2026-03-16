@@ -308,10 +308,11 @@ export interface TaskDetailResponse {
 export const getTaskDetail = (id: string) =>
   cached(`taskDetail:${id}`, () => request<TaskDetailResponse>(`/api/tasks/${id}/detail`), 10_000)
 
-export const listTasks = (filters?: { status?: string; agentId?: string; parentId?: string; tags?: string }) => {
+export const listTasks = (filters?: { status?: string; agentId?: string; assignedUserId?: string; parentId?: string; tags?: string }) => {
   const params = new URLSearchParams()
   if (filters?.status) params.set('status', filters.status)
   if (filters?.agentId) params.set('agentId', filters.agentId)
+  if (filters?.assignedUserId) params.set('assignedUserId', filters.assignedUserId)
   if (filters?.parentId !== undefined) params.set('parentId', filters.parentId)
   if (filters?.tags) params.set('tags', filters.tags)
   const qs = params.toString()
@@ -1049,7 +1050,7 @@ export const getTeamLogoUrl = (teamId: string): string => {
 
 // ===== User Profile =====
 
-export const updateUserProfile = (data: { iconName?: string; iconColor?: string }) =>
+export const updateUserProfile = (data: { iconName?: string; iconColor?: string; displayName?: string }) =>
   request<{ success: boolean }>('/api/user/profile', { method: 'PATCH', body: JSON.stringify(data) })
 
 // ===== Config =====
@@ -1336,7 +1337,7 @@ export async function uploadWorkspaceFile(file: File, dirPath?: string): Promise
 
 export interface MentionCompletionData {
   agents: Array<{ id: string; name: string; iconName: string | null; iconColor: string | null; status: string }>
-  users: Array<{ userId: string; email: string }>
+  users: Array<{ userId: string; email: string; displayName: string }>
   documents: Array<{ id: string; title: string; fileType: string }>
 }
 

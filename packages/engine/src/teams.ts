@@ -6,7 +6,7 @@ import type { Db } from './db/types.ts'
 import { randomUUID } from 'crypto'
 
 export interface Team { id: string; name: string; createdAt: string }
-export interface TeamMember { teamId: string; userId: string; email: string; role: string; joinedAt: string }
+export interface TeamMember { teamId: string; userId: string; email: string; role: string; joinedAt: string; displayName: string | null }
 
 export async function createTeam(db: Db, name: string): Promise<Team> {
   const id = randomUUID()
@@ -33,19 +33,24 @@ export async function getUserTeams(db: Db, userId: string): Promise<Array<Team &
   return rows.map((r) => ({ id: r.id as string, name: r.name as string, createdAt: r.created_at as string, role: r.role as string }))
 }
 
-export async function addMember(db: Db, teamId: string, userId: string, email: string, role = 'member'): Promise<TeamMember> {
+export async function addMember(db: Db, teamId: string, userId: string, email: string, role = 'member', displayName?: string): Promise<TeamMember> {
+  const name = displayName ?? email.split('@')[0]
   if (db.driver === 'postgres') {
     await db.run(
-      'INSERT INTO team_members (team_id, user_id, email, role) VALUES ($1, $2, $3, $4) ON CONFLICT (team_id, user_id) DO UPDATE SET email = excluded.email, role = excluded.role',
-      [teamId, userId, email, role],
+      'INSERT INTO team_members (team_id, user_id, email, role, display_name) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (team_id, user_id) DO UPDATE SET email = excluded.email, role = excluded.role, display_name = COALESCE(excluded.display_name, team_members.display_name)',
+      [teamId, userId, email, role, name],
     )
   } else {
     await db.run(
-      'INSERT OR REPLACE INTO team_members (team_id, user_id, email, role) VALUES ($1, $2, $3, $4)',
-      [teamId, userId, email, role],
+      'INSERT OR REPLACE INTO team_members (team_id, user_id, email, role, display_name) VALUES ($1, $2, $3, $4, $5)',
+      [teamId, userId, email, role, name],
     )
   }
   return (await getMember(db, teamId, userId))!
+}
+
+export async function updateMemberDisplayName(db: Db, teamId: string, userId: string, displayName: string): Promise<void> {
+  await db.run('UPDATE team_members SET display_name = $1 WHERE team_id = $2 AND user_id = $3', [displayName, teamId, userId])
 }
 
 export async function removeMember(db: Db, teamId: string, userId: string): Promise<void> {
@@ -103,5 +108,5 @@ export async function findUserByEmail(db: Db, email: string): Promise<string | n
 }
 
 function rowToMember(row: Record<string, unknown>): TeamMember {
-  return { teamId: row.team_id as string, userId: row.user_id as string, email: row.email as string, role: row.role as string, joinedAt: row.joined_at as string }
+  return { teamId: row.team_id as string, userId: row.user_id as string, email: row.email as string, role: row.role as string, joinedAt: row.joined_at as string, displayName: (row.display_name as string | null) ?? null }
 }
