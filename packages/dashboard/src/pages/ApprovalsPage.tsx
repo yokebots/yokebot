@@ -31,7 +31,11 @@ export function ApprovalsPage() {
     } catch { /* offline */ }
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => {
+    loadData()
+    const interval = setInterval(loadData, 10_000)
+    return () => clearInterval(interval)
+  }, [])
 
   const resolve = async (id: string, status: 'approved' | 'rejected') => {
     await engine.resolveApproval(id, status)

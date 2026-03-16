@@ -376,31 +376,44 @@ function PresetCard({ preset, active, onClick }: { preset: typeof PRESETS[number
 }
 
 function LivePreview({ kit }: { kit: BrandKitForm }) {
-  const radius = kit.borderRadius || '8px'
-  const btnRadius = kit.buttonStyle === 'pill' ? '999px' : kit.buttonStyle === 'square' ? '0px' : radius
-  const cardBorder = kit.cardStyle === 'bordered' ? `1px solid ${kit.primaryColor}33` : 'none'
-  const cardShadow = kit.cardStyle === 'elevated'
+  const primaryColor = kit.primaryColor || '#6366f1'
+  const surfaceColor = kit.surfaceColor || '#f8fafc'
+  const textColor = kit.textColor || '#0f172a'
+  const bgColor = kit.backgroundColor || '#ffffff'
+  const headingFont = kit.headingFont || 'Inter'
+  const bodyFont = kit.bodyFont || 'Inter'
+  const baseFontSize = kit.baseFontSize || '16px'
+  const borderRadiusVal = kit.borderRadius || '8px'
+  const spacingScaleVal = kit.spacingScale || 'comfortable'
+  const buttonStyleVal = kit.buttonStyle || 'rounded'
+  const cardStyleVal = kit.cardStyle || 'elevated'
+  const headingStyleVal = kit.headingStyle || 'bold'
+
+  const radius = borderRadiusVal
+  const btnRadius = buttonStyleVal === 'pill' ? '999px' : buttonStyleVal === 'square' ? '0px' : radius
+  const cardBorder = cardStyleVal === 'bordered' ? `1px solid ${primaryColor}33` : 'none'
+  const cardShadow = cardStyleVal === 'elevated'
     ? '0 4px 12px rgba(0,0,0,0.1)'
-    : kit.cardStyle === 'glass'
+    : cardStyleVal === 'glass'
       ? '0 8px 32px rgba(0,0,0,0.12)'
       : 'none'
-  const cardBg = kit.cardStyle === 'glass'
-    ? `${kit.surfaceColor}cc`
-    : kit.surfaceColor
-  const spacing = kit.spacingScale === 'compact' ? '12px' : kit.spacingScale === 'spacious' ? '24px' : '16px'
-  const headingWeight = kit.headingStyle === 'bold' ? 700 : kit.headingStyle === 'light' ? 300 : 600
-  const headingTransform = kit.headingStyle === 'uppercase' ? ('uppercase' as const) : ('none' as const)
+  const cardBg = cardStyleVal === 'glass'
+    ? `${surfaceColor}cc`
+    : surfaceColor
+  const spacing = spacingScaleVal === 'compact' ? '12px' : spacingScaleVal === 'spacious' ? '24px' : '16px'
+  const headingWeight = headingStyleVal === 'bold' ? 700 : headingStyleVal === 'light' ? 300 : 600
+  const headingTransform = headingStyleVal === 'uppercase' ? ('uppercase' as const) : ('none' as const)
 
   // Load fonts for preview
   useEffect(() => {
-    if (kit.headingFont) loadGoogleFont(kit.headingFont)
-    if (kit.bodyFont) loadGoogleFont(kit.bodyFont)
-  }, [kit.headingFont, kit.bodyFont])
+    if (headingFont) loadGoogleFont(headingFont)
+    if (bodyFont) loadGoogleFont(bodyFont)
+  }, [headingFont, bodyFont])
 
   return (
     <div
       className="overflow-hidden rounded-lg border border-border-subtle"
-      style={{ backgroundColor: kit.backgroundColor || '#ffffff', padding: spacing }}
+      style={{ backgroundColor: bgColor, padding: spacing }}
     >
       <p className="mb-3 text-xs font-medium text-text-muted">Live Preview</p>
       {/* Preview card */}
@@ -411,14 +424,14 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
           border: cardBorder,
           boxShadow: cardShadow,
           padding: spacing,
-          backdropFilter: kit.cardStyle === 'glass' ? 'blur(12px)' : undefined,
+          backdropFilter: cardStyleVal === 'glass' ? 'blur(12px)' : undefined,
         }}
       >
         <h3
           style={{
-            color: kit.textColor || '#0f172a',
-            fontFamily: `"${kit.headingFont}", sans-serif`,
-            fontSize: `calc(${kit.baseFontSize || '16px'} * 1.25)`,
+            color: textColor,
+            fontFamily: `"${headingFont}", sans-serif`,
+            fontSize: `calc(${baseFontSize} * 1.25)`,
             fontWeight: headingWeight,
             textTransform: headingTransform,
             marginBottom: '8px',
@@ -429,9 +442,9 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
         </h3>
         <p
           style={{
-            color: kit.textColor || '#0f172a',
-            fontFamily: `"${kit.bodyFont}", sans-serif`,
-            fontSize: kit.baseFontSize || '16px',
+            color: textColor,
+            fontFamily: `"${bodyFont}", sans-serif`,
+            fontSize: baseFontSize,
             opacity: 0.7,
             marginBottom: spacing,
             lineHeight: 1.5,
@@ -442,12 +455,12 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
         <div className="flex items-center gap-2">
           <button
             style={{
-              backgroundColor: kit.primaryColor || '#6366f1',
+              backgroundColor: primaryColor,
               color: '#ffffff',
               borderRadius: btnRadius,
               padding: '8px 16px',
-              fontSize: kit.baseFontSize || '16px',
-              fontFamily: `"${kit.bodyFont}", sans-serif`,
+              fontSize: baseFontSize,
+              fontFamily: `"${bodyFont}", sans-serif`,
               fontWeight: 500,
               border: 'none',
               cursor: 'pointer',
@@ -458,13 +471,13 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
           <button
             style={{
               backgroundColor: 'transparent',
-              color: kit.primaryColor || '#6366f1',
+              color: primaryColor,
               borderRadius: btnRadius,
               padding: '8px 16px',
-              fontSize: kit.baseFontSize || '16px',
-              fontFamily: `"${kit.bodyFont}", sans-serif`,
+              fontSize: baseFontSize,
+              fontFamily: `"${bodyFont}", sans-serif`,
               fontWeight: 500,
-              border: `1px solid ${kit.primaryColor || '#6366f1'}`,
+              border: `1px solid ${primaryColor}`,
               cursor: 'pointer',
             }}
           >
@@ -480,7 +493,7 @@ function LivePreview({ kit }: { kit: BrandKitForm }) {
               className="h-5 w-5 rounded-full border border-black/10"
               style={{ backgroundColor: (kit[c.key] as string) || '#cccccc' }}
             />
-            <span style={{ fontSize: '9px', color: kit.textColor || '#0f172a', opacity: 0.5 }}>{c.label}</span>
+            <span style={{ fontSize: '9px', color: textColor, opacity: 0.5 }}>{c.label}</span>
           </div>
         ))}
       </div>
@@ -509,7 +522,7 @@ function BrandKitPageInner() {
       .finally(() => setLoading(false))
   }, [])
 
-  const updateField = <K extends keyof BrandKitForm>(key: K, value: BrandKitForm[K]) => {
+  const updateField = (key: string, value: string) => {
     setKit((prev) => ({ ...prev, [key]: value, preset: 'custom' }))
   }
 
@@ -527,7 +540,7 @@ function BrandKitPageInner() {
     setSaving(false)
   }
 
-  const radiusValue = parseInt(kit.borderRadius) || 0
+  const radiusValue = parseInt(kit.borderRadius || '0') || 0
 
   return (
     <SettingsLayout activeTab="brand-kit">
@@ -566,13 +579,13 @@ function BrandKitPageInner() {
                     <div className="flex items-center gap-2">
                       <input
                         type="color"
-                        value={(kit[c.key] as string) || '#000000'}
+                        value={/^#[0-9a-fA-F]{6}$/.test((kit[c.key] as string) || '') ? (kit[c.key] as string) : '#000000'}
                         onChange={(e) => updateField(c.key, e.target.value)}
                         className="h-9 w-9 cursor-pointer rounded border border-border-subtle p-0.5"
                       />
                       <input
                         type="text"
-                        value={(kit[c.key] as string) || ''}
+                        value={(kit[c.key] as string) ?? ''}
                         onChange={(e) => updateField(c.key, e.target.value)}
                         className="flex-1 rounded-lg border border-border-subtle px-3 py-2 text-sm font-mono focus:border-forest-green focus:outline-none"
                         maxLength={7}
@@ -591,19 +604,19 @@ function BrandKitPageInner() {
                 <div className="grid grid-cols-2 gap-4">
                   <FontPicker
                     label="Heading Font"
-                    value={kit.headingFont}
+                    value={kit.headingFont || 'Inter'}
                     onChange={(v) => updateField('headingFont', v)}
                   />
                   <FontPicker
                     label="Body Font"
-                    value={kit.bodyFont}
+                    value={kit.bodyFont || 'Inter'}
                     onChange={(v) => updateField('bodyFont', v)}
                   />
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-text-secondary">Base Font Size</label>
                   <select
-                    value={kit.baseFontSize}
+                    value={kit.baseFontSize || '16px'}
                     onChange={(e) => updateField('baseFontSize', e.target.value)}
                     className="w-48 rounded-lg border border-border-subtle px-3 py-2 text-sm focus:border-forest-green focus:outline-none"
                   >
@@ -619,7 +632,7 @@ function BrandKitPageInner() {
                       <label
                         key={style}
                         className={`flex cursor-pointer items-center gap-2 rounded-lg border-2 px-4 py-2.5 text-sm transition-colors ${
-                          kit.headingStyle === style
+                          (kit.headingStyle || 'bold') === style
                             ? 'border-forest-green bg-forest-green/5 text-forest-green'
                             : 'border-border-subtle text-text-muted hover:border-text-muted/30'
                         }`}
@@ -628,7 +641,7 @@ function BrandKitPageInner() {
                           type="radio"
                           name="headingStyle"
                           value={style}
-                          checked={kit.headingStyle === style}
+                          checked={(kit.headingStyle || 'bold') === style}
                           onChange={(e) => updateField('headingStyle', e.target.value)}
                           className="sr-only"
                         />
@@ -656,7 +669,7 @@ function BrandKitPageInner() {
                 {/* Border Radius */}
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                    Border Radius: {kit.borderRadius}
+                    Border Radius: {kit.borderRadius || '0px'}
                   </label>
                   <div className="flex items-center gap-3">
                     <input
@@ -669,7 +682,7 @@ function BrandKitPageInner() {
                     />
                     <div
                       className="h-10 w-16 border-2 border-forest-green bg-forest-green/10"
-                      style={{ borderRadius: kit.borderRadius }}
+                      style={{ borderRadius: kit.borderRadius || '0px' }}
                     />
                   </div>
                 </div>
@@ -682,7 +695,7 @@ function BrandKitPageInner() {
                       <label
                         key={scale}
                         className={`flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 px-5 py-3 transition-colors ${
-                          kit.spacingScale === scale
+                          (kit.spacingScale || 'comfortable') === scale
                             ? 'border-forest-green bg-forest-green/5'
                             : 'border-border-subtle hover:border-text-muted/30'
                         }`}
@@ -691,7 +704,7 @@ function BrandKitPageInner() {
                           type="radio"
                           name="spacingScale"
                           value={scale}
-                          checked={kit.spacingScale === scale}
+                          checked={(kit.spacingScale || 'comfortable') === scale}
                           onChange={(e) => updateField('spacingScale', e.target.value)}
                           className="sr-only"
                         />
@@ -716,7 +729,7 @@ function BrandKitPageInner() {
                         <label
                           key={style}
                           className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 px-5 py-3 transition-colors ${
-                            kit.buttonStyle === style
+                            (kit.buttonStyle || 'rounded') === style
                               ? 'border-forest-green bg-forest-green/5'
                               : 'border-border-subtle hover:border-text-muted/30'
                           }`}
@@ -725,7 +738,7 @@ function BrandKitPageInner() {
                             type="radio"
                             name="buttonStyle"
                             value={style}
-                            checked={kit.buttonStyle === style}
+                            checked={(kit.buttonStyle || 'rounded') === style}
                             onChange={(e) => updateField('buttonStyle', e.target.value)}
                             className="sr-only"
                           />
@@ -761,7 +774,7 @@ function BrandKitPageInner() {
                         <label
                           key={style}
                           className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 px-4 py-3 transition-colors ${
-                            kit.cardStyle === style
+                            (kit.cardStyle || 'elevated') === style
                               ? 'border-forest-green bg-forest-green/5'
                               : 'border-border-subtle hover:border-text-muted/30'
                           }`}
@@ -770,7 +783,7 @@ function BrandKitPageInner() {
                             type="radio"
                             name="cardStyle"
                             value={style}
-                            checked={kit.cardStyle === style}
+                            checked={(kit.cardStyle || 'elevated') === style}
                             onChange={(e) => updateField('cardStyle', e.target.value)}
                             className="sr-only"
                           />

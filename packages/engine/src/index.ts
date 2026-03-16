@@ -16,7 +16,7 @@ import { join } from 'path'
 import { createDb } from './db/index.ts'
 import { createAgent, listAgents, getAgent, updateAgent, deleteAgent, setAgentStatus } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
-import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention, initSchedulerState } from './scheduler.ts'
+import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention, initSchedulerState, triggerAgentNow } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask, unblockTask } from './tasks.ts'
 import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
@@ -957,6 +957,8 @@ async function main() {
     // SSE: broadcast updated approval count
     const resolvedApprovalCount = await countPendingApprovals(db, teamId)
     broadcastToTeam(teamId, 'approval_count', { count: resolvedApprovalCount })
+    // Immediately wake the agent so it picks up the unblocked task without waiting for next heartbeat
+    void triggerAgentNow(db, approval.agentId, teamId)
     res.json(approval)
   })
 

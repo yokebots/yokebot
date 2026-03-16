@@ -27,7 +27,7 @@ export function WorkflowRunPage() {
   // Auto-refresh while running
   useEffect(() => {
     if (!run || (run.status !== 'running' && run.status !== 'paused')) return
-    const interval = setInterval(loadData, 5000)
+    const interval = setInterval(loadData, 3000)
     return () => clearInterval(interval)
   }, [run?.status])
 

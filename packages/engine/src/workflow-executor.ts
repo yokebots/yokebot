@@ -161,6 +161,16 @@ export async function advanceWorkflow(db: Db, runId: string): Promise<void> {
       `UPDATE workflow_runs SET status = 'paused' WHERE id = $1`,
       [runId],
     )
+
+    // Notify team that approval is needed
+    try {
+      const workflow = await getWorkflow(db, run.workflowId)
+      const { notifyTeam } = await import('./notifications.ts')
+      void notifyTeam(db, run.teamId, 'system',
+        `Approval needed: ${workflow?.name ?? 'Workflow'}`,
+        `Step "${stepDef.title}" is waiting for your approval before continuing.`,
+        `/workflows/${run.workflowId}/runs/${runId}`)
+    } catch { /* best-effort notification */ }
   } else {
     // Auto gate — trigger agent if assigned
     if (stepDef.assignedAgentId) {
@@ -187,18 +197,24 @@ export async function onTaskCompleted(db: Db, taskId: string): Promise<void> {
   )
   if (!runStep) return
 
+  // Check if the task actually succeeded — if blocked (max_retries), treat as failure
+  const { getTask } = await import('./tasks.ts')
+  const task = await getTask(db, taskId)
+  if (task && task.status === 'blocked') {
+    await onTaskFailed(db, taskId, task.title)
+    return
+  }
+
   // If the step has an outputVariable, store the task's final output/description as the value
   try {
     const stepCfg = JSON.parse((runStep.step_config as string) || '{}')
     if (stepCfg.outputVariable) {
       // Get the task's description (which may have been updated by the agent as its output)
-      const { getTask } = await import('./tasks.ts')
-      const completedTask = await getTask(db, taskId)
-      if (completedTask) {
+      if (task) {
         // Store the output value in the run_step's config column
         const runStepConfig = JSON.parse((runStep.config as string) || '{}')
         runStepConfig.outputVariable = stepCfg.outputVariable
-        runStepConfig.outputValue = completedTask.description || completedTask.title
+        runStepConfig.outputValue = task.description || task.title
         await db.run(
           `UPDATE workflow_run_steps SET config = $1 WHERE id = $2`,
           [JSON.stringify(runStepConfig), runStep.id as string],
@@ -221,6 +237,51 @@ export async function onTaskCompleted(db: Db, taskId: string): Promise<void> {
 
   // Advance to next step
   await advanceWorkflow(db, runStep.run_id as string)
+}
+
+/**
+ * Called when a task linked to a workflow step fails (e.g. blocked after max retries).
+ * Marks the step and run as failed with an error message.
+ */
+export async function onTaskFailed(db: Db, taskId: string, errorMessage?: string): Promise<void> {
+  const runStep = await db.queryOne<Record<string, unknown>>(
+    `SELECT wrs.* FROM workflow_run_steps wrs
+     WHERE wrs.task_id = $1 AND wrs.status IN ('running', 'awaiting_approval')`,
+    [taskId],
+  )
+  if (!runStep) return
+
+  const error = errorMessage
+    ? `Step failed: ${errorMessage}`
+    : 'Step task failed after max retries'
+
+  const now = db.now()
+  await db.run(
+    `UPDATE workflow_run_steps SET status = 'failed', error = $1, completed_at = ${now} WHERE id = $2`,
+    [error, runStep.id as string],
+  )
+
+  // Mark the workflow run as failed
+  await db.run(
+    `UPDATE workflow_runs SET status = 'failed', error = $1, completed_at = ${now} WHERE id = $2`,
+    [error, runStep.run_id as string],
+  )
+
+  // Log failure
+  const run = await getRun(db, runStep.run_id as string)
+  if (run) {
+    const workflow = await getWorkflow(db, run.workflowId)
+    await logActivity(db, 'workflow_run_failed', null,
+      `Workflow "${workflow?.name ?? run.workflowId}" run failed: ${error}`,
+      undefined, run.teamId)
+
+    // Notify the team about the failure
+    const { notifyTeam } = await import('./notifications.ts')
+    void notifyTeam(db, run.teamId, 'system',
+      `Workflow failed: ${workflow?.name ?? 'Unknown'}`,
+      error,
+      `/workflows/${run.workflowId}/runs/${run.id}`)
+  }
 }
 
 /**

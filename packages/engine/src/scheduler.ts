@@ -586,6 +586,11 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
         `Task blocked: ${task.title}`,
         `Agent failed after ${MAX_SPRINT_ATTEMPTS} attempts.${snippet}`,
         `/tasks/${task.id}`)
+      // Notify workflow executor that the task failed (marks step + run as failed)
+      try {
+        const { onTaskFailed } = await import('./workflow-executor.ts')
+        void onTaskFailed(db, task.id, `Agent failed after ${MAX_SPRINT_ATTEMPTS} attempts`)
+      } catch { /* best-effort */ }
       console.log(`[scheduler] Auto-blocked task "${task.title}" — ${row?.sprint_count} failed sprints`)
       continue
     }
@@ -623,6 +628,21 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMo
     }
   } catch { /* no thread yet */ }
 
+  // Check for recently resolved approvals linked to this task
+  let approvalContext = ''
+  try {
+    const recentApproval = await db.queryOne<Record<string, unknown>>(
+      `SELECT status, action_type, action_detail, resolved_at FROM approvals WHERE task_id = $1 AND status IN ('approved', 'rejected') ORDER BY resolved_at DESC LIMIT 1`,
+      [task.id],
+    )
+    if (recentApproval) {
+      const approvalStatus = recentApproval.status as string
+      const actionType = recentApproval.action_type as string
+      const actionDetail = (recentApproval.action_detail as string).slice(0, 500)
+      approvalContext = `\n## Approval Decision\nYour previous approval request for "${actionType}" was **${approvalStatus.toUpperCase()}**.\nOriginal request: ${actionDetail}\n${approvalStatus === 'approved' ? 'You may now proceed with the approved action.' : 'The action was rejected. Adjust your approach — consider an alternative strategy or ask for clarification.'}\n`
+    }
+  } catch { /* no approval found — that's fine */ }
+
   const deadlineStr = task.deadline ? `\nDeadline: ${task.deadline}` : ''
 
   const scratchpadSection = task.scratchpad
@@ -638,6 +658,7 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMo
     `Status: ${task.status}`,
     `Priority: ${task.priority}${deadlineStr}`,
     task.description ? `\nDescription:\n${task.description}` : '',
+    approvalContext,
     scratchpadSection,
     `## Subtasks`,
     subtaskLines,
@@ -1137,6 +1158,7 @@ async function processOnboardingDripEmails(db: Db): Promise<void> {
 /**
  * Process scheduled workflows — fires workflows whose schedule is due.
  * Uses simple pattern: daily:HH:MM or weekly:DAY:HH:MM
+ * Respects team timezone from team_profiles (defaults to UTC).
  */
 async function processScheduledWorkflows(db: Db): Promise<void> {
   try {
@@ -1148,16 +1170,45 @@ async function processScheduledWorkflows(db: Db): Promise<void> {
       `SELECT * FROM workflows WHERE trigger_type = 'scheduled' AND status = 'active' AND schedule_cron IS NOT NULL`,
     )
 
-    const now = new Date()
-    const currentDay = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()]
-    const currentHour = String(now.getHours()).padStart(2, '0')
-    const currentMinute = String(now.getMinutes()).padStart(2, '0')
-    const currentTime = `${currentHour}:${currentMinute}`
+    // Cache team timezones to avoid repeated queries within this tick
+    const teamTimezones = new Map<string, string>()
 
     for (const row of rows) {
       const wfId = row.id as string
       const teamId = row.team_id as string
       const cron = row.schedule_cron as string
+
+      // Look up team timezone (cached per tick)
+      if (!teamTimezones.has(teamId)) {
+        const tzRow = await db.queryOne<{ timezone: string | null }>(
+          'SELECT timezone FROM team_profiles WHERE team_id = $1', [teamId],
+        )
+        teamTimezones.set(teamId, tzRow?.timezone ?? 'UTC')
+      }
+      const tz = teamTimezones.get(teamId)!
+
+      // Get current time in team's timezone
+      const now = new Date()
+      let currentDay: string
+      let currentTime: string
+      try {
+        // Use Intl to convert server time to team's local time
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          weekday: 'long',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).formatToParts(now)
+        currentDay = parts.find(p => p.type === 'weekday')?.value?.toLowerCase() ?? ''
+        const hour = parts.find(p => p.type === 'hour')?.value ?? '00'
+        const minute = parts.find(p => p.type === 'minute')?.value ?? '00'
+        currentTime = `${hour}:${minute}`
+      } catch {
+        // Invalid timezone — fall back to UTC
+        currentDay = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getUTCDay()]
+        currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`
+      }
 
       // Check if already fired this minute
       const lastFired = lastWorkflowFired.get(wfId) ?? 0
