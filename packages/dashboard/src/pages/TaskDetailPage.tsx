@@ -425,7 +425,13 @@ export function TaskDetailPage() {
                       const images: Array<{ alt: string; url: string }> = []
                       let imgMatch
                       while ((imgMatch = imgRegex.exec(msg.content)) !== null) {
-                        images.push({ alt: imgMatch[1], url: imgMatch[2] })
+                        const imgUrl = imgMatch[2]
+                        try {
+                          const parsed = new URL(imgUrl, window.location.origin)
+                          if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+                            images.push({ alt: imgMatch[1], url: imgUrl })
+                          }
+                        } catch { /* skip invalid URLs */ }
                       }
                       return images.length > 0 ? (
                         <div className="mt-1.5 space-y-1">

@@ -176,7 +176,13 @@ export function MessageBubble({
   const embeddedImages: Array<{ alt: string; url: string }> = []
   let imgMatch
   while ((imgMatch = imageRegex.exec(cleanedContent)) !== null) {
-    embeddedImages.push({ alt: imgMatch[1], url: imgMatch[2] })
+    const imgUrl = imgMatch[2]
+    try {
+      const parsed = new URL(imgUrl, window.location.origin)
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        embeddedImages.push({ alt: imgMatch[1], url: imgUrl })
+      }
+    } catch { /* skip invalid URLs */ }
   }
   const displayContent = cleanedContent
     .replace(/!\[[^\]]*\]\([^)]+\)/g, '')

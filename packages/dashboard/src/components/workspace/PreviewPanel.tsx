@@ -209,7 +209,7 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
     iframe.contentWindow.postMessage({
       type: 'yokebot:toggle-picker',
       enabled: editMode === 'edit',
-    }, '*')
+    }, new URL(engine.getBaseUrl()).origin)
     if (editMode !== 'edit') setSelectedElement(null)
   }, [editMode])
 
@@ -222,11 +222,11 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
 
   // ---- Undo/redo ----
   const handleUndo = useCallback(() => {
-    iframeRef.current?.contentWindow?.postMessage({ type: 'yokebot:undo-change' }, '*')
+    iframeRef.current?.contentWindow?.postMessage({ type: 'yokebot:undo-change' }, new URL(engine.getBaseUrl()).origin)
   }, [])
 
   const handleRedo = useCallback(() => {
-    iframeRef.current?.contentWindow?.postMessage({ type: 'yokebot:redo-change' }, '*')
+    iframeRef.current?.contentWindow?.postMessage({ type: 'yokebot:redo-change' }, new URL(engine.getBaseUrl()).origin)
   }, [])
 
   // Keyboard shortcuts for undo/redo
@@ -284,7 +284,7 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
         type: 'yokebot:apply-style',
         selector,
         styles: { [change.property]: change.value },
-      }, '*')
+      }, new URL(engine.getBaseUrl()).origin)
     }
 
     // 2. Persist to source file via engine API (with responsive breakpoint prefix)

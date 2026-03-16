@@ -154,6 +154,8 @@ const COLOR_FIELDS: { key: keyof BrandKitForm; label: string }[] = [
 const loadedFonts = new Set<string>()
 function loadGoogleFont(fontName: string) {
   if (loadedFonts.has(fontName)) return
+  // Validate font name: only allow letters, numbers, spaces, and hyphens (prevents URL injection)
+  if (!/^[a-zA-Z0-9 \-]+$/.test(fontName)) return
   loadedFonts.add(fontName)
   const link = document.createElement('link')
   link.rel = 'stylesheet'
