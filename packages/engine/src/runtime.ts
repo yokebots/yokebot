@@ -2422,8 +2422,10 @@ export async function runReactLoop(
   }
 
   // If we hit max iterations without a response
+  // Use actual iterations run (not maxIterations) so credit refunds are accurate
+  const actualIterations = Math.min(toolCallLog.length + 1, config.maxIterations)
   const fallback = response ?? "I'm still working on this but need a bit more time. I've saved my progress — I'll pick it back up on my next check-in."
   await addMessage(db, agentId, 'assistant', fallback, teamId)
-  emitProgress('idle', 'Done', config.maxIterations)
-  return { response: fallback, iterations: config.maxIterations, toolCalls: toolCallLog }
+  emitProgress('idle', 'Done', actualIterations)
+  return { response: fallback, iterations: actualIterations, toolCalls: toolCallLog }
 }
