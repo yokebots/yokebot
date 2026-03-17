@@ -167,6 +167,8 @@ export async function executeBrowserTool(
   // All other browser tools need an active session
   if (!toolName.startsWith('browser_')) return null
 
+  console.log(`[browser] Agent ${agentId} calling ${toolName}`, JSON.stringify(args).slice(0, 200))
+
   try {
     const session = await getAgentSession(agentId, teamId)
     const { page } = session
@@ -324,9 +326,11 @@ export async function executeBrowserTool(
       } catch { /* silent — viewer frames are best-effort */ }
     }
 
+    console.log(`[browser] Agent ${agentId} ${toolName} → ${(output || 'Action completed.').slice(0, 100)}`)
     return output || 'Action completed.'
   } catch (err) {
     const message = (err as Error).message
+    console.error(`[browser] Agent ${agentId} ${toolName} error: ${message}`)
     if (message.includes('Target closed') || message.includes('Browser has been closed')) {
       agentSessions.delete(agentId)
     }
