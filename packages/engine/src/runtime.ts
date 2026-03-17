@@ -2348,7 +2348,7 @@ export async function runReactLoop(
       // If ALL tool calls were just 'think', increment no-tool counter
       if (!hasRealToolCall) {
         consecutiveNoToolIterations++
-        if (consecutiveNoToolIterations >= 5) {
+        if (consecutiveNoToolIterations >= 10) {
           console.warn(`[runtime] Agent ${agentId} spinning: ${consecutiveNoToolIterations} consecutive think-only iterations — exiting early`)
           response = "I'm having trouble making progress on this task. Let me reassess on my next check-in."
           break
@@ -2371,7 +2371,7 @@ export async function runReactLoop(
         console.log(`[runtime] Model wrote [think] as text — converting to tool call (iteration ${i + 1}, ${consecutiveNoToolIterations} consecutive no-tool iters)`)
 
         // Bail if the model is spinning without making real tool calls (saves credits)
-        if (consecutiveNoToolIterations >= 5) {
+        if (consecutiveNoToolIterations >= 10) {
           console.warn(`[runtime] Agent ${agentId} spinning: ${consecutiveNoToolIterations} consecutive iterations without real tool calls — exiting early`)
           response = "I'm having trouble making progress on this task. Let me reassess on my next check-in."
           break
