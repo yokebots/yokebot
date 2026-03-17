@@ -188,6 +188,8 @@ export async function executeBrowserTool(
         const validUrl = await validateUrl(url)
         await page.goto(validUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
         output = `Navigated to ${page.url()}`
+        // Auto-include page snapshot so the agent sees the page immediately
+        output += await capturePageSnapshot(session)
         break
       }
 
@@ -230,6 +232,8 @@ export async function executeBrowserTool(
           return 'Error: ref or element is required'
         }
         output = `Clicked "${ref || element}"`
+        // Auto-include updated page snapshot after click
+        output += await capturePageSnapshot(session)
         break
       }
 
@@ -248,6 +252,8 @@ export async function executeBrowserTool(
           await page.keyboard.type(text)
         }
         output = `Typed "${text?.slice(0, 50)}${(text?.length ?? 0) > 50 ? '...' : ''}"${ref ? ` into "${ref}"` : ''}`
+        // Auto-include updated page snapshot after typing
+        output += await capturePageSnapshot(session)
         break
       }
 
@@ -266,6 +272,8 @@ export async function executeBrowserTool(
           }
         }
         output = `Selected ${values.join(', ')} in "${ref}"`
+        // Auto-include updated page snapshot after selection
+        output += await capturePageSnapshot(session)
         break
       }
 
@@ -273,6 +281,8 @@ export async function executeBrowserTool(
         const key = (args.key as string) ?? ''
         await page.keyboard.press(key)
         output = `Pressed "${key}"`
+        // Auto-include updated page snapshot after key press (Enter/Tab can change page state)
+        output += await capturePageSnapshot(session)
         break
       }
 
@@ -307,6 +317,8 @@ export async function executeBrowserTool(
           }
         }
         output = `Form fill results:\n${results.join('\n')}`
+        // Auto-include updated page snapshot after form fill
+        output += await capturePageSnapshot(session)
         break
       }
 
@@ -360,6 +372,41 @@ export function getAgentSessionId(agentId: string): string | undefined {
 }
 
 // ---- Helpers ----
+
+/**
+ * Capture a compact page snapshot (accessibility tree + url + title).
+ * Used to auto-include page state after navigate/click/type actions
+ * so small models don't need to call browser_snapshot separately.
+ */
+async function capturePageSnapshot(session: BrowserSessionState): Promise<string> {
+  const { page, context } = session
+  try {
+    const url = page.url()
+    const title = await page.title()
+    let snapshot = `\n\n--- Page snapshot ---\n- url: ${url}\n- title: ${title}\n\n`
+    try {
+      const cdpSession = await context.newCDPSession(page)
+      try {
+        const tree = await cdpSession.send('Accessibility.getFullAXTree') as {
+          nodes: Array<{ role?: { value: string }; name?: { value: string }; value?: { value: string }; childIds?: string[] }>
+        }
+        snapshot += formatCdpAccessibilityTree(tree.nodes)
+      } finally {
+        await cdpSession.detach()
+      }
+    } catch {
+      try {
+        const ariaSnapshot = await page.locator('body').ariaSnapshot()
+        snapshot += ariaSnapshot
+      } catch {
+        snapshot += '(could not capture accessibility tree)'
+      }
+    }
+    return snapshot
+  } catch {
+    return '\n\n--- Page snapshot ---\n(could not capture page state)'
+  }
+}
 
 /**
  * Click an element by accessible name or text content.
