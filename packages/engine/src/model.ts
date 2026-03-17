@@ -107,7 +107,7 @@ export const MODEL_CATALOG: LogicalModel[] = [
     name: 'Nemotron 3 Super',
     description: 'NVIDIA agentic powerhouse — 12B active params, 1M context, 5x throughput, built for multi-step tool calling',
     type: 'chat',
-    category: 'frontier',
+    category: 'efficient',
     contextWindow: 1000000,
     backends: [
       { providerId: 'deepinfra', providerModelId: 'nvidia/NVIDIA-Nemotron-3-Super-120B-A12B', priority: 1 },
