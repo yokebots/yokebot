@@ -867,11 +867,14 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           // Auto-set task status to 'blocked' so it won't be retried on next heartbeat
           if (result.taskBlocked) {
             // Find the most recent pending approval for this task (created by the request_approval tool)
-            const latestApproval = await db.queryOne<{ id: string }>(
-              `SELECT id FROM approvals WHERE agent_id = $1 AND team_id = $2 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
+            const latestApproval = await db.queryOne<{ id: string; action_type: string; action_detail: string; risk_level: string }>(
+              `SELECT id, action_type, action_detail, risk_level FROM approvals WHERE agent_id = $1 AND team_id = $2 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
               [agent.id, agent.teamId],
             )
-            await blockTask(db, task.id, 'approval_pending', latestApproval?.id)
+            const reasonText = latestApproval
+              ? `[${latestApproval.risk_level?.toUpperCase() ?? 'MEDIUM'}] ${latestApproval.action_type}: ${latestApproval.action_detail}`
+              : undefined
+            await blockTask(db, task.id, 'approval_pending', latestApproval?.id, reasonText)
             console.log(`[scheduler] Task "${task.title}" auto-set to blocked (approval_pending) — will not retry until unblocked`)
           }
 
@@ -964,11 +967,14 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               }
 
               if (result.taskBlocked) {
-                const latestApproval = await db.queryOne<{ id: string }>(
-                  `SELECT id FROM approvals WHERE agent_id = $1 AND team_id = $2 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
+                const latestApproval = await db.queryOne<{ id: string; action_type: string; action_detail: string; risk_level: string }>(
+                  `SELECT id, action_type, action_detail, risk_level FROM approvals WHERE agent_id = $1 AND team_id = $2 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
                   [agent.id, agent.teamId],
                 )
-                await blockTask(db, task.id, 'approval_pending', latestApproval?.id)
+                const reasonText = latestApproval
+                  ? `[${latestApproval.risk_level?.toUpperCase() ?? 'MEDIUM'}] ${latestApproval.action_type}: ${latestApproval.action_detail}`
+                  : undefined
+                await blockTask(db, task.id, 'approval_pending', latestApproval?.id, reasonText)
               }
 
               const cleanResponse = result.response ? stripToolSyntax(result.response) : null

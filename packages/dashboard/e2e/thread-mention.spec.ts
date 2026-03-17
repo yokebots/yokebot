@@ -29,13 +29,13 @@ test.afterAll(async () => {
 
 test.describe('thread and mention chips', () => {
   test.beforeEach(async ({ page }) => {
-    // Navigate to the app (any page on the domain to set localStorage)
     await page.goto('/')
     await injectSession(page, testUser)
-    // Navigate to workspace where TeamChat lives
+    // Mark product tour as completed so it doesn't block interaction
+    await page.evaluate(() => localStorage.setItem('yokebot:tourComplete', 'true'))
     await page.goto('/workspace')
-    // Wait for the chat input to appear — proves the page loaded and auth worked.
-    // Do NOT use networkidle — WebSocket/SSE connections keep the network busy forever.
+
+    // Wait for the chat input to appear
     await expect(
       page.locator('textarea[placeholder="Message your team..."]'),
     ).toBeVisible({ timeout: 30_000 })
@@ -124,9 +124,25 @@ test.describe('thread and mention chips', () => {
     const replyMessage = `Thread reply ${Date.now()}`
     await threadInput.click()
     await page.keyboard.type(replyMessage, { delay: 10 })
+
+    // Capture the network response when we send the reply
+    const responsePromise = page.waitForResponse(
+      resp => resp.url().includes('/messages') && resp.request().method() === 'POST',
+      { timeout: 15_000 },
+    ).catch(() => null)
+
     await page.keyboard.press('Enter')
 
-    // Wait a moment for the API call to resolve
+    const response = await responsePromise
+    if (response) {
+      console.log(`[e2e] Thread reply API: ${response.status()} ${response.statusText()}`)
+      if (!response.ok()) {
+        const body = await response.text().catch(() => '(no body)')
+        console.log(`[e2e] Thread reply error body: ${body}`)
+      }
+    }
+
+    // Wait a moment for the UI to update
     await page.waitForTimeout(2_000)
     await page.screenshot({ path: 'e2e/results/thread-reply-attempted.png' })
 
@@ -141,9 +157,9 @@ test.describe('thread and mention chips', () => {
       await expect(replyBubble).toBeVisible()
       await page.screenshot({ path: 'e2e/results/thread-reply-sent.png' })
     } else if (await errorBanner.isVisible().catch(() => false)) {
-      // Server rejected the reply — log it but don't fail the test.
-      // The UI-level thread + mention behaviors are already verified above.
-      console.warn('[e2e] Thread reply API returned an error — thread UI verified, reply delivery skipped')
+      // Server rejected the reply — capture the error text for debugging
+      const errorText = await errorBanner.textContent()
+      console.warn(`[e2e] Thread reply failed: ${errorText}`)
       await page.screenshot({ path: 'e2e/results/thread-reply-api-error.png' })
     } else {
       // Neither appeared — something unexpected, fail

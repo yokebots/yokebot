@@ -373,6 +373,7 @@ async function startStreamProxy(
 
         case 'navigate':
           if (typeof msg.url !== 'string' || msg.url.length > 2048) break
+          sendToClient(clientWs, { type: 'navigating', url: msg.url })
           void handleNavigate(msg.url, cdpWs, clientWs)
           break
 

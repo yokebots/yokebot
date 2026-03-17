@@ -137,10 +137,13 @@ export async function validateUrl(url: string): Promise<string> {
   }
 
   // Validate both IPv4 and IPv6 DNS resolution — fail closed on errors
+  // Use a 3s timeout to prevent slow IPv6 lookups from blocking navigation
   try {
+    const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('DNS timeout')), ms))])
     const [v4Addresses, v6Addresses] = await Promise.allSettled([
-      dns.resolve4(host),
-      dns.resolve6(host),
+      withTimeout(dns.resolve4(host), 3000),
+      withTimeout(dns.resolve6(host), 3000),
     ])
     const allAddresses: string[] = []
     if (v4Addresses.status === 'fulfilled') allAddresses.push(...v4Addresses.value)

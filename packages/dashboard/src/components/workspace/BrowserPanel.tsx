@@ -28,6 +28,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
   const [connected, setConnected] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(isAgentSession ? null : sessionId)
   const [zoom, setZoom] = useState(100)
+  const [navigating, setNavigating] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -91,13 +92,18 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
             const msg = JSON.parse(event.data)
 
             if (msg.type === 'frame' && msg.data) {
+              setNavigating(false)
               drawFrame(msg.data)
             } else if (msg.type === 'url') {
+              setNavigating(false)
               setCurrentUrl(msg.url)
               if (urlInputRef.current && document.activeElement !== urlInputRef.current) {
                 setUrlInput(msg.url)
               }
+            } else if (msg.type === 'navigating') {
+              setNavigating(true)
             } else if (msg.type === 'error') {
+              setNavigating(false)
               setError(msg.message)
             }
           } catch { /* ignore */ }
@@ -383,6 +389,13 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               <span className="material-symbols-outlined text-sm">open_in_new</span>
             </button>
           )}
+        </div>
+      )}
+
+      {/* Navigation loading bar */}
+      {navigating && (
+        <div className="h-0.5 bg-forest-green/20 overflow-hidden">
+          <div className="h-full bg-forest-green animate-pulse w-2/3" />
         </div>
       )}
 

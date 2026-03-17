@@ -47,13 +47,14 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, c
         senderType: 'human',
         senderId: 'user',
         content: text,
-        parentMessageId: parentMessage.id,
+        parentMessageId: Number(parentMessage.id),
       })
       setReplies(prev => [...prev, msg])
       setReplyText('')
     } catch (err) {
       console.error('[ThreadView] Failed to send reply:', err)
-      setError('Failed to send reply. Please try again.')
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      setError(`Failed to send reply: ${msg}`)
     }
     setSending(false)
   }

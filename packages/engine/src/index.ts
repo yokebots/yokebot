@@ -1399,7 +1399,7 @@ async function main() {
               agentIcon: agent.iconName ?? 'smart_toy',
               agentColor: agent.iconColor ?? '#0F4D26',
             })
-            await respondToMention(db, agent.id, teamId, channelId, { senderId, content })
+            await respondToMention(db, agent.id, teamId, channelId, { senderId, content, parentMessageId })
             broadcastChatEvent(channelId, {
               type: 'stop_typing', channelId, agentId: agent.id,
             })
