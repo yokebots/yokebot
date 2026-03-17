@@ -69,6 +69,7 @@ const sessions = new Map<string, BrowserSessionState>()
 const teamSessionCount = new Map<string, number>() // teamId → active count
 
 const MAX_SESSIONS_PER_TEAM = 2
+const MAX_GLOBAL_SESSIONS = 50 // hard cap on total Chromium processes across all teams
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000   // 10 minutes
 const MAX_DURATION_MS = 30 * 60 * 1000   // 30 minutes
 const AWAIT_HUMAN_IDLE_MS = 15 * 60 * 1000 // 15 min when waiting for human response
@@ -266,6 +267,9 @@ export async function createBrowserSession(
   userId: string,
   options?: { vaultSessionId?: string; startUrl?: string; db?: Db; mode?: BrowserSessionMode },
 ): Promise<{ sessionId: string; screenshot: string; url: string }> {
+  if (sessions.size >= MAX_GLOBAL_SESSIONS) {
+    throw new Error('Server is at maximum browser capacity. Please try again later.')
+  }
   if (getTeamCount(teamId) >= MAX_SESSIONS_PER_TEAM) {
     throw new Error(`Maximum ${MAX_SESSIONS_PER_TEAM} concurrent browser sessions per team. Close an existing session first.`)
   }
@@ -529,7 +533,8 @@ export async function restoreVaultToSession(
 
     // Navigate to the saved URL first (so localStorage/sessionStorage target the right origin)
     if (state.url) {
-      await session.page.goto(state.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+      const validUrl = await validateUrl(state.url)
+      await session.page.goto(validUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     }
 
     // Restore localStorage

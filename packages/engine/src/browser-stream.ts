@@ -42,6 +42,31 @@ export function setBrowserStreamTeamCheck(fn: (userId: string, teamId: string) =
   _checkTeamMembership = fn
 }
 
+// ---- Rate limiting & viewer caps ----
+
+const MAX_VIEWERS_PER_SESSION = 5
+const MAX_WS_CONNECTIONS_PER_USER = 3
+const WS_CONNECT_WINDOW_MS = 60_000 // 1 minute
+const MAX_WS_CONNECTS_PER_WINDOW = 10 // max 10 connection attempts per minute per IP
+
+// Track active viewers per session
+const sessionViewerCount = new Map<string, number>()
+// Track active connections per user
+const userConnectionCount = new Map<string, number>()
+// Track connection attempts per IP for rate limiting
+const ipConnectAttempts = new Map<string, { count: number; resetAt: number }>()
+
+function checkIpRateLimit(ip: string): boolean {
+  const now = Date.now()
+  const entry = ipConnectAttempts.get(ip)
+  if (!entry || now > entry.resetAt) {
+    ipConnectAttempts.set(ip, { count: 1, resetAt: now + WS_CONNECT_WINDOW_MS })
+    return true
+  }
+  entry.count++
+  return entry.count <= MAX_WS_CONNECTS_PER_WINDOW
+}
+
 // CDP message ID counter per connection
 let cdpIdCounter = 0
 function nextCdpId(): number {
@@ -85,6 +110,14 @@ export function installBrowserStreamHandler(server: Server): void {
       return
     }
 
+    // Rate limit by IP
+    const ip = req.socket.remoteAddress ?? 'unknown'
+    if (!checkIpRateLimit(ip)) {
+      socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n')
+      socket.destroy()
+      return
+    }
+
     // Authenticate and authorize, then upgrade
     void handleUpgrade(wss, req, socket, head, sessionId, token)
   })
@@ -106,7 +139,15 @@ async function handleUpgrade(
     return
   }
 
-  // 2. Verify session exists
+  // 2. Check per-user connection limit
+  const userConns = userConnectionCount.get(user.id) ?? 0
+  if (userConns >= MAX_WS_CONNECTIONS_PER_USER) {
+    socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n')
+    socket.destroy()
+    return
+  }
+
+  // 3. Verify session exists
   const session = getSessionInfo(sessionId)
   if (!session) {
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
@@ -114,7 +155,15 @@ async function handleUpgrade(
     return
   }
 
-  // 3. Verify team membership
+  // 4. Check per-session viewer limit
+  const viewers = sessionViewerCount.get(sessionId) ?? 0
+  if (viewers >= MAX_VIEWERS_PER_SESSION) {
+    socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n')
+    socket.destroy()
+    return
+  }
+
+  // 5. Verify team membership
   if (_checkTeamMembership) {
     const isMember = await _checkTeamMembership(user.id, session.teamId)
     if (!isMember) {
@@ -124,7 +173,7 @@ async function handleUpgrade(
     }
   }
 
-  // 4. Get CDP WebSocket URL
+  // 6. Get CDP WebSocket URL
   const cdpWsUrl = getSessionCdpUrl(sessionId)
   if (!cdpWsUrl) {
     socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n')
@@ -132,9 +181,25 @@ async function handleUpgrade(
     return
   }
 
-  // 5. Upgrade the connection
+  // 7. Upgrade the connection and track counts
   wss.handleUpgrade(req, socket, head, (clientWs) => {
     wss.emit('connection', clientWs, req)
+
+    // Increment viewer + user counts
+    sessionViewerCount.set(sessionId, (sessionViewerCount.get(sessionId) ?? 0) + 1)
+    userConnectionCount.set(user.id, (userConnectionCount.get(user.id) ?? 0) + 1)
+
+    // Decrement on close
+    clientWs.on('close', () => {
+      const vc = (sessionViewerCount.get(sessionId) ?? 1) - 1
+      if (vc <= 0) sessionViewerCount.delete(sessionId)
+      else sessionViewerCount.set(sessionId, vc)
+
+      const uc = (userConnectionCount.get(user.id) ?? 1) - 1
+      if (uc <= 0) userConnectionCount.delete(user.id)
+      else userConnectionCount.set(user.id, uc)
+    })
+
     void startStreamProxy(clientWs, sessionId, cdpWsUrl)
   })
 }
@@ -232,21 +297,29 @@ async function startStreamProxy(
   // Handle client input messages
   clientWs.on('message', (raw) => {
     try {
+      // Reject oversized messages (max 10KB — no legitimate input message is larger)
+      if (raw.toString().length > 10_240) return
+
       const msg = JSON.parse(raw.toString())
       touchSession(sessionId)
 
       switch (msg.type) {
-        case 'click':
+        case 'click': {
+          const x = Number(msg.x)
+          const y = Number(msg.y)
+          if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 5000 || y > 5000) break
           cdpSend(cdpWs, 'Input.dispatchMouseEvent', {
-            type: 'mousePressed', x: msg.x, y: msg.y, button: 'left', clickCount: 1,
+            type: 'mousePressed', x, y, button: 'left', clickCount: 1,
           })
           cdpSend(cdpWs, 'Input.dispatchMouseEvent', {
-            type: 'mouseReleased', x: msg.x, y: msg.y, button: 'left', clickCount: 1,
+            type: 'mouseReleased', x, y, button: 'left', clickCount: 1,
           })
           break
+        }
 
-        case 'type':
-          for (const char of msg.text ?? '') {
+        case 'type': {
+          const text = typeof msg.text === 'string' ? msg.text.slice(0, 1000) : ''
+          for (const char of text) {
             cdpSend(cdpWs, 'Input.dispatchKeyEvent', {
               type: 'keyDown', text: char, key: char, unmodifiedText: char,
             })
@@ -255,8 +328,10 @@ async function startStreamProxy(
             })
           }
           break
+        }
 
         case 'press': {
+          if (typeof msg.key !== 'string' || msg.key.length > 50) break
           const keyInfo = KEY_MAP[msg.key]
           if (keyInfo) {
             cdpSend(cdpWs, 'Input.dispatchKeyEvent', {
@@ -282,17 +357,21 @@ async function startStreamProxy(
           break
         }
 
-        case 'scroll':
+        case 'scroll': {
+          const sx = Number(msg.x ?? 640)
+          const sy = Number(msg.y ?? 400)
+          const dx = Number(msg.deltaX ?? 0)
+          const dy = Number(msg.deltaY ?? 0)
+          if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx < 0 || sy < 0 || sx > 5000 || sy > 5000) break
+          if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) > 10000 || Math.abs(dy) > 10000) break
           cdpSend(cdpWs, 'Input.dispatchMouseEvent', {
-            type: 'mouseWheel',
-            x: msg.x ?? 640,
-            y: msg.y ?? 400,
-            deltaX: msg.deltaX ?? 0,
-            deltaY: msg.deltaY ?? 0,
+            type: 'mouseWheel', x: sx, y: sy, deltaX: dx, deltaY: dy,
           })
           break
+        }
 
         case 'navigate':
+          if (typeof msg.url !== 'string' || msg.url.length > 2048) break
           void handleNavigate(msg.url, cdpWs, clientWs)
           break
 
