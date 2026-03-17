@@ -213,19 +213,21 @@ async function startStreamProxy(
   sessionId: string,
   cdpWsUrl: string,
 ): Promise<void> {
-  // Connect to the browser page's CDP endpoint
-  // First, get the page's target ID from the browser CDP endpoint
-  let pageWsUrl: string
+  // Find the page target ID (needed for Target.attachToTarget)
+  let pageTargetId: string
   try {
-    pageWsUrl = await getPageCdpUrl(cdpWsUrl)
+    pageTargetId = await getPageTargetId(cdpWsUrl)
   } catch (err) {
     sendToClient(clientWs, { type: 'error', message: `Failed to find page target: ${(err as Error).message}` })
     clientWs.close()
     return
   }
 
-  const cdpWs = new WebSocket(pageWsUrl)
+  // Connect to the BROWSER-level CDP WebSocket (not page-level).
+  // Browser-level connections survive cross-origin navigations.
+  const cdpWs = new WebSocket(cdpWsUrl)
   const pendingCallbacks = new Map<number, (result: unknown) => void>()
+  let cdpSessionId: string | undefined // CDP session ID for the attached page target
 
   // Wait for CDP connection
   await new Promise<void>((resolve, reject) => {
@@ -233,6 +235,32 @@ async function startStreamProxy(
     cdpWs.on('error', reject)
     setTimeout(() => reject(new Error('CDP connection timeout')), 5000)
   })
+
+  // Helper to send CDP command and await result
+  function cdpCall(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+    return new Promise((resolve) => {
+      const id = nextCdpId()
+      pendingCallbacks.set(id, resolve)
+      // If we have a session ID, route commands through it
+      const msg = cdpSessionId
+        ? { id, method, params, sessionId: cdpSessionId }
+        : { id, method, params }
+      cdpWs.send(JSON.stringify(msg))
+      // Timeout after 10s
+      setTimeout(() => {
+        if (pendingCallbacks.has(id)) {
+          pendingCallbacks.delete(id)
+          resolve(undefined)
+        }
+      }, 10_000)
+    })
+  }
+
+  // Helper to fire-and-forget a CDP command to the attached page session
+  function cdpSendToPage(method: string, params: Record<string, unknown> = {}): void {
+    if (!cdpSessionId) return
+    cdpWs.send(JSON.stringify({ id: nextCdpId(), method, params, sessionId: cdpSessionId }))
+  }
 
   // Handle CDP messages
   cdpWs.on('message', (data) => {
@@ -247,10 +275,10 @@ async function startStreamProxy(
         return
       }
 
-      // Handle screencast frames
+      // Handle events from the attached page session
+      // When using flatten: true, events come with a sessionId field
       if (msg.method === 'Page.screencastFrame') {
         const { data: frameData, metadata, sessionId: frameSessionId } = msg.params
-        // Send frame to client
         sendToClient(clientWs, {
           type: 'frame',
           data: frameData,
@@ -258,7 +286,7 @@ async function startStreamProxy(
           timestamp: metadata?.timestamp,
         })
         // Acknowledge the frame (required for backpressure)
-        cdpSend(cdpWs, 'Page.screencastFrameAck', { sessionId: frameSessionId })
+        cdpSendToPage('Page.screencastFrameAck', { sessionId: frameSessionId })
         return
       }
 
@@ -266,34 +294,58 @@ async function startStreamProxy(
       if (msg.method === 'Page.frameNavigated' && msg.params?.frame?.parentId === undefined) {
         sendToClient(clientWs, { type: 'url', url: msg.params.frame.url })
       }
+
+      // Handle target destroyed — page navigated cross-origin, target replaced
+      if (msg.method === 'Target.targetDestroyed' && msg.params?.targetId === pageTargetId) {
+        // The old page target is gone — try to re-attach to the new page target
+        void reattachToPage()
+      }
+
+      // Handle new target created (cross-origin navigation creates a new page target)
+      if (msg.method === 'Target.targetCreated' && msg.params?.targetInfo?.type === 'page') {
+        pageTargetId = msg.params.targetInfo.targetId
+      }
     } catch { /* ignore parse errors */ }
   })
 
-  // Enable page events and start screencast
-  cdpSend(cdpWs, 'Page.enable', {})
-  cdpSend(cdpWs, 'Page.startScreencast', {
-    format: 'jpeg',
-    quality: 60,
-    maxWidth: 1280,
-    maxHeight: 800,
-    everyNthFrame: 1, // every frame for responsive feel
-  })
+  // Attach to the page target using flatten mode (events come through browser WS)
+  async function attachToPage(): Promise<void> {
+    const result = await cdpCall('Target.attachToTarget', {
+      targetId: pageTargetId,
+      flatten: true,
+    }) as { sessionId?: string } | undefined
+    cdpSessionId = result?.sessionId
+    if (!cdpSessionId) {
+      sendToClient(clientWs, { type: 'error', message: 'Failed to attach to page target' })
+      return
+    }
 
-  // Helper to send CDP command and await result
-  function cdpCall(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
-    return new Promise((resolve) => {
-      const id = nextCdpId()
-      pendingCallbacks.set(id, resolve)
-      cdpWs.send(JSON.stringify({ id, method, params }))
-      // Timeout after 10s
-      setTimeout(() => {
-        if (pendingCallbacks.has(id)) {
-          pendingCallbacks.delete(id)
-          resolve(undefined)
-        }
-      }, 10_000)
+    // Enable page events and start screencast on the attached session
+    cdpSendToPage('Page.enable', {})
+    cdpSendToPage('Page.startScreencast', {
+      format: 'jpeg',
+      quality: 60,
+      maxWidth: 1280,
+      maxHeight: 800,
+      everyNthFrame: 1,
     })
   }
+
+  // Re-attach after cross-origin navigation
+  async function reattachToPage(): Promise<void> {
+    // Wait a moment for the new target to settle
+    await new Promise(r => setTimeout(r, 200))
+    // Find the new page target
+    try {
+      pageTargetId = await getPageTargetId(cdpWsUrl)
+    } catch { /* use whatever pageTargetId we last saw */ }
+    await attachToPage()
+  }
+
+  // Listen for target lifecycle events at the browser level
+  await cdpCall('Target.setDiscoverTargets', { discover: true })
+  // Initial attach
+  await attachToPage()
 
   // Handle client input messages
   clientWs.on('message', (raw) => {
@@ -309,10 +361,10 @@ async function startStreamProxy(
           const x = Number(msg.x)
           const y = Number(msg.y)
           if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 5000 || y > 5000) break
-          cdpSend(cdpWs, 'Input.dispatchMouseEvent', {
+          cdpSendToPage('Input.dispatchMouseEvent', {
             type: 'mousePressed', x, y, button: 'left', clickCount: 1,
           })
-          cdpSend(cdpWs, 'Input.dispatchMouseEvent', {
+          cdpSendToPage('Input.dispatchMouseEvent', {
             type: 'mouseReleased', x, y, button: 'left', clickCount: 1,
           })
           break
@@ -321,10 +373,10 @@ async function startStreamProxy(
         case 'type': {
           const text = typeof msg.text === 'string' ? msg.text.slice(0, 1000) : ''
           for (const char of text) {
-            cdpSend(cdpWs, 'Input.dispatchKeyEvent', {
+            cdpSendToPage('Input.dispatchKeyEvent', {
               type: 'keyDown', text: char, key: char, unmodifiedText: char,
             })
-            cdpSend(cdpWs, 'Input.dispatchKeyEvent', {
+            cdpSendToPage('Input.dispatchKeyEvent', {
               type: 'keyUp', key: char,
             })
           }
@@ -335,7 +387,7 @@ async function startStreamProxy(
           if (typeof msg.key !== 'string' || msg.key.length > 50) break
           const keyInfo = KEY_MAP[msg.key]
           if (keyInfo) {
-            cdpSend(cdpWs, 'Input.dispatchKeyEvent', {
+            cdpSendToPage('Input.dispatchKeyEvent', {
               type: 'keyDown',
               key: keyInfo.key,
               code: keyInfo.code,
@@ -343,7 +395,7 @@ async function startStreamProxy(
               nativeVirtualKeyCode: keyInfo.keyCode,
               text: keyInfo.text,
             })
-            cdpSend(cdpWs, 'Input.dispatchKeyEvent', {
+            cdpSendToPage('Input.dispatchKeyEvent', {
               type: 'keyUp',
               key: keyInfo.key,
               code: keyInfo.code,
@@ -352,8 +404,8 @@ async function startStreamProxy(
             })
           } else {
             // Generic key press
-            cdpSend(cdpWs, 'Input.dispatchKeyEvent', { type: 'keyDown', key: msg.key })
-            cdpSend(cdpWs, 'Input.dispatchKeyEvent', { type: 'keyUp', key: msg.key })
+            cdpSendToPage('Input.dispatchKeyEvent', { type: 'keyDown', key: msg.key })
+            cdpSendToPage('Input.dispatchKeyEvent', { type: 'keyUp', key: msg.key })
           }
           break
         }
@@ -365,7 +417,7 @@ async function startStreamProxy(
           const dy = Number(msg.deltaY ?? 0)
           if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx < 0 || sy < 0 || sx > 5000 || sy > 5000) break
           if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) > 10000 || Math.abs(dy) > 10000) break
-          cdpSend(cdpWs, 'Input.dispatchMouseEvent', {
+          cdpSendToPage('Input.dispatchMouseEvent', {
             type: 'mouseWheel', x: sx, y: sy, deltaX: dx, deltaY: dy,
           })
           break
@@ -374,15 +426,15 @@ async function startStreamProxy(
         case 'navigate':
           if (typeof msg.url !== 'string' || msg.url.length > 2048) break
           sendToClient(clientWs, { type: 'navigating', url: msg.url })
-          void handleNavigate(msg.url, cdpWs, clientWs)
+          void handleNavigate(msg.url, cdpWs, clientWs, cdpSessionId)
           break
 
         case 'back':
-          void handleHistoryNav(cdpCall, cdpWs, 'back')
+          void handleHistoryNav(cdpCall, cdpWs, 'back', cdpSessionId)
           break
 
         case 'forward':
-          void handleHistoryNav(cdpCall, cdpWs, 'forward')
+          void handleHistoryNav(cdpCall, cdpWs, 'forward', cdpSessionId)
           break
 
         case 'control':
@@ -398,7 +450,7 @@ async function startStreamProxy(
   clientWs.on('close', () => {
     // Stop screencast but DON'T close the browser (agent may still be using it)
     try {
-      cdpSend(cdpWs, 'Page.stopScreencast', {})
+      cdpSendToPage('Page.stopScreencast', {})
     } catch { /* best effort */ }
     setTimeout(() => {
       try { cdpWs.close() } catch { /* best effort */ }
@@ -420,25 +472,25 @@ async function startStreamProxy(
   })
 }
 
-/** Get the first page's CDP WebSocket URL from the browser endpoint. */
-async function getPageCdpUrl(browserWsUrl: string): Promise<string> {
-  // Browser CDP URL: ws://127.0.0.1:PORT/devtools/browser/UUID
-  // We need: ws://127.0.0.1:PORT/devtools/page/TARGET_ID
-  // Get target list from the HTTP API
+/** Get the first page's target ID from the browser endpoint. */
+async function getPageTargetId(browserWsUrl: string): Promise<string> {
   const httpUrl = browserWsUrl.replace('ws://', 'http://').replace(/\/devtools\/browser\/.*/, '/json')
   const response = await fetch(httpUrl)
-  const targets = await response.json() as Array<{ type: string; webSocketDebuggerUrl: string }>
+  const targets = await response.json() as Array<{ type: string; id: string; webSocketDebuggerUrl: string }>
   const page = targets.find(t => t.type === 'page')
-  if (!page?.webSocketDebuggerUrl) {
+  if (!page?.id) {
     throw new Error('No page target found in Chromium')
   }
-  return page.webSocketDebuggerUrl
+  return page.id
 }
 
 /** Send a CDP command (fire and forget). */
-function cdpSend(ws: WebSocket, method: string, params: Record<string, unknown>): void {
+function cdpSend(ws: WebSocket, method: string, params: Record<string, unknown>, sessionId?: string): void {
   if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ id: nextCdpId(), method, params }))
+    const msg = sessionId
+      ? { id: nextCdpId(), method, params, sessionId }
+      : { id: nextCdpId(), method, params }
+    ws.send(JSON.stringify(msg))
   }
 }
 
@@ -450,10 +502,10 @@ function sendToClient(ws: WebSocket, msg: Record<string, unknown>): void {
 }
 
 /** Handle navigate command with SSRF validation. */
-async function handleNavigate(url: string, cdpWs: WebSocket, clientWs: WebSocket): Promise<void> {
+async function handleNavigate(url: string, cdpWs: WebSocket, clientWs: WebSocket, sessionId?: string): Promise<void> {
   try {
     const validUrl = await validateUrl(url)
-    cdpSend(cdpWs, 'Page.navigate', { url: validUrl })
+    cdpSend(cdpWs, 'Page.navigate', { url: validUrl }, sessionId)
   } catch (err) {
     sendToClient(clientWs, { type: 'error', message: (err as Error).message })
   }
@@ -464,6 +516,7 @@ async function handleHistoryNav(
   cdpCall: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
   cdpWs: WebSocket,
   direction: 'back' | 'forward',
+  sessionId?: string,
 ): Promise<void> {
   const history = await cdpCall('Page.getNavigationHistory') as {
     currentIndex: number
@@ -474,5 +527,5 @@ async function handleHistoryNav(
   const targetIndex = direction === 'back' ? history.currentIndex - 1 : history.currentIndex + 1
   if (targetIndex < 0 || targetIndex >= history.entries.length) return
 
-  cdpSend(cdpWs, 'Page.navigateToHistoryEntry', { entryId: history.entries[targetIndex].id })
+  cdpSend(cdpWs, 'Page.navigateToHistoryEntry', { entryId: history.entries[targetIndex].id }, sessionId)
 }
