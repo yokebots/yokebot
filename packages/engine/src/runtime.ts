@@ -2185,6 +2185,8 @@ export async function runReactLoop(
   const setupMs = Date.now() - reactStart
   console.log(`[runtime] React loop setup: ${setupMs}ms (${tailMessages.length} tail msgs, ${memoryNodes.length} memory nodes, ${tools.length} tools)`)
 
+  console.log(`[runtime] v2 — react loop start for agent ${agentId}, maxIters=${config.maxIterations}`)
+
   for (let i = 0; i < config.maxIterations; i++) {
     // Deduct LLM credits before each ReAct iteration (hosted mode only, skip for free agents like AdvisorBot)
     if (HOSTED_MODE && logicalModelId && !config.skipCredits) {
@@ -2214,6 +2216,8 @@ export async function runReactLoop(
       if (!response) response = "I ran into a temporary issue communicating with my AI model. I'll pick this back up on my next check-in."
       break
     }
+
+    console.log(`[runtime] Iteration ${i + 1}: content=${completion.content ? completion.content.length + ' chars' : 'null'}, tool_calls=${completion.tool_calls.length}`)
 
     // If the model returned tool calls, execute them
     if (completion.tool_calls.length > 0) {
@@ -2333,6 +2337,7 @@ export async function runReactLoop(
           continue
         }
 
+        console.log(`[runtime] EXIT via respond tool (iteration ${i + 1}, ${browserToolCount} browser calls)`)
         await addMessage(db, agentId, 'assistant', response, teamId)
         emitProgress('idle', 'Done', i + 1)
         return { response, iterations: i + 1, toolCalls: toolCallLog }
@@ -2457,14 +2462,31 @@ export async function runReactLoop(
       }
 
       // Genuinely done or late in the budget — extract and return
+      console.log(`[runtime] EXIT via plain text (iteration ${i + 1}, hasMadeRealProgress=${hasMadeRealProgress}, isEarlyInBudget=${isEarlyInBudget})`)
       response = extractHumanMessage(completion.content)
       await addMessage(db, agentId, 'assistant', response, teamId)
       emitProgress('idle', 'Done', i + 1)
       return { response, iterations: i + 1, toolCalls: toolCallLog }
     }
 
-    // Empty response — shouldn't happen, but break to be safe
-    break
+    // Empty response — model returned null content and no tool calls.
+    // This happens when the adapter strips tool markup but can't parse valid tools.
+    // Retry by prompting the model to use tools properly.
+    consecutiveNoToolIterations++
+    console.log(`[runtime] Empty response on iteration ${i + 1} (${consecutiveNoToolIterations} consecutive no-tool iters) — retrying`)
+    if (consecutiveNoToolIterations >= 3) {
+      console.log(`[runtime] EXIT via repeated empty responses (iteration ${i + 1})`)
+      break
+    }
+    messages.push({
+      role: 'assistant',
+      content: 'I need to continue working on this task.',
+    })
+    messages.push({
+      role: 'user',
+      content: 'Continue. Use your tools to take action. Call browser_click to explore more pages on the site.',
+    })
+    continue
   }
 
   // If we hit max iterations without a response

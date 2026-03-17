@@ -722,6 +722,9 @@ export async function chatCompletion(
       // Safety net: strip any leaked XML tool markup from content before returning
       // This prevents raw tags like <function=think> from appearing in chat
       if (content && (content.includes('<function=') || content.includes('<tool_call>') || content.includes('<parameter='))) {
+        if (toolCalls.length === 0) {
+          console.log(`[model] WARNING: Content has tool markup but no tool calls parsed. Raw content (first 500 chars): ${content.slice(0, 500)}`)
+        }
         if (adapter) {
           content = adapter.stripMarkup(content) || null
         } else {
