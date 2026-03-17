@@ -1935,6 +1935,14 @@ export async function getAgentBrowserScreenshot(agentId: string): Promise<{ scre
   return request(`/api/agents/${agentId}/browser/screenshot`)
 }
 
+/** Build a WebSocket URL for CDP Screencast streaming. */
+export async function getBrowserStreamUrl(sessionId: string): Promise<string> {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token ?? ''
+  const wsBase = ENGINE_URL.replace(/^http/, 'ws')
+  return `${wsBase}/api/browser-sessions/${sessionId}/stream?token=${encodeURIComponent(token)}`
+}
+
 // ---- Sandbox (Daytona app-building) ----
 
 export interface SandboxStatus {

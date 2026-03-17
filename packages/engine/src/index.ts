@@ -52,10 +52,11 @@ import {
 import {
   createBrowserSession, interactWithSession, getSessionScreenshot,
   navigateSession, saveSessionToVault, closeBrowserSession as closeBrowserSess,
-  listActiveSessions, getSessionInfo,
+  listActiveSessions, getSessionInfo, setSessionController,
   type InteractionAction as BrowserInteractionAction,
 } from './browser-sessions.ts'
 import { captureAgentScreenshot, setBrowserBroadcast } from './browser.ts'
+import { installBrowserStreamHandler, setBrowserStreamTeamCheck } from './browser-stream.ts'
 import { listServices } from './services.ts'
 import { listTemplates, getTemplate } from './templates.ts'
 import { listMcpServers, addMcpServer, removeMcpServer, connectMcpServer } from './mcp-client.ts'
@@ -4704,6 +4705,13 @@ ${truncated}`,
     // But the API server still needs workspace/skills state for respondToMention.
     initSchedulerState(workspaceConfig, SKILLS_DIR)
   })
+
+  // CDP Screencast WebSocket proxy for browser sessions
+  setBrowserStreamTeamCheck(async (userId: string, teamId: string) => {
+    const members = await getTeamMembers(db, teamId)
+    return members.some(m => m.userId === userId)
+  })
+  installBrowserStreamHandler(server)
 
   // WebSocket upgrade handler for Vite HMR through the sandbox proxy
   server.on('upgrade', (req, socket, head) => {

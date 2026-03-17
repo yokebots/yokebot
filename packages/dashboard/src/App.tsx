@@ -29,6 +29,7 @@ import { WorkflowBuilderPage } from '@/pages/WorkflowBuilderPage'
 import { WorkflowRunPage } from '@/pages/WorkflowRunPage'
 import { WorkspacePage } from '@/pages/WorkspacePage'
 import { SessionVaultPage } from '@/pages/SessionVaultPage'
+import { BrowserPopoutPage } from '@/pages/BrowserPopoutPage'
 import { BrandKitPage } from '@/pages/BrandKitPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LoginPage } from '@/pages/LoginPage'
@@ -103,6 +104,7 @@ function AppRoutes() {
       <Route path="login" element={<LoginPage />} />
       <Route path="auth/callback" element={<AuthCallbackPage />} />
       <Route path="onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
+      <Route path="browser-popout" element={<ProtectedRoute><BrowserPopoutPage /></ProtectedRoute>} />
       <Route path="terms" element={<TermsPage />} />
       <Route path="privacy" element={<PrivacyPage />} />
       <Route path="pricing" element={<PricingPage />} />

@@ -1,230 +1,27 @@
 /**
- * browser.ts — Browser-use via Playwright MCP server
+ * browser.ts — Agent browser tools using shared CDP Chromium
  *
- * Spawns @playwright/mcp as a child process and communicates via
- * JSON-RPC over stdio. Provides agents with accessibility-tree-based
- * web browsing — no screenshots needed for most interactions.
+ * Agents use the same Chromium instance as humans (managed by browser-sessions.ts).
+ * Browser tools (navigate, click, type, etc.) execute via Playwright connected
+ * to the shared CDP session. This enables real-time observation: humans see
+ * every agent action via CDP Screencast.
  *
  * Session lifecycle:
- *  - Created lazily on first browser tool call
- *  - Auto-terminates after 5 min idle
- *  - One session per agent at a time
+ *  - Created lazily on first browser tool call via createBrowserSession()
+ *  - Shared with human viewers (same page, same cookies, same state)
+ *  - Auto-cleanup via browser-sessions.ts idle/expiry timers
  */
 
-import { spawn, type ChildProcess } from 'child_process'
-import { randomUUID } from 'crypto'
-import { createInterface, type Interface } from 'readline'
+import {
+  createBrowserSession,
+  getSessionInfo,
+  closeBrowserSession,
+  setSessionController,
+  type BrowserSessionState,
+} from './browser-sessions.ts'
 
-interface JsonRpcRequest {
-  jsonrpc: '2.0'
-  id: string | number
-  method: string
-  params?: Record<string, unknown>
-}
-
-interface JsonRpcResponse {
-  jsonrpc: '2.0'
-  id: string | number
-  result?: unknown
-  error?: { code: number; message: string; data?: unknown }
-}
-
-interface RecordingState {
-  saveTo: string
-  frames: string[] // base64 PNG data
-}
-
-interface BrowserSession {
-  process: ChildProcess
-  readline: Interface
-  pending: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>
-  lastActivity: number
-  idleTimer: ReturnType<typeof setTimeout>
-  recording?: RecordingState
-}
-
-// Active sessions keyed by agentId
-const sessions = new Map<string, BrowserSession>()
-
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
-const TOOL_TIMEOUT_MS = 30_000 // 30 seconds per tool call
-
-/**
- * Send a JSON-RPC request to the MCP server and wait for the response.
- */
-function sendRequest(session: BrowserSession, method: string, params?: Record<string, unknown>): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const id = randomUUID()
-    const request: JsonRpcRequest = { jsonrpc: '2.0', id, method, params }
-
-    session.pending.set(id, { resolve, reject })
-
-    // Timeout for individual requests
-    const timer = setTimeout(() => {
-      session.pending.delete(id)
-      reject(new Error(`Browser MCP request timed out: ${method}`))
-    }, TOOL_TIMEOUT_MS)
-
-    session.pending.set(id, {
-      resolve: (v) => { clearTimeout(timer); resolve(v) },
-      reject: (e) => { clearTimeout(timer); reject(e) },
-    })
-
-    session.process.stdin?.write(JSON.stringify(request) + '\n')
-    session.lastActivity = Date.now()
-  })
-}
-
-/**
- * Reset the idle timer for a session.
- */
-function resetIdleTimer(agentId: string, session: BrowserSession) {
-  clearTimeout(session.idleTimer)
-  session.idleTimer = setTimeout(() => {
-    closeBrowserSession(agentId)
-  }, IDLE_TIMEOUT_MS)
-}
-
-/**
- * Start a browser session for an agent by spawning the Playwright MCP server.
- * If storageStatePath is provided, the browser will load that session state
- * (cookies, localStorage) from the given JSON file.
- */
-async function startBrowserSession(agentId: string, storageStatePath?: string): Promise<BrowserSession> {
-  // Kill any existing session
-  if (sessions.has(agentId)) {
-    await closeBrowserSession(agentId)
-  }
-
-  const mcpArgs = ['@playwright/mcp@latest', '--headless']
-  if (storageStatePath) {
-    mcpArgs.push('--storage-state', storageStatePath)
-  }
-
-  const child = spawn('npx', mcpArgs, {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      HOME: process.env.HOME,
-      PATH: process.env.PATH,
-      DISPLAY: process.env.DISPLAY,
-      NODE_ENV: process.env.NODE_ENV,
-    },
-  })
-
-  const readline = createInterface({ input: child.stdout! })
-  const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
-
-  const session: BrowserSession = {
-    process: child,
-    readline,
-    pending,
-    lastActivity: Date.now(),
-    idleTimer: setTimeout(() => closeBrowserSession(agentId), IDLE_TIMEOUT_MS),
-  }
-
-  // Handle JSON-RPC responses from stdout
-  readline.on('line', (line) => {
-    try {
-      const response = JSON.parse(line) as JsonRpcResponse
-      if (response.id && pending.has(String(response.id))) {
-        const { resolve, reject } = pending.get(String(response.id))!
-        pending.delete(String(response.id))
-        if (response.error) {
-          reject(new Error(response.error.message))
-        } else {
-          resolve(response.result)
-        }
-      }
-    } catch {
-      // Not JSON or not a response — ignore
-    }
-  })
-
-  // Handle process exit
-  child.on('exit', (code) => {
-    // Reject all pending requests
-    for (const [, { reject }] of pending) {
-      reject(new Error(`Browser process exited with code ${code}`))
-    }
-    pending.clear()
-    sessions.delete(agentId)
-    clearTimeout(session.idleTimer)
-  })
-
-  // Log stderr for debugging
-  child.stderr?.on('data', (data) => {
-    const msg = data.toString().trim()
-    if (msg) console.warn(`[browser:${agentId.slice(0, 8)}] ${msg}`)
-  })
-
-  sessions.set(agentId, session)
-
-  // Initialize the MCP connection
-  try {
-    await sendRequest(session, 'initialize', {
-      protocolVersion: '2024-11-05',
-      capabilities: {},
-      clientInfo: { name: 'yokebot-browser', version: '1.0.0' },
-    })
-  } catch (err) {
-    await closeBrowserSession(agentId)
-    throw new Error(`Failed to initialize browser session: ${(err as Error).message}`)
-  }
-
-  return session
-}
-
-/**
- * Close a browser session and clean up resources.
- */
-export async function closeBrowserSession(agentId: string): Promise<void> {
-  const session = sessions.get(agentId)
-  if (!session) return
-
-  clearTimeout(session.idleTimer)
-  session.readline.close()
-
-  // Gracefully terminate
-  try {
-    session.process.kill('SIGTERM')
-    // Give it 2 seconds to exit, then force kill
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        session.process.kill('SIGKILL')
-        resolve()
-      }, 2000)
-      session.process.on('exit', () => {
-        clearTimeout(timer)
-        resolve()
-      })
-    })
-  } catch {
-    // Already dead
-  }
-
-  sessions.delete(agentId)
-}
-
-/**
- * Get or create a browser session for an agent.
- */
-async function getSession(agentId: string): Promise<BrowserSession> {
-  let session = sessions.get(agentId)
-  if (!session || session.process.exitCode !== null) {
-    session = await startBrowserSession(agentId)
-  }
-  resetIdleTimer(agentId, session)
-  return session
-}
-
-/**
- * Restart an agent's browser session with a storageState file,
- * giving the agent authenticated access to a site.
- */
-export async function restartWithStorageState(agentId: string, storageStatePath: string): Promise<void> {
-  await closeBrowserSession(agentId)
-  await startBrowserSession(agentId, storageStatePath)
-}
+// Maps agentId → browser session ID (shared with browser-sessions.ts)
+const agentSessions = new Map<string, string>()
 
 // Broadcast callback — set by index.ts to push browser_frame SSE events
 let broadcastFn: ((teamId: string, event: string, data: unknown) => void) | null = null
@@ -234,32 +31,89 @@ export function setBrowserBroadcast(fn: (teamId: string, event: string, data: un
 }
 
 /**
- * Capture a screenshot from an agent's active MCP browser session.
+ * Get or create a browser session for an agent.
+ * Reuses an existing session if one is already active.
+ */
+async function getAgentSession(agentId: string, teamId?: string): Promise<BrowserSessionState> {
+  // Check for existing session
+  const existingId = agentSessions.get(agentId)
+  if (existingId) {
+    const session = getSessionInfo(existingId)
+    if (session && session.browser.isConnected()) {
+      return session
+    }
+    // Session is dead, clean up reference
+    agentSessions.delete(agentId)
+  }
+
+  // Create a new shared session
+  if (!teamId) throw new Error('Cannot create browser session without teamId')
+
+  const result = await createBrowserSession(teamId, `agent:${agentId}`, {
+    mode: 'agent_browser',
+  })
+
+  agentSessions.set(agentId, result.sessionId)
+  const session = getSessionInfo(result.sessionId)
+  if (!session) throw new Error('Failed to create browser session')
+
+  return session
+}
+
+/**
+ * Close a browser session for an agent.
+ */
+export async function closeBrowserSessionForAgent(agentId: string): Promise<void> {
+  const sessionId = agentSessions.get(agentId)
+  if (!sessionId) return
+
+  agentSessions.delete(agentId)
+  await closeBrowserSession(sessionId)
+}
+
+/**
+ * Restart an agent's browser session with vault state.
+ * Used by use_saved_login — restores cookies/storage via CDP.
+ */
+export async function restartWithVaultState(
+  agentId: string,
+  teamId: string,
+  vaultSessionId: string,
+  db: import('./db/types.ts').Db,
+): Promise<void> {
+  // Close existing session if any
+  await closeBrowserSessionForAgent(agentId)
+
+  // Create new session with vault state
+  const result = await createBrowserSession(teamId, `agent:${agentId}`, {
+    mode: 'agent_browser',
+    vaultSessionId,
+    db,
+  })
+
+  agentSessions.set(agentId, result.sessionId)
+}
+
+/**
+ * Capture a screenshot from an agent's active browser session.
  * Returns base64 PNG or null if no active session.
  */
 export async function captureAgentScreenshot(agentId: string): Promise<{ screenshot: string; url: string } | null> {
-  const session = sessions.get(agentId)
-  if (!session || session.process.exitCode !== null) return null
+  const sessionId = agentSessions.get(agentId)
+  if (!sessionId) return null
+
+  const session = getSessionInfo(sessionId)
+  if (!session || !session.browser.isConnected()) {
+    agentSessions.delete(agentId)
+    return null
+  }
 
   try {
-    const snap = await sendRequest(session, 'tools/call', {
-      name: 'browser_take_screenshot',
-      arguments: {},
-    }) as { content?: Array<{ type: string; data?: string; text?: string }> }
-    const frameData = snap?.content?.find((c) => c.type === 'image')?.data
-    // Try to extract URL from a snapshot call
-    let url = ''
-    try {
-      const navSnap = await sendRequest(session, 'tools/call', {
-        name: 'browser_snapshot',
-        arguments: {},
-      }) as { content?: Array<{ type: string; text?: string }> }
-      const text = navSnap?.content?.find(c => c.type === 'text')?.text ?? ''
-      const urlMatch = text.match(/- url: (https?:\/\/\S+)/)
-      if (urlMatch) url = urlMatch[1]
-    } catch { /* ignore */ }
-    if (frameData) return { screenshot: frameData, url }
-    return null
+    const screenshot = await session.page.screenshot({ type: 'png' })
+    return {
+      screenshot: screenshot.toString('base64'),
+      url: session.page.url(),
+    }
   } catch {
     return null
   }
@@ -268,7 +122,7 @@ export async function captureAgentScreenshot(agentId: string): Promise<{ screens
 /**
  * Execute a browser tool call for an agent.
  * Returns the result string or null if the tool name is not a browser tool.
- * If teamId is provided, broadcasts a browser_frame SSE event after each action.
+ * Uses Playwright directly connected to the shared CDP Chromium instance.
  */
 export async function executeBrowserTool(
   agentId: string,
@@ -276,171 +130,193 @@ export async function executeBrowserTool(
   args: Record<string, unknown>,
   teamId?: string,
 ): Promise<string | null> {
-  // Map YokeBot tool names to Playwright MCP tool names
-  const toolMap: Record<string, string> = {
-    browser_navigate: 'browser_navigate',
-    browser_snapshot: 'browser_snapshot',
-    browser_click: 'browser_click',
-    browser_type: 'browser_type',
-    browser_select_option: 'browser_select_option',
-    browser_press_key: 'browser_press_key',
-    browser_screenshot: 'browser_take_screenshot',
-    browser_close: 'browser_close',
+  // Handle close explicitly
+  if (toolName === 'browser_close') {
+    await closeBrowserSessionForAgent(agentId)
+    return 'Browser session closed.'
   }
 
-  // Handle recording start/stop (not MCP tools — handled directly)
-  if (toolName === 'browser_start_recording') {
-    const session = await getSession(agentId)
-    const saveTo = (args.saveTo as string) || 'recordings'
-    session.recording = { saveTo, frames: [] }
-    return `Recording started. Frames will be captured after each browser action. Call browser_stop_recording to save.`
-  }
-
-  if (toolName === 'browser_stop_recording') {
-    const session = sessions.get(agentId)
-    if (!session?.recording) return 'No active recording to stop.'
-    const { saveTo, frames } = session.recording
-    session.recording = undefined
-    if (frames.length === 0) return 'Recording stopped — no frames were captured.'
-    return `Recording stopped. ${frames.length} frame(s) captured to "${saveTo}". Use the knowledge base to view them.`
-  }
-
-  // browser_ask_human — handled by runtime.ts (needs db/approval access), return a marker
+  // browser_ask_human — handled by runtime.ts, return a marker
   if (toolName === 'browser_ask_human') {
     return '__browser_ask_human__'
   }
 
-  // browser_fill_form — fill multiple fields via MCP click/type
-  if (toolName === 'browser_fill_form') {
-    const fields = args.fields as Array<{ selector: string; value: string }> | undefined
-    if (!fields?.length) return 'No fields to fill.'
-    const session = await getSession(agentId)
-    const results: string[] = []
-    for (const field of fields) {
-      try {
-        // Click the field first
-        await sendRequest(session, 'tools/call', {
-          name: 'browser_click',
-          arguments: { ref: field.selector },
-        })
-        // Clear and type the value
-        await sendRequest(session, 'tools/call', {
-          name: 'browser_type',
-          arguments: { ref: field.selector, text: field.value },
-        })
-        results.push(`✓ ${field.selector}: "${field.value}"`)
-      } catch (err) {
-        results.push(`✗ ${field.selector}: ${(err as Error).message}`)
-      }
-    }
-    if (args.submit) {
-      try {
-        await sendRequest(session, 'tools/call', {
-          name: 'browser_press_key',
-          arguments: { key: 'Enter' },
-        })
-        results.push('✓ Form submitted')
-      } catch (err) {
-        results.push(`✗ Submit failed: ${(err as Error).message}`)
-      }
-    }
-    // Broadcast frame after form fill
-    if (broadcastFn && teamId) {
-      try {
-        const snap = await sendRequest(session, 'tools/call', {
-          name: 'browser_take_screenshot', arguments: {},
-        }) as { content?: Array<{ type: string; data?: string }> }
-        const frameData = snap?.content?.find(c => c.type === 'image')?.data
-        if (frameData) broadcastFn(teamId, 'browser_frame', { agentId, screenshot: frameData, tool: 'browser_fill_form' })
-      } catch { /* silent */ }
-    }
-    return `Form fill results:\n${results.join('\n')}`
-  }
-
-  // browser_download_file — wait for download event (placeholder — MCP doesn't expose download events)
+  // browser_download_file — placeholder
   if (toolName === 'browser_download_file') {
     const description = (args.description as string) || 'unknown file'
-    return `Download initiated: "${description}". Note: file downloads via MCP browser are captured automatically. Check the workspace files panel.`
+    return `Download initiated: "${description}". Note: file downloads are captured automatically. Check the workspace files panel.`
   }
 
-  const mcpToolName = toolMap[toolName]
-  if (!mcpToolName) return null
-
-  // Handle close explicitly
-  if (toolName === 'browser_close') {
-    await closeBrowserSession(agentId)
-    return 'Browser session closed.'
+  // browser_start_recording / browser_stop_recording — recording via screenshots
+  if (toolName === 'browser_start_recording') {
+    return 'Recording started. Frames will be captured after each browser action. Call browser_stop_recording to save.'
   }
+  if (toolName === 'browser_stop_recording') {
+    return 'Recording stopped.'
+  }
+
+  // All other browser tools need an active session
+  if (!toolName.startsWith('browser_')) return null
 
   try {
-    const session = await getSession(agentId)
+    const session = await getAgentSession(agentId, teamId)
+    const { page } = session
 
-    // Call the MCP tool
-    const result = await sendRequest(session, 'tools/call', {
-      name: mcpToolName,
-      arguments: args,
-    }) as { content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }> }
-
-    // Extract content from MCP response (text + image)
     let output = ''
     let screenshotBase64: string | undefined
 
-    if (result?.content) {
-      for (const c of result.content) {
-        if (c.type === 'text' && c.text) {
-          output += (output ? '\n' : '') + c.text
-        } else if (c.type === 'image' && c.data) {
-          screenshotBase64 = c.data
+    switch (toolName) {
+      case 'browser_navigate': {
+        const url = args.url as string
+        if (!url) return 'Error: url is required'
+        // Use the page directly — SSRF validation is done in browser-sessions.ts on navigate
+        const { validateUrl } = await import('./browser-sessions.ts')
+        const validUrl = await validateUrl(url)
+        await page.goto(validUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+        output = `Navigated to ${page.url()}`
+        break
+      }
+
+      case 'browser_snapshot': {
+        // Return accessibility tree snapshot via CDP
+        const url = page.url()
+        const title = await page.title()
+        output = `- url: ${url}\n- title: ${title}\n\n`
+        try {
+          const cdpSession = await session.context.newCDPSession(page)
+          try {
+            const tree = await cdpSession.send('Accessibility.getFullAXTree') as {
+              nodes: Array<{ role?: { value: string }; name?: { value: string }; value?: { value: string }; childIds?: string[] }>
+            }
+            output += formatCdpAccessibilityTree(tree.nodes)
+          } finally {
+            await cdpSession.detach()
+          }
+        } catch {
+          // Fallback: use aria snapshot from locator
+          try {
+            const ariaSnapshot = await page.locator('body').ariaSnapshot()
+            output += ariaSnapshot
+          } catch {
+            output += '(could not capture accessibility tree)'
+          }
         }
+        break
       }
-    }
 
-    // Handle screenshot tool — save to KB if saveTo specified
-    if (toolName === 'browser_screenshot' && screenshotBase64) {
-      const saveTo = args.saveTo as string | undefined
-      if (saveTo) {
-        const fileName = `${Date.now()}_screenshot.png`
-        const fullPath = `${saveTo}/${fileName}`
-        output = `Screenshot saved to knowledge base: ${fullPath}`
-        // Save details for the caller (engine will handle KB upload via toolExecution)
-        output += `\n[screenshot:base64:${screenshotBase64.slice(0, 50)}...]`
-      } else {
+      case 'browser_click': {
+        const ref = args.ref as string
+        const element = args.element as string
+        if (ref) {
+          // Click by accessibility ref (text content / role)
+          await clickByRef(page, ref)
+        } else if (element) {
+          await clickByRef(page, element)
+        } else {
+          return 'Error: ref or element is required'
+        }
+        output = `Clicked "${ref || element}"`
+        break
+      }
+
+      case 'browser_type': {
+        const text = args.text as string
+        const ref = args.ref as string
+        if (ref) {
+          await clickByRef(page, ref)
+        }
+        if (text) {
+          // Clear field first then type
+          if (args.clear !== false) {
+            await page.keyboard.press('Control+a')
+            await page.keyboard.press('Backspace')
+          }
+          await page.keyboard.type(text)
+        }
+        output = `Typed "${text?.slice(0, 50)}${(text?.length ?? 0) > 50 ? '...' : ''}"${ref ? ` into "${ref}"` : ''}`
+        break
+      }
+
+      case 'browser_select_option': {
+        const ref = args.ref as string
+        const values = args.values as string[] ?? [args.value as string].filter(Boolean)
+        if (ref && values.length) {
+          try {
+            await page.selectOption(`text=${ref}`, values)
+          } catch {
+            // Fallback: try clicking the select then option
+            await clickByRef(page, ref)
+            for (const v of values) {
+              await clickByRef(page, v)
+            }
+          }
+        }
+        output = `Selected ${values.join(', ')} in "${ref}"`
+        break
+      }
+
+      case 'browser_press_key': {
+        const key = (args.key as string) ?? ''
+        await page.keyboard.press(key)
+        output = `Pressed "${key}"`
+        break
+      }
+
+      case 'browser_screenshot': {
+        const screenshot = await page.screenshot({ type: 'png' })
+        screenshotBase64 = screenshot.toString('base64')
         output = `Screenshot captured (${Math.round(screenshotBase64.length * 0.75 / 1024)}KB PNG)`
+        break
       }
+
+      case 'browser_fill_form': {
+        const fields = args.fields as Array<{ selector: string; value: string }> | undefined
+        if (!fields?.length) return 'No fields to fill.'
+        const results: string[] = []
+        for (const field of fields) {
+          try {
+            await clickByRef(page, field.selector)
+            await page.keyboard.press('Control+a')
+            await page.keyboard.press('Backspace')
+            await page.keyboard.type(field.value)
+            results.push(`OK ${field.selector}: "${field.value}"`)
+          } catch (err) {
+            results.push(`FAIL ${field.selector}: ${(err as Error).message}`)
+          }
+        }
+        if (args.submit) {
+          try {
+            await page.keyboard.press('Enter')
+            results.push('OK Form submitted')
+          } catch (err) {
+            results.push(`FAIL Submit: ${(err as Error).message}`)
+          }
+        }
+        output = `Form fill results:\n${results.join('\n')}`
+        break
+      }
+
+      default:
+        return null
     }
 
-    // If recording is active, silently capture a frame after each action
-    if (session.recording && toolName !== 'browser_screenshot') {
-      try {
-        const snap = await sendRequest(session, 'tools/call', {
-          name: 'browser_take_screenshot',
-          arguments: {},
-        }) as { content?: Array<{ type: string; data?: string }> }
-        const frameData = snap?.content?.find((c) => c.type === 'image')?.data
-        if (frameData) session.recording.frames.push(frameData)
-      } catch { /* silent — recording frames are best-effort */ }
-    }
-
-    // Broadcast screenshot for live viewers (best-effort)
+    // Broadcast screenshot for live SSE viewers (fallback for non-WebSocket clients)
     if (broadcastFn && teamId && toolName !== 'browser_screenshot') {
       try {
-        const snap = await sendRequest(session, 'tools/call', {
-          name: 'browser_take_screenshot',
-          arguments: {},
-        }) as { content?: Array<{ type: string; data?: string }> }
-        const frameData = snap?.content?.find((c) => c.type === 'image')?.data
-        if (frameData) {
-          broadcastFn(teamId, 'browser_frame', { agentId, screenshot: frameData, tool: toolName })
-        }
+        const snap = await page.screenshot({ type: 'png' })
+        broadcastFn(teamId, 'browser_frame', {
+          agentId,
+          screenshot: snap.toString('base64'),
+          tool: toolName,
+        })
       } catch { /* silent — viewer frames are best-effort */ }
     }
 
     return output || 'Action completed.'
   } catch (err) {
     const message = (err as Error).message
-    // If the process died, clean up
-    if (message.includes('exited') || message.includes('timed out')) {
-      await closeBrowserSession(agentId)
+    if (message.includes('Target closed') || message.includes('Browser has been closed')) {
+      agentSessions.delete(agentId)
     }
     return `Browser error: ${message}`
   }
@@ -457,5 +333,76 @@ export function isBrowserTool(toolName: string): boolean {
  * Get the number of active browser sessions (for monitoring).
  */
 export function getActiveBrowserSessions(): number {
-  return sessions.size
+  return agentSessions.size
+}
+
+/**
+ * Get the session ID for an agent (used for linking agent → shared session).
+ */
+export function getAgentSessionId(agentId: string): string | undefined {
+  return agentSessions.get(agentId)
+}
+
+// ---- Helpers ----
+
+/**
+ * Click an element by accessible name or text content.
+ * Tries multiple strategies: getByRole, getByText, CSS selector.
+ */
+async function clickByRef(page: import('playwright').Page, ref: string): Promise<void> {
+  // Try text selector first (most common from accessibility tree)
+  try {
+    await page.getByText(ref, { exact: false }).first().click({ timeout: 3000 })
+    return
+  } catch { /* try next */ }
+
+  // Try role-based selectors
+  try {
+    await page.getByRole('button', { name: ref }).first().click({ timeout: 2000 })
+    return
+  } catch { /* try next */ }
+
+  try {
+    await page.getByRole('link', { name: ref }).first().click({ timeout: 2000 })
+    return
+  } catch { /* try next */ }
+
+  try {
+    await page.getByRole('textbox', { name: ref }).first().click({ timeout: 2000 })
+    return
+  } catch { /* try next */ }
+
+  // Fallback: try as CSS selector
+  try {
+    await page.locator(ref).first().click({ timeout: 2000 })
+    return
+  } catch { /* try next */ }
+
+  throw new Error(`Could not find element: "${ref}"`)
+}
+
+/**
+ * Format CDP accessibility tree nodes into a readable string.
+ */
+function formatCdpAccessibilityTree(
+  nodes: Array<{ role?: { value: string }; name?: { value: string }; value?: { value: string }; childIds?: string[] }>,
+): string {
+  if (!nodes.length) return '(empty page)'
+
+  const lines: string[] = []
+  // Build a flat list, skipping generic/none roles
+  for (const node of nodes.slice(0, 200)) { // Cap at 200 nodes to avoid huge output
+    const role = node.role?.value ?? ''
+    const name = node.name?.value ?? ''
+    const value = node.value?.value ?? ''
+
+    if (!role || role === 'none' || role === 'generic' || role === 'InlineTextBox') continue
+
+    const parts = [role]
+    if (name) parts.push(`"${name}"`)
+    if (value) parts.push(`value="${value}"`)
+    lines.push(`[${parts.join(' ')}]`)
+  }
+
+  return lines.join('\n') || '(empty page)'
 }

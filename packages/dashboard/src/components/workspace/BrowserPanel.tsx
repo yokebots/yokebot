@@ -5,214 +5,236 @@ type BrowserMode = 'take_control' | 'agent_browser'
 
 interface BrowserPanelProps {
   sessionId: string
+  /** If true, render in popout mode (no status bar chrome) */
+  popout?: boolean
 }
 
 /**
  * Live browser viewer for the workspace context pane.
+ * Uses CDP Screencast over WebSocket for real-time JPEG frame streaming.
  * Two modes:
- *   - Agent Browser: agent drives, human observes in real-time (default)
+ *   - Agent Browser: agent drives, human observes in real-time
  *   - Take Control: human drives the browser via click/type/scroll
  */
-export function BrowserPanel({ sessionId }: BrowserPanelProps) {
+export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
   const isAgentSession = sessionId.startsWith('agent:')
   const agentId = isAgentSession ? sessionId.slice('agent:'.length) : null
 
   const [mode, setMode] = useState<BrowserMode>(isAgentSession ? 'agent_browser' : 'take_control')
-  const [screenshot, setScreenshot] = useState<string | null>(null)
   const [currentUrl, setCurrentUrl] = useState('')
   const [urlInput, setUrlInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [connected, setConnected] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(isAgentSession ? null : sessionId)
   const [zoom, setZoom] = useState(100)
-  const imgRef = useRef<HTMLImageElement>(null)
+
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const scrollAccRef = useRef({ x: 0, y: 0, deltaX: 0, deltaY: 0 })
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Initialize session
+  // Initialize session — for agent sessions, first get the agent's session ID
   useEffect(() => {
     if (isAgentSession) {
-      // Agent browser mode — fetch initial screenshot from agent
-      const fetchAgentScreenshot = async () => {
+      // Agent browser mode — try to get existing screenshot to find active session
+      const init = async () => {
         try {
           const result = await engine.getAgentBrowserScreenshot(agentId!)
-          setScreenshot(result.screenshot)
           setCurrentUrl(result.url)
           setUrlInput(result.url)
+          // We'll need the session ID from the engine to connect WebSocket
+          // For now, try listing sessions
+          const sessions = await engine.listBrowserSessions()
+          const agentSession = sessions.find(s => s.mode === 'agent_browser')
+          if (agentSession) {
+            setActiveSessionId(agentSession.id)
+          }
         } catch {
           // Agent may not have an active browser yet
-          setScreenshot(null)
         }
         setLoading(false)
       }
-      fetchAgentScreenshot()
+      init()
     } else {
-      // Take control mode — session already exists or needs to be created
-      const initSession = async () => {
-        try {
-          const result = await engine.getBrowserScreenshot(sessionId)
-          setScreenshot(result.screenshot)
-          setCurrentUrl(result.url)
-          setUrlInput(result.url)
-        } catch {
-          setError('Failed to connect to browser session')
-        }
-        setLoading(false)
-      }
-      initSession()
+      setLoading(false)
     }
   }, [sessionId, isAgentSession, agentId])
 
-  // Subscribe to SSE browser_frame events for agent browser mode
+  // WebSocket connection for CDP Screencast
   useEffect(() => {
-    if (mode !== 'agent_browser' || !agentId) return
-    const unsub = engine.subscribeSse('browser_frame', (data: unknown) => {
-      const frame = data as { agentId?: string; screenshot?: string; tool?: string }
-      if (frame.agentId === agentId && frame.screenshot) {
-        setScreenshot(frame.screenshot)
-      }
-    })
-    return unsub
-  }, [mode, agentId])
-
-  // Periodic refresh as fallback (2s interval)
-  useEffect(() => {
-    if (mode === 'agent_browser') return // SSE handles this
     if (!activeSessionId) return
 
-    const interval = setInterval(async () => {
+    let ws: WebSocket | null = null
+    let cancelled = false
+
+    const connect = async () => {
       try {
-        const result = await engine.getBrowserScreenshot(activeSessionId)
-        setScreenshot(result.screenshot)
-        setCurrentUrl(result.url)
-        // Only update URL input if the user isn't actively editing it
-        if (document.activeElement !== urlInputRef.current) {
-          setUrlInput(result.url)
+        const wsUrl = await engine.getBrowserStreamUrl(activeSessionId)
+        if (cancelled) return
+
+        ws = new WebSocket(wsUrl)
+        wsRef.current = ws
+
+        ws.onopen = () => {
+          if (!cancelled) {
+            setConnected(true)
+            setLoading(false)
+            setError(null)
+          }
         }
-      } catch { /* ignore */ }
-    }, 2000)
 
-    return () => clearInterval(interval)
-  }, [mode, activeSessionId])
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data)
 
-  // Click handler — map coordinates to 1280x800 viewport
-  const handleClick = useCallback(async (e: React.MouseEvent<HTMLImageElement>) => {
-    if (mode !== 'take_control' || !activeSessionId || !imgRef.current) return
+            if (msg.type === 'frame' && msg.data) {
+              drawFrame(msg.data)
+            } else if (msg.type === 'url') {
+              setCurrentUrl(msg.url)
+              if (urlInputRef.current && document.activeElement !== urlInputRef.current) {
+                setUrlInput(msg.url)
+              }
+            } else if (msg.type === 'error') {
+              setError(msg.message)
+            }
+          } catch { /* ignore */ }
+        }
 
-    const rect = imgRef.current.getBoundingClientRect()
-    const scaleX = 1280 / rect.width
-    const scaleY = 800 / rect.height
+        ws.onclose = () => {
+          if (!cancelled) {
+            setConnected(false)
+          }
+        }
+
+        ws.onerror = () => {
+          if (!cancelled) {
+            setError('WebSocket connection failed')
+            setConnected(false)
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError((err as Error).message)
+          setLoading(false)
+        }
+      }
+    }
+
+    connect()
+
+    return () => {
+      cancelled = true
+      if (ws) {
+        ws.close()
+      }
+      wsRef.current = null
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current)
+    }
+  }, [activeSessionId])
+
+  // Draw a JPEG frame onto the canvas
+  const drawFrame = useCallback((base64Data: string) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const img = new Image()
+    img.onload = () => {
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.drawImage(img, 0, 0)
+      }
+    }
+    img.src = `data:image/jpeg;base64,${base64Data}`
+  }, [])
+
+  // Send message over WebSocket
+  const wsSend = useCallback((msg: Record<string, unknown>) => {
+    const ws = wsRef.current
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg))
+    }
+  }, [])
+
+  // Click handler — map canvas coordinates to 1280x800 viewport
+  const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (mode !== 'take_control') return
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
     const x = Math.round((e.clientX - rect.left) * scaleX)
     const y = Math.round((e.clientY - rect.top) * scaleY)
-
-    try {
-      const result = await engine.sendBrowserInteraction(activeSessionId, { type: 'click', x, y })
-      setScreenshot(result.screenshot)
-      setCurrentUrl(result.url)
-      setUrlInput(result.url)
-    } catch (err) {
-      setError((err as Error).message)
-    }
-  }, [mode, activeSessionId])
+    wsSend({ type: 'click', x, y })
+  }, [mode, wsSend])
 
   // Keyboard handler — skip when URL input is focused
-  const handleKeyDown = useCallback(async (e: React.KeyboardEvent) => {
-    if (mode !== 'take_control' || !activeSessionId) return
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (mode !== 'take_control') return
     if (urlInputRef.current && document.activeElement === urlInputRef.current) return
 
     const specialKeys = ['Enter', 'Tab', 'Backspace', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Home', 'End']
     if (specialKeys.includes(e.key)) {
       e.preventDefault()
-      try {
-        const result = await engine.sendBrowserInteraction(activeSessionId, { type: 'press', key: e.key })
-        setScreenshot(result.screenshot)
-        setCurrentUrl(result.url)
-        setUrlInput(result.url)
-      } catch { /* ignore */ }
+      wsSend({ type: 'press', key: e.key })
       return
     }
-
-    // Regular character typing
     if (e.key.length === 1) {
       e.preventDefault()
-      try {
-        const result = await engine.sendBrowserInteraction(activeSessionId, { type: 'type', text: e.key })
-        setScreenshot(result.screenshot)
-        setCurrentUrl(result.url)
-        setUrlInput(result.url)
-      } catch { /* ignore */ }
+      wsSend({ type: 'type', text: e.key })
     }
-  }, [mode, activeSessionId])
+  }, [mode, wsSend])
 
-  // Scroll handler
-  const handleWheel = useCallback(async (e: React.WheelEvent) => {
-    if (mode !== 'take_control' || !activeSessionId || !imgRef.current) return
+  // Scroll handler — debounce: accumulate deltas over 100ms, send as one batch
+  const flushScroll = useCallback(() => {
+    const acc = scrollAccRef.current
+    if (acc.deltaX === 0 && acc.deltaY === 0) return
+    const { x, y, deltaX, deltaY } = acc
+    scrollAccRef.current = { x: 0, y: 0, deltaX: 0, deltaY: 0 }
+    scrollTimerRef.current = null
+    wsSend({ type: 'scroll', x, y, deltaX, deltaY })
+  }, [wsSend])
 
-    const rect = imgRef.current.getBoundingClientRect()
-    const scaleX = 1280 / rect.width
-    const scaleY = 800 / rect.height
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (mode !== 'take_control' || !canvasRef.current) return
+    e.preventDefault()
+
+    const canvas = canvasRef.current
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
     const x = Math.round((e.clientX - rect.left) * scaleX)
     const y = Math.round((e.clientY - rect.top) * scaleY)
 
-    try {
-      const result = await engine.sendBrowserInteraction(activeSessionId, {
-        type: 'scroll', x, y,
-        deltaX: Math.round(e.deltaX),
-        deltaY: Math.round(e.deltaY),
-      })
-      setScreenshot(result.screenshot)
-      setCurrentUrl(result.url)
-      setUrlInput(result.url)
-    } catch { /* ignore */ }
-  }, [mode, activeSessionId])
+    scrollAccRef.current.x = x
+    scrollAccRef.current.y = y
+    scrollAccRef.current.deltaX += Math.round(e.deltaX)
+    scrollAccRef.current.deltaY += Math.round(e.deltaY)
+
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current)
+    scrollTimerRef.current = setTimeout(flushScroll, 100)
+  }, [mode, flushScroll])
 
   // URL bar navigation
-  const handleNavigate = useCallback(async (e: React.FormEvent) => {
+  const handleNavigate = useCallback((e: React.FormEvent) => {
     e.preventDefault()
-    if (!activeSessionId || !urlInput.trim()) return
+    if (!urlInput.trim()) return
+    wsSend({ type: 'navigate', url: urlInput.trim() })
+    setError(null)
+  }, [urlInput, wsSend])
 
-    try {
-      const result = await engine.navigateBrowser(activeSessionId, urlInput.trim())
-      setScreenshot(result.screenshot)
-      setCurrentUrl(result.url)
-      setUrlInput(result.url)
-      setError(null)
-    } catch (err) {
-      setError((err as Error).message)
-    }
-  }, [activeSessionId, urlInput])
-
-  // Back / Forward
-  const handleBack = useCallback(async () => {
-    if (!activeSessionId) return
-    try {
-      const result = await engine.sendBrowserInteraction(activeSessionId, { type: 'back' })
-      setScreenshot(result.screenshot)
-      setCurrentUrl(result.url)
-      setUrlInput(result.url)
-    } catch { /* ignore */ }
-  }, [activeSessionId])
-
-  const handleForward = useCallback(async () => {
-    if (!activeSessionId) return
-    try {
-      const result = await engine.sendBrowserInteraction(activeSessionId, { type: 'forward' })
-      setScreenshot(result.screenshot)
-      setCurrentUrl(result.url)
-      setUrlInput(result.url)
-    } catch { /* ignore */ }
-  }, [activeSessionId])
-
-  // Refresh
-  const handleRefresh = useCallback(async () => {
-    if (!activeSessionId) return
-    try {
-      const result = await engine.navigateBrowser(activeSessionId, currentUrl)
-      setScreenshot(result.screenshot)
-      setCurrentUrl(result.url)
-      setUrlInput(result.url)
-    } catch { /* ignore */ }
-  }, [activeSessionId, currentUrl])
+  // Back / Forward / Refresh
+  const handleBack = useCallback(() => wsSend({ type: 'back' }), [wsSend])
+  const handleForward = useCallback(() => wsSend({ type: 'forward' }), [wsSend])
+  const handleRefresh = useCallback(() => {
+    if (currentUrl) wsSend({ type: 'navigate', url: currentUrl })
+  }, [currentUrl, wsSend])
 
   // Save login to vault
   const [savingLogin, setSavingLogin] = useState(false)
@@ -233,20 +255,23 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
 
   // Take control from agent browser mode
   const handleTakeControl = useCallback(async () => {
-    try {
-      setLoading(true)
-      const result = await engine.createBrowserSession({ startUrl: currentUrl || undefined })
-      setActiveSessionId(result.sessionId)
-      setScreenshot(result.screenshot)
-      setCurrentUrl(result.url)
-      setUrlInput(result.url)
-      setMode('take_control')
-      setError(null)
-    } catch (err) {
-      setError((err as Error).message)
-    }
-    setLoading(false)
-  }, [currentUrl])
+    if (!activeSessionId) return
+    wsSend({ type: 'control', controller: 'human' })
+    setMode('take_control')
+  }, [activeSessionId, wsSend])
+
+  // Return to agent
+  const handleReturnToAgent = useCallback(() => {
+    if (!activeSessionId) return
+    wsSend({ type: 'control', controller: 'agent' })
+    setMode('agent_browser')
+  }, [activeSessionId, wsSend])
+
+  // Pop out to new window
+  const handlePopout = useCallback(() => {
+    if (!activeSessionId) return
+    window.open(`/browser-popout?session=${activeSessionId}`, '_blank', 'width=1360,height=920')
+  }, [activeSessionId])
 
   if (loading) {
     return (
@@ -260,7 +285,7 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className={`flex-1 flex flex-col overflow-hidden ${popout ? 'h-screen' : ''}`}>
       {/* URL bar + nav controls */}
       {mode === 'take_control' && (
         <div className="flex items-center gap-1 border-b border-border-subtle bg-light-surface-alt px-2 py-1">
@@ -328,6 +353,15 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
             <span className="material-symbols-outlined text-sm">security</span>
             Save Login
           </button>
+          {!popout && (
+            <button
+              onClick={handlePopout}
+              className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
+              title="Pop out to new window"
+            >
+              <span className="material-symbols-outlined text-sm">open_in_new</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -348,11 +382,9 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
-        {screenshot && currentUrl && currentUrl !== 'about:blank' ? (
-          <img
-            ref={imgRef}
-            src={`data:image/png;base64,${screenshot}`}
-            alt="Browser view"
+        {connected ? (
+          <canvas
+            ref={canvasRef}
             onClick={handleClick}
             onWheel={handleWheel}
             className={`rounded border border-border-subtle shadow-lg ${
@@ -365,7 +397,6 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
               maxWidth: zoom <= 100 ? '100%' : 'none',
               maxHeight: zoom <= 100 ? '100%' : 'none',
             }}
-            draggable={false}
           />
         ) : (
           <div className="text-center text-text-muted text-sm">
@@ -383,35 +414,55 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
       </div>
 
       {/* Status bar */}
-      <div className="flex items-center justify-between border-t border-border-subtle bg-light-surface-alt px-3 py-1.5 text-xs text-text-muted">
-        <div className="flex items-center gap-3">
-          {mode === 'take_control' ? (
-            <span className="flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-forest-green" />
-              Take Control
-            </span>
-          ) : (
-            <span className="flex items-center gap-1">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-              Agent Browser
-            </span>
-          )}
-          {currentUrl && (
-            <span className="max-w-xs truncate text-text-muted/70">{currentUrl}</span>
-          )}
+      {!popout && (
+        <div className="flex items-center justify-between border-t border-border-subtle bg-light-surface-alt px-3 py-1.5 text-xs text-text-muted">
+          <div className="flex items-center gap-3">
+            {mode === 'take_control' ? (
+              <span className="flex items-center gap-1">
+                <span className={`h-2 w-2 rounded-full ${connected ? 'bg-forest-green' : 'bg-gray-400'}`} />
+                Take Control
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <span className={`h-2 w-2 rounded-full ${connected ? 'animate-pulse bg-blue-500' : 'bg-gray-400'}`} />
+                Agent Browser
+              </span>
+            )}
+            {currentUrl && (
+              <span className="max-w-xs truncate text-text-muted/70">{currentUrl}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {mode === 'agent_browser' && (
+              <button
+                onClick={handleTakeControl}
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-forest-green text-white hover:bg-forest-green/90 text-xs font-medium"
+              >
+                <span className="material-symbols-outlined text-sm">pan_tool</span>
+                Take Control
+              </button>
+            )}
+            {mode === 'take_control' && isAgentSession && (
+              <button
+                onClick={handleReturnToAgent}
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500 text-white hover:bg-blue-600 text-xs font-medium"
+              >
+                <span className="material-symbols-outlined text-sm">smart_toy</span>
+                Return to Agent
+              </button>
+            )}
+            {!popout && activeSessionId && (
+              <button
+                onClick={handlePopout}
+                className="p-0.5 rounded hover:bg-light-surface-alt2 text-text-muted"
+                title="Pop out to new window"
+              >
+                <span className="material-symbols-outlined text-sm">open_in_new</span>
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {mode === 'agent_browser' && (
-            <button
-              onClick={handleTakeControl}
-              className="flex items-center gap-1 px-2 py-0.5 rounded bg-forest-green text-white hover:bg-forest-green/90 text-xs font-medium"
-            >
-              <span className="material-symbols-outlined text-sm">pan_tool</span>
-              Take Control
-            </button>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   )
 }

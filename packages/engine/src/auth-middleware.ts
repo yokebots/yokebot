@@ -198,6 +198,40 @@ async function validateApiKeyAuth(
   next()
 }
 
+/**
+ * Standalone JWT verification for non-Express contexts (e.g. WebSocket upgrade).
+ * Returns the authenticated user or null if verification fails.
+ */
+export async function verifyJwtToken(token: string): Promise<AuthUser | null> {
+  // Dev mode bypass
+  if (!JWT_SECRET && process.env.NODE_ENV !== 'production') {
+    return { id: 'dev-user-local', email: 'dev@localhost' }
+  }
+  if (!JWT_SECRET) return null
+
+  // Peek at algorithm
+  const headerB64 = token.split('.')[0]
+  let alg = 'HS256'
+  try {
+    const header = JSON.parse(Buffer.from(headerB64, 'base64url').toString()) as { alg?: string }
+    alg = header.alg ?? 'HS256'
+  } catch { /* default to HS256 */ }
+
+  try {
+    if (alg === 'ES256') {
+      const publicKey = await getJwksPublicKey()
+      if (!publicKey) return null
+      const payload = jwt.verify(token, publicKey, { algorithms: ['ES256'] }) as jwt.JwtPayload
+      return { id: payload.sub ?? '', email: (payload.email as string) ?? '' }
+    } else {
+      const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as jwt.JwtPayload
+      return { id: payload.sub ?? '', email: (payload.email as string) ?? '' }
+    }
+  } catch {
+    return null
+  }
+}
+
 async function verifyES256(token: string, req: Request, res: Response, next: NextFunction): Promise<void> {
   const publicKey = await getJwksPublicKey()
   if (!publicKey) {

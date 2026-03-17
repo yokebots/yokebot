@@ -1368,24 +1368,14 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     case 'use_saved_login': {
       const domain = args.domain as string
       const { findVaultSessionByDomain, updateSessionUsage, logVaultEvent: logVault } = await import('./session-vault.ts')
-      const { restartWithStorageState } = await import('./browser.ts')
-      const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs')
-      const { join } = await import('node:path')
-      const { tmpdir } = await import('node:os')
+      const { restartWithVaultState } = await import('./browser.ts')
 
       const session = await findVaultSessionByDomain(ctx.db, ctx.teamId, domain)
       if (!session) return `No active saved login found for "${domain}". The team needs to record a login session for this domain in Settings → Session Vault.`
       if (session.info.status !== 'active') return `The saved login for "${domain}" is ${session.info.status}. The team needs to re-record it.`
 
-      // Write storageState to a secure temp directory (mode 0o700), then delete
-      const tempDir = mkdtempSync(join(tmpdir(), 'vault-'))
-      const tmpPath = join(tempDir, 'state.json')
-      writeFileSync(tmpPath, session.storageState, { mode: 0o600 })
-      try {
-        await restartWithStorageState(ctx.agentId, tmpPath)
-      } finally {
-        try { rmSync(tempDir, { recursive: true, force: true }) } catch { /* best effort */ }
-      }
+      // Restore vault state via CDP (cookies + localStorage + sessionStorage)
+      await restartWithVaultState(ctx.agentId, ctx.teamId, session.info.id, ctx.db)
 
       await updateSessionUsage(ctx.db, session.info.id)
       await logVault(ctx.db, session.info.id, ctx.teamId, 'used', ctx.agentId)
