@@ -209,14 +209,18 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
     }
   }, [mode, wsSend])
 
-  // Scroll handler — debounce: accumulate deltas over 100ms, send as one batch
+  // Scroll handler — throttle: send immediately, then batch every 50ms
   const flushScroll = useCallback(() => {
     const acc = scrollAccRef.current
-    if (acc.deltaX === 0 && acc.deltaY === 0) return
+    if (acc.deltaX === 0 && acc.deltaY === 0) {
+      scrollTimerRef.current = null
+      return
+    }
     const { x, y, deltaX, deltaY } = acc
     scrollAccRef.current = { x: 0, y: 0, deltaX: 0, deltaY: 0 }
-    scrollTimerRef.current = null
     wsSend({ type: 'scroll', x, y, deltaX, deltaY })
+    // Schedule next flush if more events come in
+    scrollTimerRef.current = setTimeout(flushScroll, 50)
   }, [wsSend])
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -235,8 +239,11 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
     scrollAccRef.current.deltaX += Math.round(e.deltaX)
     scrollAccRef.current.deltaY += Math.round(e.deltaY)
 
-    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current)
-    scrollTimerRef.current = setTimeout(flushScroll, 100)
+    // If no timer is running, flush immediately (first event in a scroll gesture)
+    if (!scrollTimerRef.current) {
+      flushScroll()
+    }
+    // Otherwise, events accumulate and get flushed by the running 50ms timer
   }, [mode, flushScroll])
 
   // URL bar navigation
