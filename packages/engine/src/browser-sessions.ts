@@ -321,6 +321,9 @@ export async function createBrowserSession(
       proc.kill('SIGKILL')
       throw new Error(`Failed to navigate to ${validUrl}: ${(err as Error).message}`)
     }
+  } else {
+    // Navigate to about:blank to avoid Chrome's incognito new-tab page showing in the screencast
+    await page.goto('about:blank').catch(() => {})
   }
 
   const mode = options?.mode ?? 'take_control'
