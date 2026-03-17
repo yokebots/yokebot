@@ -17,6 +17,7 @@ import {
   getSessionInfo,
   closeBrowserSession,
   setSessionController,
+  touchSession,
   type BrowserSessionState,
 } from './browser-sessions.ts'
 
@@ -56,6 +57,14 @@ async function getAgentSession(agentId: string, teamId?: string): Promise<Browse
   agentSessions.set(agentId, result.sessionId)
   const session = getSessionInfo(result.sessionId)
   if (!session) throw new Error('Failed to create browser session')
+
+  // Notify dashboard so it auto-opens a browser tab for this agent
+  if (broadcastFn) {
+    broadcastFn(teamId, 'agent_browser_started', {
+      agentId,
+      sessionId: result.sessionId,
+    })
+  }
 
   return session
 }
@@ -161,6 +170,9 @@ export async function executeBrowserTool(
   try {
     const session = await getAgentSession(agentId, teamId)
     const { page } = session
+
+    // Keep session alive while agent is actively using it
+    touchSession(session.id)
 
     let output = ''
     let screenshotBase64: string | undefined

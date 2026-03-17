@@ -1618,6 +1618,7 @@ export type SseEventType =
   | 'agent_typing'
   | 'agent_progress'
   | 'browser_frame'
+  | 'agent_browser_started'
   | 'sandbox_preview'
   | 'app_published'
   | 'skill_warning'

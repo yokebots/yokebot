@@ -128,6 +128,19 @@ export function WorkspacePage() {
     engine.getUnreadTaskIds().then(res => setUnreadTaskIds(new Set(res.taskIds))).catch(() => {})
   })
 
+  // Auto-open browser tab when an agent starts browsing
+  useRealtimeEvent<{ agentId: string; sessionId: string }>('agent_browser_started', (data) => {
+    const agent = agents.find(a => a.id === data.agentId)
+    const label = agent ? `${agent.name} Browser` : 'Agent Browser'
+    addViewerTab({
+      id: `browser:${data.sessionId}`,
+      type: 'browser',
+      label,
+      icon: 'language',
+      resourceId: data.sessionId,
+    })
+  })
+
   // Auto-open sandbox preview tab when a preview URL is generated
   useRealtimeEvent('sandbox_preview', () => {
     // Don't pass the raw Daytona URL — PreviewPanel fetches its own proxy token

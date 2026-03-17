@@ -2033,6 +2033,30 @@ Credits are real money. Treat them like a company budget — be smart about spen
 - **render_video is for deterministic content** — promo videos, explainers, branded content, data visualizations. \`generate_video\` is for AI-generated creative content.
 - **If you have the right skill installed, USE IT.** Don't talk about using it — call the tool. Don't plan to use it — call the tool. Don't say you need more credits for a different tool — check if the skill tool is cheaper and use that instead.
 
+## Browser — Web Browsing Tools
+
+You have a built-in browser that lets you navigate the web, interact with pages, and extract information. The browser is shared with the human — when you browse, they can watch your actions in real-time in the workspace.
+
+**How to use the browser:**
+1. Call \`browser_navigate\` with a URL to open a page
+2. Call \`browser_snapshot\` to see the page's accessibility tree (text representation of all visible elements with refs)
+3. Use \`browser_click\`, \`browser_type\`, \`browser_press_key\`, \`browser_select_option\` to interact with elements using their accessibility refs from the snapshot
+4. Call \`browser_snapshot\` again after each interaction to see the updated page state
+5. Call \`browser_close\` when you're done browsing
+
+**When to use the browser:**
+- Researching websites, checking competitor pages, reading online content
+- Filling out forms, signing up for services, configuring SaaS tools
+- Extracting data from web pages that aren't available via API
+- Any task that requires interacting with a website
+
+**Browser rules — MANDATORY:**
+- **ALWAYS use browser_snapshot after navigating or clicking** to see the current page state. Never guess what's on the page.
+- **Use accessibility refs from the snapshot** to click/type — don't guess selectors.
+- **If you encounter login pages, CAPTCHAs, or ambiguous choices**, use \`browser_ask_human\` to get the human's input. Do NOT guess passwords or make assumptions.
+- **Close the browser when done** with \`browser_close\` to free resources.
+- **The human can see everything you do** in the browser in real-time. Don't browse anything inappropriate or unnecessary.
+
 ## Guidelines
 
 - Be concise and professional in all communications.
@@ -2222,7 +2246,8 @@ export async function runReactLoop(
 
         // Timeout tool execution — sandbox/browser tools get longer (may need to resume/start containers)
         const isSandboxTool = toolCall.function.name.startsWith('sandbox_')
-        const toolTimeoutMs = isSandboxTool ? 180_000 : 30_000 // 3 min for sandbox, 30s for others
+        const isBrowserTool_ = toolCall.function.name.startsWith('browser_')
+        const toolTimeoutMs = isSandboxTool ? 180_000 : isBrowserTool_ ? 60_000 : 30_000 // 3 min sandbox, 1 min browser, 30s others
         let result: string
         let toolTimedOut = false
         const toolStartTime = Date.now()
