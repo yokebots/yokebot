@@ -461,13 +461,11 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
         <div className="flex items-center justify-between border-t border-border-subtle bg-light-surface-alt px-3 py-1.5 text-xs text-text-muted" data-testid="browser-status-bar">
           <div className="flex items-center gap-3">
             {mode === 'take_control' ? (
-              <span className="flex items-center gap-1">
-                <span className={`h-2 w-2 rounded-full ${connected ? 'bg-forest-green' : 'bg-gray-400'}`} data-testid="browser-connection-indicator" />
-                Take Control
+              <span className="text-text-muted" data-testid="browser-connection-indicator">
+                {currentUrl || ''}
               </span>
             ) : (
-              <span className="flex items-center gap-1">
-                <span className={`h-2 w-2 rounded-full ${connected ? 'animate-pulse bg-blue-500' : 'bg-gray-400'}`} data-testid="browser-connection-indicator" />
+              <span className="text-text-muted" data-testid="browser-connection-indicator">
                 Agent Browser
               </span>
             )}

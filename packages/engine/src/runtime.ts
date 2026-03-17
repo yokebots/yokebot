@@ -2035,7 +2035,7 @@ Credits are real money. Treat them like a company budget — be smart about spen
 
 ## Browser — Web Browsing Tools
 
-You have a built-in browser that lets you navigate the web, interact with pages, and extract information. The browser is shared with the human — when you browse, they can watch your actions in real-time in the workspace.
+You have a built-in browser that lets you navigate ANY website on the internet, interact with pages, and extract information. You CAN and SHOULD navigate to external sites when asked — you are NOT limited to internal pages. The browser is shared with the human — when you browse, they can watch your actions in real-time in the workspace.
 
 **How to use the browser:**
 1. Call \`browser_navigate\` with a URL to open a page — the page's accessibility tree (all visible elements) is returned automatically
@@ -2057,6 +2057,7 @@ You have a built-in browser that lets you navigate the web, interact with pages,
 - **If you encounter login pages, CAPTCHAs, or ambiguous choices**, use \`browser_ask_human\` to get the human's input. Do NOT guess passwords or make assumptions.
 - **Close the browser when done** with \`browser_close\` to free resources.
 - **The human can see everything you do** in the browser in real-time. Don't browse anything inappropriate or unnecessary.
+- **Do NOT stop browsing after just one or two pages.** When asked to research or analyze a website, explore multiple pages thoroughly — click through navigation, check subpages, read content. Do NOT return a response until you've done a thorough job.
 
 ## Guidelines
 
@@ -2408,9 +2409,35 @@ export async function runReactLoop(
         continue  // Re-enter the loop so the model can make real tool calls
       }
 
-      // No text-based tool syntax detected — genuine text response
-      // Guard: if the model returned structured JSON (e.g. {"thought":"...","tasks":[...]})
-      // instead of a human-readable message, extract the readable part.
+      // No text-based tool syntax detected — model returned plain text without calling respond.
+      // Small models often return text mid-task instead of continuing with tool calls.
+      // If we're still early in the iteration budget AND the model has been actively working,
+      // treat this as intermediate output and prompt the model to keep going.
+      const hasMadeRealProgress = toolCallLog.some(tc => !['think', 'respond', 'update_scratchpad'].includes(tc.name))
+      const isEarlyInBudget = i < Math.floor(config.maxIterations * 0.5)
+
+      if (hasMadeRealProgress && isEarlyInBudget && i < config.maxIterations - 1) {
+        consecutiveNoToolIterations++
+        console.log(`[runtime] Model returned text without respond tool (iteration ${i + 1}) — prompting to continue (${consecutiveNoToolIterations} consecutive no-tool iters)`)
+
+        // Bail if we've nudged too many times — the model genuinely can't continue
+        if (consecutiveNoToolIterations >= 3) {
+          response = extractHumanMessage(text)
+          await addMessage(db, agentId, 'assistant', response, teamId)
+          emitProgress('idle', 'Done', i + 1)
+          return { response, iterations: i + 1, toolCalls: toolCallLog }
+        }
+
+        // Inject the text as assistant message and nudge the model to keep using tools
+        messages.push({ role: 'assistant', content: text })
+        messages.push({
+          role: 'user',
+          content: 'Continue working on the task using your tools. Do not stop until you have completed the task or exhausted all approaches. Use the "respond" tool when you are truly finished.',
+        })
+        continue
+      }
+
+      // Genuinely done or late in the budget — extract and return
       response = extractHumanMessage(completion.content)
       await addMessage(db, agentId, 'assistant', response, teamId)
       emitProgress('idle', 'Done', i + 1)
