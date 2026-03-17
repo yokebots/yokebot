@@ -2312,8 +2312,27 @@ export async function runReactLoop(
         })
       }
 
-      // If agent responded, we're done
+      // If agent responded, check if it's too early during browser work
       if (response !== null) {
+        const browserToolCount = toolCallLog.filter(tc => tc.name.startsWith('browser_') && tc.name !== 'browser_close').length
+        const isEarlyBrowserExit = browserToolCount > 0 && browserToolCount < 5 && i < Math.floor(config.maxIterations * 0.3)
+        // Detect when the model falsely claims it cannot browse (e.g. "I cannot browse external URLs")
+        // Must match self-referential refusal patterns, not site critiques like "the site cannot handle..."
+        const looksLikeFalseRefusal = /\bI\b.*(?:cannot|can't|unable to|don't have|not able to).*(?:browse|navigate|access.*(?:website|url|external))/i.test(response)
+
+        if ((isEarlyBrowserExit || looksLikeFalseRefusal) && i < config.maxIterations - 1) {
+          console.log(`[runtime] Intercepted early respond during browser work (${browserToolCount} browser calls, iteration ${i + 1}) — nudging to continue`)
+          // Don't treat this as a final response — nudge the model to keep browsing
+          messages.push({
+            role: 'user',
+            content: looksLikeFalseRefusal
+              ? 'CORRECTION: You DO have browser access and you just used it successfully. The browser_navigate tool worked. Keep browsing and exploring the site. Do NOT say you cannot browse — you clearly can. Continue using browser tools to complete the task.'
+              : 'Good progress! Keep exploring — click through more pages on the site before responding. You should visit at least 3-4 different pages to give a thorough analysis. Use browser_click to navigate to other sections.',
+          })
+          response = null // Reset so the loop continues
+          continue
+        }
+
         await addMessage(db, agentId, 'assistant', response, teamId)
         emitProgress('idle', 'Done', i + 1)
         return { response, iterations: i + 1, toolCalls: toolCallLog }
@@ -2452,7 +2471,10 @@ export async function runReactLoop(
   // Use actual iterations run (not maxIterations) so credit refunds are accurate
   const actualIterations = Math.min(toolCallLog.length + 1, config.maxIterations)
   const fallback = response ?? "I'm still working on this but need a bit more time. I've saved my progress — I'll pick it back up on my next check-in."
-  await addMessage(db, agentId, 'assistant', fallback, teamId)
+  // Only store meaningful responses in agent history — generic fallbacks poison future context
+  if (response) {
+    await addMessage(db, agentId, 'assistant', fallback, teamId)
+  }
   emitProgress('idle', 'Done', actualIterations)
   return { response: fallback, iterations: actualIterations, toolCalls: toolCallLog }
 }
