@@ -236,7 +236,7 @@ export function MessageBubble({
         {/* Content — full on desktop, collapsible on mobile */}
         {displayContent && (<>
         <div className={`relative text-sm text-text-main leading-relaxed break-words whitespace-pre-wrap ${mobileCollapsed ? 'max-md:max-h-[6.5em] max-md:overflow-hidden' : ''}`}>
-          {renderMentionContent(displayContent, onAgentClick, onFileClick, undefined, onTaskClick)}
+          <>{renderMentionContent(displayContent, onAgentClick, onFileClick, undefined, onTaskClick)}</>
           {mobileCollapsed && (
             <div
               className="absolute bottom-0 left-0 right-0 h-8 pointer-events-none hidden max-md:block"

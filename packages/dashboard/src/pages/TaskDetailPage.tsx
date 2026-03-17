@@ -416,7 +416,7 @@ export function TaskDetailPage() {
                       : 'bg-light-surface-alt text-text-main'
                   }`}>
                     <p className="whitespace-pre-wrap break-words">
-                      {renderMentionContent(msg.content, onAgentClick, onFileClick, agentColorMap)}
+                      <>{renderMentionContent(msg.content, onAgentClick, onFileClick, agentColorMap)}</>
                     </p>
 
                     {/* Render inline images/GIFs from markdown syntax */}
