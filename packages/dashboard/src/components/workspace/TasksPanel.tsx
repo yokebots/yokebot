@@ -192,6 +192,17 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
     return sorted
   }, [tasks, sortKey, sortDir])
 
+  // IMPORTANT: useCallback must be called before any early return (Rules of Hooks)
+  const handleStatusChange = useCallback(async (taskId: string, newStatus: string) => {
+    // Optimistic update
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus as engine.EngineTask['status'] } : t))
+    try {
+      await engine.updateTask(taskId, { status: newStatus })
+    } catch {
+      loadTasks() // revert on failure
+    }
+  }, [loadTasks])
+
   // Show TaskDetail if a task is selected
   if (workspace.selectedTaskId) {
     return (
@@ -206,16 +217,6 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
 
   const tasksByStatus = (status: string) => sortedTasks.filter(t => t.status === status)
   const doneCount = tasks.filter(t => t.status === 'done').length
-
-  const handleStatusChange = useCallback(async (taskId: string, newStatus: string) => {
-    // Optimistic update
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus as engine.EngineTask['status'] } : t))
-    try {
-      await engine.updateTask(taskId, { status: newStatus })
-    } catch {
-      loadTasks() // revert on failure
-    }
-  }, [loadTasks])
 
   return (
     <div data-testid="tasks-panel" className="flex flex-col h-full">

@@ -586,7 +586,7 @@ export function renderMentionContent(
   onFileClick?: (docId: string) => void,
   agentColorMap?: Map<string, { color: string; icon: string }>,
   onTaskClick?: (taskId: string) => void,
-): React.ReactNode[] {
+): React.ReactNode {
   const regex = /@\[([^\]]+)\]\((agent|user|file|task|everyone):([^)]+)\)/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
@@ -675,5 +675,5 @@ export function renderMentionContent(
     parts.push(<span key={`t-${lastIndex}`}>{renderInlineMarkdown(content.slice(lastIndex), `t-${lastIndex}`)}</span>)
   }
 
-  return parts.length > 0 ? parts : [<span key="raw">{content}</span>]
+  return parts.length > 0 ? <>{parts}</> : <span>{content}</span>
 }
