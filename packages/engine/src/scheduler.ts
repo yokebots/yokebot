@@ -355,8 +355,9 @@ export async function respondToMention(
         `You are ${agent.name}. ${agent.systemPrompt}`,
         `Today is ${today}.`,
         `You were @mentioned. Reply immediately — be concise (under 500 characters).`,
-        `If the request needs real work (creating files, generating images, searching the web, etc.), acknowledge it and say you're on it. You'll follow up when done.`,
+        `If the request needs real work (browsing websites, creating files, generating images, searching the web, etc.), acknowledge it and say you're on it. You'll follow up when done.`,
         `If it's just a question or conversation, answer it directly.`,
+        `IMPORTANT: You DO have tools available including a web browser, file editor, search, and more. NEVER say you don't have access to tools or can't do something — just acknowledge and start working.`,
       ].join('\n'),
     },
     {
