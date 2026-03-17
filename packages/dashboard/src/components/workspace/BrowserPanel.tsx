@@ -135,21 +135,33 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
     }
   }, [activeSessionId])
 
-  // Draw a JPEG frame onto the canvas
+  // Draw a JPEG frame onto the canvas using createImageBitmap (much faster than Image + data URL)
+  const drawingRef = useRef(false)
   const drawFrame = useCallback((base64Data: string) => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || drawingRef.current) return // skip if still drawing previous frame
+    drawingRef.current = true
 
-    const img = new Image()
-    img.onload = () => {
-      canvas.width = img.width
-      canvas.height = img.height
+    // Decode base64 to binary
+    const binary = atob(base64Data)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    const blob = new Blob([bytes], { type: 'image/jpeg' })
+
+    createImageBitmap(blob).then((bitmap) => {
+      if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+      }
       const ctx = canvas.getContext('2d')
       if (ctx) {
-        ctx.drawImage(img, 0, 0)
+        ctx.drawImage(bitmap, 0, 0)
       }
-    }
-    img.src = `data:image/jpeg;base64,${base64Data}`
+      bitmap.close()
+      drawingRef.current = false
+    }).catch(() => {
+      drawingRef.current = false
+    })
   }, [])
 
   // Send message over WebSocket
@@ -276,7 +288,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-testid="browser-loading">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-forest-green border-t-transparent" />
           Connecting to browser...
         </div>
@@ -285,14 +297,15 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
   }
 
   return (
-    <div className={`flex-1 flex flex-col overflow-hidden ${popout ? 'h-screen' : ''}`}>
+    <div className={`flex-1 flex flex-col overflow-hidden ${popout ? 'h-screen' : ''}`} data-testid="browser-panel">
       {/* URL bar + nav controls */}
       {mode === 'take_control' && (
-        <div className="flex items-center gap-1 border-b border-border-subtle bg-light-surface-alt px-2 py-1">
+        <div className="flex items-center gap-1 border-b border-border-subtle bg-light-surface-alt px-2 py-1" data-testid="browser-url-bar">
           <button
             onClick={handleBack}
             className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
             title="Back"
+            data-testid="browser-back"
           >
             <span className="material-symbols-outlined text-base">arrow_back</span>
           </button>
@@ -300,6 +313,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
             onClick={handleForward}
             className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
             title="Forward"
+            data-testid="browser-forward"
           >
             <span className="material-symbols-outlined text-base">arrow_forward</span>
           </button>
@@ -307,6 +321,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
             onClick={handleRefresh}
             className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
             title="Refresh"
+            data-testid="browser-refresh"
           >
             <span className="material-symbols-outlined text-base">refresh</span>
           </button>
@@ -317,6 +332,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
               placeholder="Enter URL..."
+              data-testid="browser-url-input"
               autoFocus={!currentUrl || currentUrl === 'about:blank'}
               className="flex-1 bg-white border border-border-subtle rounded px-2 py-1 text-xs focus:border-forest-green focus:outline-none"
             />
@@ -326,6 +342,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               onClick={() => setZoom(z => Math.max(25, z - 25))}
               className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
               title="Zoom out"
+              data-testid="browser-zoom-out"
             >
               <span className="material-symbols-outlined text-sm">zoom_out</span>
             </button>
@@ -333,6 +350,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               onClick={() => setZoom(100)}
               className="px-1 py-0.5 rounded hover:bg-light-surface-alt2 text-text-muted text-[10px] font-mono min-w-[36px] text-center"
               title="Reset zoom"
+              data-testid="browser-zoom-reset"
             >
               {zoom}%
             </button>
@@ -340,6 +358,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               onClick={() => setZoom(z => Math.min(200, z + 25))}
               className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
               title="Zoom in"
+              data-testid="browser-zoom-in"
             >
               <span className="material-symbols-outlined text-sm">zoom_in</span>
             </button>
@@ -349,6 +368,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
             disabled={savingLogin}
             className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-light-surface-alt2 text-text-muted disabled:opacity-50"
             title="Save login session to vault"
+            data-testid="browser-save-login"
           >
             <span className="material-symbols-outlined text-sm">security</span>
             Save Login
@@ -358,6 +378,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               onClick={handlePopout}
               className="p-1 rounded hover:bg-light-surface-alt2 text-text-muted"
               title="Pop out to new window"
+              data-testid="browser-popout"
             >
               <span className="material-symbols-outlined text-sm">open_in_new</span>
             </button>
@@ -367,7 +388,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
 
       {/* Error banner */}
       {error && (
-        <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-600 flex items-center justify-between">
+        <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-600 flex items-center justify-between" data-testid="browser-error">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 ml-2">
             <span className="material-symbols-outlined text-sm">close</span>
@@ -379,6 +400,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
       <div
         ref={containerRef}
         className="flex-1 flex items-center justify-center overflow-auto bg-slate-100 p-2"
+        data-testid="browser-viewport"
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
@@ -387,6 +409,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
             ref={canvasRef}
             onClick={handleClick}
             onWheel={handleWheel}
+            data-testid="browser-canvas"
             className={`rounded border border-border-subtle shadow-lg ${
               mode === 'take_control' ? 'cursor-crosshair' : 'cursor-default'
             }`}
@@ -402,10 +425,10 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
           <div className="text-center text-text-muted text-sm">
             <span className="material-symbols-outlined text-4xl block mb-3 text-forest-green/40">language</span>
             {isAgentSession ? (
-              <p>Waiting for agent to start browsing...</p>
+              <p data-testid="browser-waiting-agent">Waiting for agent to start browsing...</p>
             ) : (
               <>
-                <p className="font-medium text-text-main mb-1">Browser ready</p>
+                <p className="font-medium text-text-main mb-1" data-testid="browser-ready">Browser ready</p>
                 <p>Type a URL in the address bar above to get started</p>
               </>
             )}
@@ -415,16 +438,16 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
 
       {/* Status bar */}
       {!popout && (
-        <div className="flex items-center justify-between border-t border-border-subtle bg-light-surface-alt px-3 py-1.5 text-xs text-text-muted">
+        <div className="flex items-center justify-between border-t border-border-subtle bg-light-surface-alt px-3 py-1.5 text-xs text-text-muted" data-testid="browser-status-bar">
           <div className="flex items-center gap-3">
             {mode === 'take_control' ? (
               <span className="flex items-center gap-1">
-                <span className={`h-2 w-2 rounded-full ${connected ? 'bg-forest-green' : 'bg-gray-400'}`} />
+                <span className={`h-2 w-2 rounded-full ${connected ? 'bg-forest-green' : 'bg-gray-400'}`} data-testid="browser-connection-indicator" />
                 Take Control
               </span>
             ) : (
               <span className="flex items-center gap-1">
-                <span className={`h-2 w-2 rounded-full ${connected ? 'animate-pulse bg-blue-500' : 'bg-gray-400'}`} />
+                <span className={`h-2 w-2 rounded-full ${connected ? 'animate-pulse bg-blue-500' : 'bg-gray-400'}`} data-testid="browser-connection-indicator" />
                 Agent Browser
               </span>
             )}
@@ -437,6 +460,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               <button
                 onClick={handleTakeControl}
                 className="flex items-center gap-1 px-2 py-0.5 rounded bg-forest-green text-white hover:bg-forest-green/90 text-xs font-medium"
+                data-testid="browser-take-control"
               >
                 <span className="material-symbols-outlined text-sm">pan_tool</span>
                 Take Control
@@ -446,6 +470,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               <button
                 onClick={handleReturnToAgent}
                 className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500 text-white hover:bg-blue-600 text-xs font-medium"
+                data-testid="browser-return-to-agent"
               >
                 <span className="material-symbols-outlined text-sm">smart_toy</span>
                 Return to Agent
@@ -456,6 +481,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
                 onClick={handlePopout}
                 className="p-0.5 rounded hover:bg-light-surface-alt2 text-text-muted"
                 title="Pop out to new window"
+                data-testid="browser-popout"
               >
                 <span className="material-symbols-outlined text-sm">open_in_new</span>
               </button>

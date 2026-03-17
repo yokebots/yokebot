@@ -20,7 +20,7 @@ export function SettingsLayout({ activeTab, children }: { activeTab: SettingsTab
   return (
     <div>
       <div className="mb-6">
-        <h1 className="font-display text-2xl font-bold text-text-main">Settings</h1>
+        <h1 data-testid="settings-heading" className="font-display text-2xl font-bold text-text-main">Settings</h1>
         <p className="text-sm text-text-muted">Manage your team, integrations, and billing.</p>
       </div>
 

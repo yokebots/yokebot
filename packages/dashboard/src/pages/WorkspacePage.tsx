@@ -294,7 +294,7 @@ export function WorkspacePage() {
 
   // ---- Desktop layout: 3 resizable panels ----
   return (
-    <div className="-m-4 md:-m-6 flex h-[calc(100vh-4rem)] overflow-hidden">
+    <div data-testid="workspace-layout" className="-m-4 md:-m-6 flex h-[calc(100vh-4rem)] overflow-hidden">
       {/* Left: Files */}
       <ResizablePanel
         defaultWidth={260}

@@ -273,9 +273,10 @@ async function startStreamProxy(
   cdpSend(cdpWs, 'Page.enable', {})
   cdpSend(cdpWs, 'Page.startScreencast', {
     format: 'jpeg',
-    quality: 60,
-    maxWidth: 1280,
-    maxHeight: 800,
+    quality: 40,
+    maxWidth: 1024,
+    maxHeight: 768,
+    everyNthFrame: 2, // skip every other frame for lower latency
   })
 
   // Helper to send CDP command and await result

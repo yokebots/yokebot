@@ -266,7 +266,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
 
   if (!teamChannelId) {
     return (
-      <div className="flex flex-col h-full">
+      <div data-testid="team-chat-panel" className="flex flex-col h-full">
         <PanelHeader icon="forum" title="Team Chat" />
         <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
           Loading team chat...
@@ -276,7 +276,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div data-testid="team-chat-panel" className="flex flex-col h-full">
       <PanelHeader icon="forum" title="Team Chat" />
 
       {/* Messages */}

@@ -529,7 +529,7 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
     : tables
 
   return (
-    <div ref={panelRef} className="flex flex-col h-full">
+    <div ref={panelRef} data-testid="files-panel" className="flex flex-col h-full">
       {/* Files / Data tab header — single line */}
       <div className="flex items-center gap-1 px-2 py-2 border-b border-border-subtle shrink-0">
         <button

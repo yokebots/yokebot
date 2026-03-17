@@ -349,7 +349,7 @@ export function HomePage() {
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['50,000 Credits Per Month', 'Unlimited Agents', 'Unlimited Team Members', '30-Min Heartbeat Interval', '24/7 Always Available'].map((f) => (
+                  {['50,000 Credits Per Month', 'Unlimited Agents', 'Unlimited Team Members', '30-Min Heartbeat Interval', '24/7 Always Available', 'Full Workspace — Skills, Chat, Browser & More'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
@@ -376,7 +376,7 @@ export function HomePage() {
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['150,000 Credits Per Month', 'Unlimited Agents', 'Unlimited Team Members', '15-Min Heartbeat Interval', '24/7 Always Available'].map((f) => (
+                  {['150,000 Credits Per Month', 'Unlimited Agents', 'Unlimited Team Members', '15-Min Heartbeat Interval', '24/7 Always Available', 'Full Workspace — Skills, Chat, Browser & More'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}
@@ -402,7 +402,7 @@ export function HomePage() {
                   <span className="text-text-muted">/mo</span>
                 </div>
                 <ul className="mb-4 flex-1 space-y-4">
-                  {['500,000 Credits Per Month', 'Unlimited Agents', 'Unlimited Team Members', '5-Min Heartbeat Interval', '24/7 Always Available'].map((f) => (
+                  {['500,000 Credits Per Month', 'Unlimited Agents', 'Unlimited Team Members', '5-Min Heartbeat Interval', '24/7 Always Available', 'Full Workspace — Skills, Chat, Browser & More'].map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-text-main">
                       <span className="material-symbols-outlined text-lg text-accent-gold-dim">check</span>
                       {f}

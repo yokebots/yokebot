@@ -218,7 +218,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
   }, [loadTasks])
 
   return (
-    <div className="flex flex-col h-full">
+    <div data-testid="tasks-panel" className="flex flex-col h-full">
       {/* Slim toolbar — no title (tab above already says "Tasks") */}
       <div className="flex items-center gap-1 border-b border-border-subtle px-2 py-1.5 shrink-0">
             <button
