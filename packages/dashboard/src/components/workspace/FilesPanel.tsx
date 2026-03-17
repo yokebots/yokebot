@@ -529,7 +529,14 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
     : tables
 
   return (
-    <div ref={panelRef} data-testid="files-panel" className="flex flex-col h-full">
+    <div
+      ref={panelRef}
+      data-testid="files-panel"
+      className={`flex flex-col h-full ${dragOver ? 'ring-2 ring-inset ring-forest-green/40' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); if (activePanel === 'files') setDragOver(true) }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false) }}
+      onDrop={activePanel === 'files' ? handleDrop : undefined}
+    >
       {/* Files / Data tab header — single line */}
       <div className="flex items-center gap-1 px-2 py-2 border-b border-border-subtle shrink-0">
         <button
@@ -579,7 +586,7 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
         />
       </div>
 
-      {/* Search + Upload row */}
+      {/* Search row */}
       <div className="flex items-center gap-1 px-1 py-1.5 shrink-0">
         <input
           type="text"
@@ -588,24 +595,11 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
           placeholder={activePanel === 'files' ? 'Search files...' : 'Search tables...'}
           className="flex-1 rounded-lg border border-border-subtle px-2.5 py-1.5 text-xs focus:border-forest-green focus:outline-none"
         />
-        {activePanel === 'files' && (
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            title="Upload files"
-            className="flex items-center gap-1 rounded-lg border border-border-subtle px-2 py-1.5 text-xs text-text-muted hover:border-forest-green hover:text-forest-green transition-colors disabled:opacity-40"
-          >
-            <span className="material-symbols-outlined text-[14px]">{uploading ? 'hourglass_top' : 'upload_file'}</span>
-          </button>
-        )}
       </div>
 
       {/* Content area */}
       <div
-        className={`flex-1 overflow-y-auto px-1 relative ${dragOver ? 'ring-2 ring-inset ring-forest-green/40 bg-forest-green/5' : ''}`}
-        onDragOver={(e) => { e.preventDefault(); if (activePanel === 'files') setDragOver(true) }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={activePanel === 'files' ? handleDrop : undefined}
+        className={`flex-1 overflow-y-auto px-1 relative ${dragOver ? 'bg-forest-green/5' : ''}`}
       >
         {activePanel === 'files' ? (
           // FILES panel
@@ -689,8 +683,18 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
         )}
       </div>
 
-      {/* Export footer */}
-      <div className="border-t border-border-subtle px-2 py-1.5 shrink-0">
+      {/* Upload + Export footer */}
+      <div className="border-t border-border-subtle px-2 py-1.5 shrink-0 flex flex-col gap-1.5">
+        {activePanel === 'files' && (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-forest-green/30 bg-forest-green/5 px-3 py-1.5 text-xs font-medium text-forest-green hover:bg-forest-green/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-[14px]">{uploading ? 'hourglass_top' : 'upload_file'}</span>
+            {uploading ? 'Uploading...' : 'Upload Files'}
+          </button>
+        )}
         {activePanel === 'files' ? (
           <button
             onClick={handleExportAllFiles}
