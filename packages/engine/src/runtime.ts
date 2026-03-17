@@ -568,7 +568,7 @@ function getBuiltinTools(): ToolDef[] {
     }, ['skillName']),
 
     // Session Vault — authenticated browser sessions
-    toolDef('use_saved_login', 'Load an authenticated browser session from the team\'s Session Vault. This lets you browse websites the team has logged into without needing credentials.', {
+    toolDef('use_saved_login', 'Load a saved login session for a website that REQUIRES authentication. Only use this if you encounter a login page or need authenticated access. For public websites, just use browser_navigate directly — no login needed.', {
       domain: { type: 'string', description: 'Domain to load session for, e.g. "app.hubspot.com"' },
     }, ['domain']),
 
@@ -2157,6 +2157,7 @@ export async function runReactLoop(
   const toolCtx: ToolContext = { db, agentId, teamId, channelId, skillsDir, skipCredits: config.skipCredits, currentTaskId: config.currentTaskId, tools, onFileWritten: config.onFileWritten }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
+  let consecutiveNoToolIterations = 0 // Track iterations without real tool calls (only think/text)
 
   // Context window management: trim messages to fit model's context window
   const logicalModel = logicalModelId ? getLogicalModel(logicalModelId) : undefined
@@ -2215,6 +2216,10 @@ export async function runReactLoop(
 
     // If the model returned tool calls, execute them
     if (completion.tool_calls.length > 0) {
+      // Reset no-tool counter — model is actually calling tools
+      const hasRealToolCall = completion.tool_calls.some(tc => tc.function.name !== 'think')
+      if (hasRealToolCall) consecutiveNoToolIterations = 0
+
       // Add assistant message with tool calls
       messages.push({
         role: 'assistant',
@@ -2340,6 +2345,16 @@ export async function runReactLoop(
         }
       }
 
+      // If ALL tool calls were just 'think', increment no-tool counter
+      if (!hasRealToolCall) {
+        consecutiveNoToolIterations++
+        if (consecutiveNoToolIterations >= 5) {
+          console.warn(`[runtime] Agent ${agentId} spinning: ${consecutiveNoToolIterations} consecutive think-only iterations — exiting early`)
+          response = "I'm having trouble making progress on this task. Let me reassess on my next check-in."
+          break
+        }
+      }
+
       // Otherwise continue the loop (agent thought but didn't respond yet)
       continue
     }
@@ -2352,7 +2367,15 @@ export async function runReactLoop(
       const thinkMatch = text.match(/\[think\]([\s\S]*?)\[\/think\]/)
       if (thinkMatch && i < config.maxIterations - 1) {
         const thought = thinkMatch[1].trim()
-        console.log(`[runtime] Model wrote [think] as text — converting to tool call (iteration ${i + 1})`)
+        consecutiveNoToolIterations++
+        console.log(`[runtime] Model wrote [think] as text — converting to tool call (iteration ${i + 1}, ${consecutiveNoToolIterations} consecutive no-tool iters)`)
+
+        // Bail if the model is spinning without making real tool calls (saves credits)
+        if (consecutiveNoToolIterations >= 5) {
+          console.warn(`[runtime] Agent ${agentId} spinning: ${consecutiveNoToolIterations} consecutive iterations without real tool calls — exiting early`)
+          response = "I'm having trouble making progress on this task. Let me reassess on my next check-in."
+          break
+        }
 
         // Check if the rest of the text after stripping think blocks is just [no-op] or empty
         const remainder = text.replace(/\[think\][\s\S]*?\[\/think\]/g, '').replace(/\[no-?op\]/gi, '').trim()
