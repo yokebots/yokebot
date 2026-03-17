@@ -821,22 +821,55 @@ For each function call, return a JSON object with the function name and argument
 
 RULES:
 1. ALWAYS call at least one tool when you have a task to do. Never describe what you would do — ACT by calling tools.
-2. You MUST respond to the user by calling the "respond" tool with a "message" argument. Do NOT write a plain text response.
+2. You MUST respond to the user by calling the "respond" tool with a "message" argument. Do NOT write a plain text response. Only call respond when you have FULLY completed the task.
 3. You may call multiple tools by outputting multiple <tool_call> blocks.
 4. The "arguments" value must be a valid JSON object with the correct parameter names and types.
 5. ALWAYS use the "think" tool first to plan your approach before taking action.
+6. Do NOT claim you cannot use a tool. You have full access to ALL listed tools. If a tool exists in the list above, you CAN use it.
+7. For multi-step tasks, keep calling tools until the task is FULLY complete. Do NOT respond after just 1-2 steps.
 
-Example — thinking then responding:
+## Example: Browsing a website (multi-step)
+
+User: "Check out example.com and tell me what's on it"
+
+Step 1 — Think and navigate:
 <tool_call>
-{"name": "think", "arguments": {"thought": "The user wants me to check the files first."}}
+{"name": "think", "arguments": {"thought": "I need to navigate to example.com, explore the site, then report my findings."}}
+</tool_call>
+<tool_call>
+{"name": "browser_navigate", "arguments": {"url": "https://example.com"}}
+</tool_call>
+
+Step 2 — After seeing the page snapshot, click to explore more:
+<tool_call>
+{"name": "browser_click", "arguments": {"element": "About Us"}}
+</tool_call>
+
+Step 3 — After exploring multiple pages, respond with findings:
+<tool_call>
+{"name": "respond", "arguments": {"message": "Here's what I found on example.com: ..."}}
+</tool_call>
+
+## Example: Writing code
+
+User: "Build a hello world app"
+
+Step 1 — Think and check existing files:
+<tool_call>
+{"name": "think", "arguments": {"thought": "I need to scaffold a new app. Let me check what exists first."}}
 </tool_call>
 <tool_call>
 {"name": "sandbox_list_files", "arguments": {"directory": "/home/daytona/app"}}
 </tool_call>
 
-Example — responding to the user:
+Step 2 — Write the code:
 <tool_call>
-{"name": "respond", "arguments": {"message": "I've completed the task! Here's what I did..."}}
+{"name": "sandbox_write_file", "arguments": {"path": "/home/daytona/app/src/App.tsx", "content": "export default function App() { return <h1>Hello World</h1> }"}}
+</tool_call>
+
+Step 3 — Respond when done:
+<tool_call>
+{"name": "respond", "arguments": {"message": "I've built the hello world app! Check the preview."}}
 </tool_call>`
   },
 

@@ -260,6 +260,71 @@ export function getFilteredBuiltinTools(categories: ToolCategory[]): ToolDef[] {
   })
 }
 
+/**
+ * Essential tool subsets for small models (under ~30B active params).
+ * Research shows small models degrade with >7 tools per category.
+ * We keep core tools + the most relevant category tools based on task context.
+ */
+const ESSENTIAL_BROWSER_TOOLS = new Set([
+  'think', 'respond', 'browser_navigate', 'browser_click', 'browser_type',
+  'browser_press_key', 'browser_screenshot', 'browser_close', 'browser_snapshot',
+])
+const ESSENTIAL_SANDBOX_TOOLS = new Set([
+  'think', 'respond', 'sandbox_exec', 'sandbox_write_file', 'sandbox_read_file',
+  'sandbox_list_files', 'sandbox_setup', 'sandbox_preview', 'sandbox_write_files',
+])
+const ESSENTIAL_WORKSPACE_TOOLS = new Set([
+  'think', 'respond', 'read_workspace_file', 'write_workspace_file',
+  'list_workspace_files', 'search_knowledge_base', 'send_chat_message',
+])
+const ESSENTIAL_TASK_TOOLS = new Set([
+  'think', 'respond', 'update_task', 'list_tasks', 'create_task',
+  'add_subtask', 'update_scratchpad', 'send_chat_message',
+])
+const ALWAYS_INCLUDE = new Set(['think', 'respond', 'update_task', 'send_chat_message'])
+
+/**
+ * Detect task intent from the user message and reduce tool set for small models.
+ * Returns a pruned tool list (max ~15 tools) based on what the agent actually needs.
+ */
+export function pruneToolsForSmallModel(tools: ToolDef[], userMessage: string): ToolDef[] {
+  const msg = userMessage.toLowerCase()
+
+  // Detect primary intent
+  const wantsBrowser = /browse|website|url|http|navigate|check.*site|review.*site|hometownclean|\.com|\.org|\.io|web.*page/i.test(msg)
+  const wantsSandbox = /build|code|scaffold|create.*app|develop|implement|write.*code|react|typescript|npm|install/i.test(msg)
+  const wantsWorkspace = /file|document|read|write|upload|knowledge|search.*docs/i.test(msg)
+
+  // Build the essential set based on intent
+  const essentialNames = new Set<string>(ALWAYS_INCLUDE)
+
+  if (wantsBrowser) {
+    for (const t of ESSENTIAL_BROWSER_TOOLS) essentialNames.add(t)
+  }
+  if (wantsSandbox) {
+    for (const t of ESSENTIAL_SANDBOX_TOOLS) essentialNames.add(t)
+  }
+  if (wantsWorkspace || (!wantsBrowser && !wantsSandbox)) {
+    for (const t of ESSENTIAL_WORKSPACE_TOOLS) essentialNames.add(t)
+  }
+
+  // For tasks that involve building (common), include both sandbox and browser
+  if (wantsSandbox && !wantsBrowser) {
+    // Builders often need to browse for reference — include basic browser
+    essentialNames.add('browser_navigate')
+    essentialNames.add('browser_snapshot')
+    essentialNames.add('browser_click')
+    essentialNames.add('browser_close')
+  }
+
+  // Always include task tools for task-focused work
+  for (const t of ESSENTIAL_TASK_TOOLS) essentialNames.add(t)
+
+  const pruned = tools.filter(t => essentialNames.has(t.function.name))
+  console.log(`[runtime] Small model tool pruning: ${tools.length} → ${pruned.length} tools (browser=${wantsBrowser}, sandbox=${wantsSandbox}, workspace=${wantsWorkspace})`)
+  return pruned
+}
+
 export interface RuntimeConfig {
   maxIterations: number  // safety limit to prevent infinite loops
   skipCredits?: boolean  // bypass credit deduction (e.g. AdvisorBot is free)
@@ -2135,7 +2200,15 @@ export async function runReactLoop(
     ? [...new Set([...categories, ...config.extraToolCategories])]
     : categories
   const builtinTools = getFilteredBuiltinTools(effectiveCategories as ToolCategory[])
-  const tools = [...builtinTools, ...skillTools, ...mcpTools]
+  let tools = [...builtinTools, ...skillTools, ...mcpTools]
+
+  // For small models, prune tools to essentials based on task context
+  // This dramatically improves tool calling reliability (research shows max 5-7 tools per category)
+  const logicalModel = logicalModelId ? getLogicalModel(logicalModelId) : undefined
+  const isSmallModel = logicalModel?.category === 'efficient' || (logicalModelId && /9b|8b|7b|3b|flash/i.test(logicalModelId))
+  if (isSmallModel) {
+    tools = pruneToolsForSmallModel(tools, userMessage)
+  }
 
   // Look up agent name for progress broadcasts (reuse agentRow from above)
   const agentName = agentRow?.name ?? agentId
@@ -2161,7 +2234,6 @@ export async function runReactLoop(
   let consecutiveNoToolIterations = 0 // Track iterations without real tool calls (only think/text)
 
   // Context window management: trim messages to fit model's context window
-  const logicalModel = logicalModelId ? getLogicalModel(logicalModelId) : undefined
   const contextWindow = logicalModel?.contextWindow ?? 128_000
   const maxInputTokens = Math.floor(contextWindow * 0.8) // reserve 20% for response
   const toolsTokens = estimateToolsTokens(tools)
