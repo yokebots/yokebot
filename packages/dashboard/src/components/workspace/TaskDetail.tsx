@@ -1,7 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { PanelHeader } from './PanelHeader'
-import { MessageBubble } from './ThreadView'
-import { MentionInput } from '@/components/MentionInput'
 import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 import { useAgentProgress } from '@/hooks/useAgentProgress'
 import TagManager from '@/components/TagManager'
@@ -20,23 +18,18 @@ interface TaskDetailProps {
 
 export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProps) {
   const [task, setTask] = useState<engine.EngineTask | null>(null)
-  const [threadMessages, setThreadMessages] = useState<engine.ChatMessage[]>([])
-  const [threadChannelId, setThreadChannelId] = useState<string | null>(null)
-  const [replyText, setReplyText] = useState('')
-  const [sending, setSending] = useState(false)
   const [linkedFiles, setLinkedFiles] = useState<Array<{ path: string; name: string; size: number }>>([])
   const [actionLoading, setActionLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const [completions, setCompletions] = useState<engine.MentionCompletionData | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const [teamUsers, setTeamUsers] = useState<Array<{ userId: string; email: string; displayName: string | null }>>([])
+
+  // Fetch team users for assignee dropdown
+  useEffect(() => {
+    engine.getMentionCompletions().then(data => setTeamUsers(data.users)).catch(() => {})
+  }, [])
 
   // Live tool streaming: show agent progress for this task
   const { progressMap } = useAgentProgress()
-
-  // Build agent color map
-  const agentColorMap = new Map(
-    agents.map(a => [a.id, { color: a.iconColor ?? '#0F4D26', icon: a.iconName ?? 'smart_toy', name: a.name }])
-  )
 
   // Load everything in a single API call
   const loadAll = useCallback(async () => {
@@ -44,8 +37,6 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
       setLoadError(false)
       const detail = await engine.getTaskDetail(taskId)
       setTask(detail.task)
-      setThreadChannelId(detail.channelId)
-      setThreadMessages(detail.messages)
       setLinkedFiles(detail.files)
     } catch {
       setLoadError(true)
@@ -53,11 +44,6 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
   }, [taskId])
 
   useEffect(() => { loadAll() }, [loadAll])
-
-  // Fetch mention completions for the reply input
-  useEffect(() => {
-    engine.getMentionCompletions().then(setCompletions).catch(() => {})
-  }, [])
 
   const updateField = async (field: string, value: string | null) => {
     // Optimistic update so the UI feels instant
@@ -71,22 +57,6 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
     }
   }
 
-  const sendReply = async () => {
-    const text = replyText.trim()
-    if (!text || !threadChannelId || sending) return
-    setSending(true)
-    try {
-      const msg = await engine.sendMessage(threadChannelId, {
-        senderType: 'human',
-        senderId: 'user',
-        content: text,
-      })
-      setThreadMessages(prev => [...prev, msg])
-      setReplyText('')
-    } catch { /* ignore */ }
-    setSending(false)
-  }
-
   const openFile = (path: string) => {
     const name = path.split('/').pop() ?? path
     const tab: ViewerTab = {
@@ -98,10 +68,6 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
     }
     workspace.addViewerTab(tab)
   }
-
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [threadMessages.length])
 
   if (!task) {
     return (
@@ -333,7 +299,7 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
               className="rounded border border-border-subtle px-2 py-0.5 text-xs focus:border-forest-green focus:outline-none"
             >
               <option value="">Unassigned</option>
-              {completions?.users.map(u => (
+              {teamUsers.map(u => (
                 <option key={u.userId} value={u.userId}>{u.displayName || u.email.split('@')[0]}</option>
               ))}
             </select>
@@ -381,30 +347,6 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
           </div>
         )}
 
-        {/* Task thread */}
-        <div className="px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2">Thread</p>
-          <div ref={scrollRef} className="space-y-1">
-            {threadMessages.length === 0 && (
-              <p className="text-xs text-text-muted py-2">No messages in this task thread yet</p>
-            )}
-            {threadMessages.map(msg => (
-              <MessageBubble key={msg.id} message={msg} agentColorMap={agentColorMap} />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Reply input — MentionInput with @mention support */}
-      <div className="px-3 py-2 border-t border-border-subtle shrink-0">
-        <MentionInput
-          value={replyText}
-          onChange={setReplyText}
-          onSubmit={sendReply}
-          placeholder="Reply to task thread... (@mention an agent)"
-          completions={completions}
-          disabled={sending}
-        />
       </div>
     </div>
   )

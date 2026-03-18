@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
-import { ResizablePanel } from '@/components/workspace/ResizablePanel'
+import { ResizablePanel, HorizontalDivider } from '@/components/workspace/ResizablePanel'
 import { FilesPanel } from '@/components/workspace/FilesPanel'
 import { ContextPane } from '@/components/workspace/ContextPane'
 import { TasksPanel } from '@/components/workspace/TasksPanel'
@@ -79,6 +79,14 @@ export function WorkspacePage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [threadParent, setThreadParent] = useState<engine.ChatMessage | null>(null)
   const [completions, setCompletions] = useState<engine.MentionCompletionData | null>(null)
+  const [threadSplitRatio, setThreadSplitRatio] = useState(() => {
+    const saved = localStorage.getItem('workspace-thread-split-ratio')
+    return saved ? Number(saved) : 0.5
+  })
+  const saveThreadSplitRatio = useCallback((ratio: number) => {
+    setThreadSplitRatio(ratio)
+    localStorage.setItem('workspace-thread-split-ratio', String(ratio))
+  }, [])
 
   // Persist tabs to localStorage whenever they change
   useEffect(() => {
@@ -399,22 +407,31 @@ export function WorkspacePage() {
             </button>
           </div>
           {/* Tasks/Workflows panel — shrinks when thread is open */}
-          <div className={threadParent ? 'flex-1 overflow-hidden min-h-0' : 'flex-1 overflow-hidden'} style={threadParent ? { maxHeight: '50%' } : undefined}>
+          <div
+            className="overflow-hidden flex flex-col"
+            style={threadParent ? { height: `${threadSplitRatio * 100}%` } : { flex: '1 1 0%' }}
+          >
             {rightPanelTab === 'tasks' && <TasksPanel workspace={workspaceState} unreadTaskIds={unreadTaskIds} agents={agents} />}
             {rightPanelTab === 'workflows' && <WorkflowsPanel workspace={workspaceState} />}
           </div>
-          {/* Thread panel — bottom half of right column */}
+          {/* Draggable divider + Thread panel — bottom of right column */}
           {threadParent && teamChannelId && (
-            <div className="flex-1 overflow-hidden min-h-0 border-t border-border-subtle">
-              <ThreadView
-                parentMessage={threadParent}
-                channelId={teamChannelId}
-                onClose={() => setThreadParent(null)}
-                agentColorMap={agentColorMapRef.current}
-                completions={completions}
-                humanName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'You'}
+            <>
+              <HorizontalDivider
+                storageKey="thread-split"
+                onRatioChange={saveThreadSplitRatio}
               />
-            </div>
+              <div className="overflow-hidden flex flex-col" style={{ height: `${(1 - threadSplitRatio) * 100}%` }}>
+                <ThreadView
+                  parentMessage={threadParent}
+                  channelId={teamChannelId}
+                  onClose={() => setThreadParent(null)}
+                  agentColorMap={agentColorMapRef.current}
+                  completions={completions}
+                  humanName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'You'}
+                />
+              </div>
+            </>
           )}
         </div>
       </ResizablePanel>
