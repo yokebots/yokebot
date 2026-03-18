@@ -110,6 +110,13 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return
   }
 
+  // Skip auth for WebSocket upgrade paths — these handle auth internally via JWT in query param
+  // If Express middleware rejects the request, the server.on('upgrade') handler never fires.
+  if (req.path.match(/^\/api\/browser-sessions\/[^/]+\/stream$/) && req.headers.upgrade?.toLowerCase() === 'websocket') {
+    next()
+    return
+  }
+
   // Dev mode: no JWT secret configured — use a deterministic dev user
   // Only allow this bypass in development to prevent accidental production exposure
   if (!JWT_SECRET && process.env.NODE_ENV !== 'production') {
