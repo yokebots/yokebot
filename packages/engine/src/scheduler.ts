@@ -758,8 +758,11 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMo
     `2. **Then IMMEDIATELY start coding** — call \`sandbox_setup\` to scaffold the project with ALL files in one call`,
     `3. **Self-review** — visit your preview URL with browser_navigate to check your work`,
     `4. **Iterate** — fix any issues, then respond with the preview URL`,
+    `5. **When everything works, mark the task DONE** — call update_task with status "done"`,
     ``,
     `**You MUST call sandbox_setup or sandbox_write_file before responding.** If you respond without writing any code, you have FAILED the task. Research alone is NOT a deliverable — a working app is. Do NOT visit external sites (design blogs, tutorials, etc.) — you already know how to code. Focus on the TARGET site only, then BUILD.`,
+    ``,
+    `**PATH RULES:** All file paths in sandbox_setup, sandbox_write_file, and sandbox_write_files must be RELATIVE (e.g. "src/App.tsx", "package.json"). Do NOT use absolute paths — the system automatically resolves them to the correct project directory. Using absolute paths causes double-prefixing bugs.`,
   ] : []
 
   // Sandbox project context
@@ -1263,8 +1266,10 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           if (result.taskCompleted) continue
           // If blocked, skip to next task
           if (result.taskBlocked) continue
-          // Task not done yet — continue to next task with remaining budget
-          continue
+          // Task not done yet — STOP here. Don't cycle to the next task.
+          // The agent will pick this up on the next heartbeat with fresh context.
+          // This prevents partial work across multiple tasks that wastes credits.
+          break
         }
 
         // Pick up newly-created subtasks from this sprint (if budget allows)

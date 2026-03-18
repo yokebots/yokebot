@@ -1707,8 +1707,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const installCmd = `cd ${PROJECT_DIR} && npm install`
       const startCmd = `cd ${PROJECT_DIR} && npm run dev -- --host 0.0.0.0 &`
 
-      // 1. Clean slate — remove old content in this project directory only
-      await sbExec(ctx.db, ctx.teamId, `rm -rf ${PROJECT_DIR}`)
+      // 1. Create project directory (preserves existing files — no destructive rm -rf)
+      await sbExec(ctx.db, ctx.teamId, `mkdir -p ${PROJECT_DIR}`)
 
       // 2. Collect all unique directories and create them in one command
       const dirs = [...new Set(files.map(f => f.path.replace(/\/[^/]+$/, '')))]
