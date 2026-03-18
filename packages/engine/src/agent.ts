@@ -21,7 +21,7 @@ export interface AgentConfig {
   templateId?: string
 }
 
-export type AgentStatus = 'running' | 'paused' | 'stopped' | 'error'
+export type AgentStatus = 'running' | 'idle' | 'paused' | 'stopped' | 'error'
 
 export interface Agent {
   id: string

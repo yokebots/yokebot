@@ -311,11 +311,11 @@ export async function respondToMention(
   if (!agent) return
   if (agent.teamId !== teamId) return
 
-  // Auto-resume paused agents on @mention — human signal means "wake up"
-  if (agent.status === 'paused') {
+  // Auto-resume paused/idle agents on @mention — human signal means "wake up"
+  if (agent.status === 'paused' || agent.status === 'idle') {
     await setAgentStatus(db, agent.id, 'running')
     scheduleAgent(db, agent)
-    console.log(`[scheduler] Auto-resumed "${agent.name}" on @mention`)
+    console.log(`[scheduler] Auto-resumed "${agent.name}" (was ${agent.status}) on @mention`)
   } else if (agent.status !== 'running') {
     return
   }

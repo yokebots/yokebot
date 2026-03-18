@@ -1413,23 +1413,23 @@ async function main() {
         // DM — reply from the DM's agent
         const agentId = channel.name.slice(3)
         const agent = await getAgent(db, agentId)
-        if (agent && agent.status === 'running') triggerAgentReply(agent)
+        if (agent && (agent.status === 'running' || agent.status === 'idle' || agent.status === 'paused')) triggerAgentReply(agent)
       } else if (channel?.type === 'group' && !content.match(/@\[[^\]]+\]\((agent|everyone):/)) {
         // Group channel, no @agent or @everyone mention — pick the most relevant agent
         ;(async () => {
           try {
             const agents = await listAgents(db, teamId)
-            const running = agents.filter(a => a.status === 'running')
-            if (running.length === 0) return
+            const available = agents.filter(a => a.status === 'running' || a.status === 'idle' || a.status === 'paused')
+            if (available.length === 0) return
 
             // If only one agent, just use that one
-            if (running.length === 1) {
-              triggerAgentReply(running[0])
+            if (available.length === 1) {
+              triggerAgentReply(available[0])
               return
             }
 
             // Quick LLM call to pick the best agent
-            const agentList = running.map((a, i) => `${i + 1}. ${a.name} — ${a.department ?? 'general'}`).join('\n')
+            const agentList = available.map((a, i) => `${i + 1}. ${a.name} — ${a.department ?? 'general'}`).join('\n')
             const routerModel = await resolveModelConfig(db, 'gemma-3-27b')
             const result = await chatCompletion(routerModel, [
               { role: 'system', content: 'You are a routing assistant. Given a user message and a list of agents, reply with ONLY the number of the most relevant agent. Nothing else.' },
@@ -1437,7 +1437,7 @@ async function main() {
             ] as LlmMessage[])
 
             const pick = parseInt(result.content?.trim() ?? '', 10)
-            const chosenAgent = pick >= 1 && pick <= running.length ? running[pick - 1] : running[0]
+            const chosenAgent = pick >= 1 && pick <= available.length ? available[pick - 1] : available[0]
             triggerAgentReply(chosenAgent)
           } catch (err) {
             console.error('[chat] Group auto-reply routing error:', err)

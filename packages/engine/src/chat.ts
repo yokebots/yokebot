@@ -352,12 +352,12 @@ export async function processMentions(
   const hasEveryone = mentions.some((m) => m.type === 'everyone')
   if (hasEveryone) {
     const allAgents = await listAgents(db, teamId)
-    const runningAgents = allAgents.filter((a) => a.status === 'running')
-    shuffleArray(runningAgents)
+    const availableAgents = allAgents.filter((a) => a.status === 'running' || a.status === 'idle' || a.status === 'paused')
+    shuffleArray(availableAgents)
 
-    console.log(`[chat] @everyone in channel ${channelId} — triggering ${runningAgents.length} agents: ${runningAgents.map((a) => a.name).join(', ')}`)
+    console.log(`[chat] @everyone in channel ${channelId} — triggering ${availableAgents.length} agents: ${availableAgents.map((a) => a.name).join(', ')}`)
 
-    for (const agent of runningAgents) {
+    for (const agent of availableAgents) {
       // Broadcast typing indicator
       broadcastChatEvent(channelId, {
         type: 'typing',
