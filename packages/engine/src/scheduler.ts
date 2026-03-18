@@ -483,12 +483,24 @@ export async function respondToMention(
     }
 
     // Fire and forget — don't block the mention response
-    const mentionBoosts = detectTaskCategories(triggerMessage.content, '')
-    const runtimeConfig = { maxIterations: mentionIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && mentionCost > 0, extraToolCategories: mentionBoosts.length > 0 ? mentionBoosts : undefined }
-    runReactLoop(
-      db, agent.id, teamId, mentionWorkPrompt, modelConfig, systemPrompt,
-      state.workspaceConfig, state.skillsDir, runtimeConfig, mentionModelId, channelId,
-    ).then(async (result) => {
+    // Check if this agent has a routing profile for multi-phase execution
+    const mentionRoutingProfile = getRoutingProfile(agent.templateId ?? '')
+
+    const mentionPromise = mentionRoutingProfile
+      ? runRoutedSprint(
+          db, agent, { id: `mention-${Date.now()}`, title: triggerMessage.content, description: null },
+          mentionRoutingProfile, systemPrompt, mentionIterations, broadcastFileWritten,
+        ).then(r => ({ response: r.response, iterations: r.totalIterations }))
+      : (() => {
+          const mentionBoosts = detectTaskCategories(triggerMessage.content, '')
+          const runtimeConfig = { maxIterations: mentionIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && mentionCost > 0, extraToolCategories: mentionBoosts.length > 0 ? mentionBoosts : undefined }
+          return runReactLoop(
+            db, agent.id, teamId, mentionWorkPrompt, modelConfig, systemPrompt,
+            state.workspaceConfig, state.skillsDir, runtimeConfig, mentionModelId, channelId,
+          )
+        })()
+
+    mentionPromise.then(async (result) => {
       // Release unused reserved credits
       if (HOSTED_MODE && mentionReserved > 0) {
         const refund = (mentionIterations - result.iterations) * mentionCost
