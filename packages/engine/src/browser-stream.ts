@@ -98,13 +98,16 @@ export function installBrowserStreamHandler(server: Server): void {
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '', 'http://localhost')
+    console.log(`[browser-stream] WebSocket upgrade request: ${url.pathname}`)
     const match = url.pathname.match(/^\/api\/browser-sessions\/([^/]+)\/stream$/)
     if (!match) return // Not our route — let other upgrade handlers take it
 
     const sessionId = match[1]
     const token = url.searchParams.get('token')
+    console.log(`[browser-stream] Stream request for session ${sessionId}, token=${token ? 'present' : 'MISSING'}`)
 
     if (!token) {
+      console.log(`[browser-stream] Rejecting — no token`)
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
       socket.destroy()
       return
@@ -134,10 +137,12 @@ async function handleUpgrade(
   // 1. Verify JWT
   const user = await verifyJwtToken(token)
   if (!user) {
+    console.log(`[browser-stream] JWT verification failed for session ${sessionId}`)
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
     socket.destroy()
     return
   }
+  console.log(`[browser-stream] Authenticated user ${user.id} for session ${sessionId}`)
 
   // 2. Check per-user connection limit
   const userConns = userConnectionCount.get(user.id) ?? 0
@@ -150,6 +155,7 @@ async function handleUpgrade(
   // 3. Verify session exists
   const session = getSessionInfo(sessionId)
   if (!session) {
+    console.log(`[browser-stream] Session ${sessionId} not found`)
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
     socket.destroy()
     return
@@ -176,10 +182,12 @@ async function handleUpgrade(
   // 6. Get CDP WebSocket URL
   const cdpWsUrl = getSessionCdpUrl(sessionId)
   if (!cdpWsUrl) {
+    console.log(`[browser-stream] No CDP URL for session ${sessionId}`)
     socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n')
     socket.destroy()
     return
   }
+  console.log(`[browser-stream] Upgrading to stream for session ${sessionId} → CDP ${cdpWsUrl.slice(0, 50)}...`)
 
   // 7. Upgrade the connection and track counts
   wss.handleUpgrade(req, socket, head, (clientWs) => {
