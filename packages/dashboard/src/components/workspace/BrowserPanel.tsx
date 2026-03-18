@@ -71,14 +71,18 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
     }
   }, [sessionId, isAgentSession, agentId, knownBrowserSessionId])
 
-  // WebSocket connection for CDP Screencast
+  // WebSocket connection for CDP Screencast (with auto-reconnect)
   useEffect(() => {
     if (!activeSessionId) return
 
     let ws: WebSocket | null = null
     let cancelled = false
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let reconnectAttempts = 0
+    const MAX_RECONNECT_ATTEMPTS = 10
 
     const connect = async () => {
+      if (cancelled) return
       try {
         const wsUrl = await engine.getBrowserStreamUrl(activeSessionId)
         if (cancelled) return
@@ -91,6 +95,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
             setConnected(true)
             setLoading(false)
             setError(null)
+            reconnectAttempts = 0 // reset on successful connection
           }
         }
 
@@ -119,6 +124,12 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
         ws.onclose = () => {
           if (!cancelled) {
             setConnected(false)
+            // Auto-reconnect with exponential backoff
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+              const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000)
+              reconnectAttempts++
+              reconnectTimer = setTimeout(connect, delay)
+            }
           }
         }
 
@@ -132,6 +143,12 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
         if (!cancelled) {
           setError((err as Error).message)
           setLoading(false)
+          // Retry on fetch errors too (token refresh might fail transiently)
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            const delay = Math.min(2000 * Math.pow(1.5, reconnectAttempts), 10000)
+            reconnectAttempts++
+            reconnectTimer = setTimeout(connect, delay)
+          }
         }
       }
     }
@@ -140,6 +157,7 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
 
     return () => {
       cancelled = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
       if (ws) {
         ws.close()
       }
