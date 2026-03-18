@@ -74,7 +74,7 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
     params.push(...tagNames)
   }
 
-  sql += " ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at DESC"
+  sql += " ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at ASC"
 
   const rows = await db.query<Record<string, unknown>>(sql, params)
   const tasks = rows.map(rowToTask)
