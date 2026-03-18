@@ -16,7 +16,7 @@ import { join } from 'path'
 import { createDb } from './db/index.ts'
 import { createAgent, listAgents, getAgent, updateAgent, deleteAgent, setAgentStatus } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt } from './runtime.ts'
-import { startScheduler, stopScheduler, scheduleAgent, unscheduleAgent, respondToMention, initSchedulerState, triggerAgentNow } from './scheduler.ts'
+import { startScheduler, stopScheduler, drainScheduler, scheduleAgent, unscheduleAgent, respondToMention, initSchedulerState, triggerAgentNow } from './scheduler.ts'
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask, unblockTask } from './tasks.ts'
 import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
@@ -4727,16 +4727,17 @@ ${truncated}`,
     // Not a sandbox WebSocket — ignore (other upgrade handlers can take over)
   })
 
-  // Graceful shutdown
+  // Graceful shutdown — drain in-flight sprints before exiting
   process.on('SIGINT', async () => {
-    console.log('\n[engine] Shutting down...')
-    stopScheduler()
+    console.log('\n[engine] SIGINT — draining sprints...')
+    await drainScheduler(280_000)
     await db.close()
     process.exit(0)
   })
 
   process.on('SIGTERM', async () => {
-    stopScheduler()
+    console.log('[engine] SIGTERM — draining sprints...')
+    await drainScheduler(280_000)
     await db.close()
     process.exit(0)
   })
