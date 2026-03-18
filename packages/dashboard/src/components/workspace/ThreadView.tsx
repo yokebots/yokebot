@@ -22,7 +22,9 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, c
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [uploadingFile, setUploadingFile] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     engine.getThreadReplies(parentMessage.id).then(setReplies).catch(() => {})
@@ -60,6 +62,30 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, c
       setError(`Failed to send reply: ${msg}`)
     }
     setSending(false)
+  }
+
+  const handleFileAttach = async (files: FileList) => {
+    if (uploadingFile) return
+    setUploadingFile(true)
+    try {
+      const snippets: string[] = []
+      for (const file of Array.from(files)) {
+        if (file.size > 10 * 1024 * 1024) {
+          alert(`"${file.name}" exceeds the 10MB limit`)
+          continue
+        }
+        const result = await engine.uploadWorkspaceFile(file, 'chat-uploads')
+        const size = file.size < 1024 ? `${file.size}B` : file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)}KB` : `${(file.size / (1024 * 1024)).toFixed(1)}MB`
+        snippets.push(`\u{1F4CE} **${file.name}** (${size}) \`${result.path}\``)
+      }
+      if (snippets.length > 0) {
+        const fileText = snippets.join('\n')
+        setReplyText(prev => prev ? `${prev}\n${fileText}` : fileText)
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Upload failed')
+    }
+    setUploadingFile(false)
   }
 
   return (
@@ -137,7 +163,15 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, c
           onSubmit={sendReply}
           placeholder="Reply in thread..."
           completions={completions}
-          disabled={sending}
+          disabled={sending || uploadingFile}
+          onFileAttach={() => fileInputRef.current?.click()}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => { if (e.target.files?.length) handleFileAttach(e.target.files); e.target.value = '' }}
         />
       </div>
     </div>
