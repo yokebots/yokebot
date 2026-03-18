@@ -6,9 +6,11 @@ import { ContextPane } from '@/components/workspace/ContextPane'
 import { TasksPanel } from '@/components/workspace/TasksPanel'
 import { WorkflowsPanel } from '@/components/workspace/WorkflowsPanel'
 import { TeamChat } from '@/components/workspace/TeamChat'
+import { ThreadView } from '@/components/workspace/ThreadView'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { useRealtimeEvent } from '@/lib/use-realtime'
 import { useTeam } from '@/lib/team-context'
+import { useAuth } from '@/lib/auth'
 import * as engine from '@/lib/engine'
 
 // ---- Tab types for the context pane viewer ----
@@ -46,6 +48,7 @@ type MobileTab = typeof MOBILE_TABS[number]
 export function WorkspacePage() {
   const isMobile = useIsMobile()
   const { activeTeam } = useTeam()
+  const { user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [mobileTab, setMobileTab] = useState<MobileTab>('Chat')
 
@@ -74,6 +77,8 @@ export function WorkspacePage() {
     } catch { return null }
   })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [threadParent, setThreadParent] = useState<engine.ChatMessage | null>(null)
+  const [completions, setCompletions] = useState<engine.MentionCompletionData | null>(null)
 
   // Persist tabs to localStorage whenever they change
   useEffect(() => {
@@ -93,6 +98,26 @@ export function WorkspacePage() {
 
   // Agents list (shared by tasks panel and agent color map)
   const [agents, setAgents] = useState<engine.EngineAgent[]>([])
+
+  // Build agent color map from agents list (for ThreadView in right panel)
+  const agentColorMapRef = useRef(new Map<string, { color: string; icon: string; name: string }>())
+  useEffect(() => {
+    const map = new Map<string, { color: string; icon: string; name: string }>()
+    for (const a of agents) {
+      map.set(a.id, {
+        color: a.iconColor ?? '#0F4D26',
+        icon: a.iconName ?? 'smart_toy',
+        name: a.name,
+      })
+    }
+    agentColorMapRef.current = map
+  }, [agents])
+
+  // Fetch mention completions for ThreadView
+  useEffect(() => {
+    if (!activeTeam) return
+    engine.getMentionCompletions().then(setCompletions).catch(() => {})
+  }, [activeTeam])
 
   // Unread tracking
   const [unreadFileIds, setUnreadFileIds] = useState<Set<string>>(new Set())
@@ -328,6 +353,7 @@ export function WorkspacePage() {
           teamChannelId={teamChannelId}
           splitRatio={splitRatio}
           onSplitRatioChange={saveSplitRatio}
+          onOpenThread={setThreadParent}
         />
       </div>
 
@@ -372,9 +398,24 @@ export function WorkspacePage() {
               Workflows
             </button>
           </div>
-          {/* Active panel */}
-          {rightPanelTab === 'tasks' && <TasksPanel workspace={workspaceState} unreadTaskIds={unreadTaskIds} agents={agents} />}
-          {rightPanelTab === 'workflows' && <WorkflowsPanel workspace={workspaceState} />}
+          {/* Tasks/Workflows panel — shrinks when thread is open */}
+          <div className={threadParent ? 'flex-1 overflow-hidden min-h-0' : 'flex-1 overflow-hidden'} style={threadParent ? { maxHeight: '50%' } : undefined}>
+            {rightPanelTab === 'tasks' && <TasksPanel workspace={workspaceState} unreadTaskIds={unreadTaskIds} agents={agents} />}
+            {rightPanelTab === 'workflows' && <WorkflowsPanel workspace={workspaceState} />}
+          </div>
+          {/* Thread panel — bottom half of right column */}
+          {threadParent && teamChannelId && (
+            <div className="flex-1 overflow-hidden min-h-0 border-t border-border-subtle">
+              <ThreadView
+                parentMessage={threadParent}
+                channelId={teamChannelId}
+                onClose={() => setThreadParent(null)}
+                agentColorMap={agentColorMapRef.current}
+                completions={completions}
+                humanName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'You'}
+              />
+            </div>
+          )}
         </div>
       </ResizablePanel>
     </div>

@@ -11,9 +11,13 @@ interface ThreadViewProps {
   onClose: () => void
   agentColorMap: Map<string, { color: string; icon: string; name: string }>
   completions: engine.MentionCompletionData | null
+  humanName?: string
+  onFileClick?: (docId: string) => void
+  onTaskClick?: (taskId: string) => void
+  onAgentClick?: (agentId: string) => void
 }
 
-export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, completions }: ThreadViewProps) {
+export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, completions, humanName, onFileClick, onTaskClick, onAgentClick }: ThreadViewProps) {
   const [replies, setReplies] = useState<engine.ChatMessage[]>([])
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
@@ -28,10 +32,9 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, c
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [replies.length])
 
-  // Real-time: listen for new messages and append thread replies
+  // Real-time: listen for new messages and refresh thread replies
   useRealtimeEvent<{ channelId: string; messageId: number }>('new_message', (data) => {
     if (data.channelId !== channelId) return
-    // Refetch thread replies to pick up agent responses
     engine.getThreadReplies(parentMessage.id).then((fresh) => {
       setReplies(fresh)
     }).catch(() => {})
@@ -60,43 +63,79 @@ export function ThreadView({ parentMessage, channelId, onClose, agentColorMap, c
   }
 
   return (
-    <div className="flex flex-col border-t border-border-subtle bg-light-surface/50 max-h-[50%]">
-      {/* Thread header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle shrink-0">
-        <span className="material-symbols-outlined text-[16px] text-text-muted">reply</span>
-        <span className="text-xs font-semibold text-text-main">Thread</span>
-        <span className="text-xs text-text-muted">{replies.length} {replies.length === 1 ? 'reply' : 'replies'}</span>
-        <button onClick={onClose} className="ml-auto rounded p-0.5 hover:bg-light-surface-alt">
-          <span className="material-symbols-outlined text-[16px] text-text-muted">close</span>
+    <div className="flex flex-col h-full bg-white border-l border-border-subtle">
+      {/* Header — Discord-style with thread icon + close */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle shrink-0 bg-light-surface">
+        <span className="material-symbols-outlined text-[18px] text-text-main">forum</span>
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-semibold text-text-main">Thread</span>
+          <span className="ml-2 text-xs text-text-muted">{replies.length} {replies.length === 1 ? 'reply' : 'replies'}</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded-md p-1 hover:bg-light-surface-alt transition-colors"
+          title="Close thread"
+        >
+          <span className="material-symbols-outlined text-[18px] text-text-muted">close</span>
         </button>
       </div>
 
-      {/* Parent message context */}
-      <div className="px-3 py-2 bg-light-surface-alt/50 border-b border-border-subtle shrink-0">
-        <MessageBubble message={parentMessage} agentColorMap={agentColorMap} compact />
-      </div>
+      {/* Scrollable area: parent message + replies */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        {/* Parent message — highlighted */}
+        <div className="px-4 py-3 border-b border-border-subtle bg-gray-50/80">
+          <MessageBubble
+            message={parentMessage}
+            agentColorMap={agentColorMap}
+            humanName={humanName}
+            onFileClick={onFileClick}
+            onTaskClick={onTaskClick}
+            onAgentClick={onAgentClick}
+            isThreadParent
+          />
+        </div>
 
-      {/* Replies */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-        {replies.map(msg => (
-          <MessageBubble key={msg.id} message={msg} agentColorMap={agentColorMap} />
-        ))}
+        {/* Reply count divider */}
+        {replies.length > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2">
+            <div className="flex-1 h-px bg-border-subtle" />
+            <span className="text-[11px] font-medium text-text-muted">
+              {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+            </span>
+            <div className="flex-1 h-px bg-border-subtle" />
+          </div>
+        )}
+
+        {/* Replies */}
+        <div className="px-4 py-1 space-y-1">
+          {replies.map(msg => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              agentColorMap={agentColorMap}
+              humanName={humanName}
+              onFileClick={onFileClick}
+              onTaskClick={onTaskClick}
+              onAgentClick={onAgentClick}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Error message */}
       {error && (
-        <div className="px-3 py-1 shrink-0">
+        <div className="px-4 py-1 shrink-0">
           <p className="text-xs text-red-600">{error}</p>
         </div>
       )}
 
-      {/* Reply input — MentionInput with @mention support */}
-      <div className="px-3 py-2 border-t border-border-subtle shrink-0">
+      {/* Reply input */}
+      <div className="px-4 py-3 border-t border-border-subtle shrink-0 bg-white">
         <MentionInput
           value={replyText}
           onChange={setReplyText}
           onSubmit={sendReply}
-          placeholder="Reply..."
+          placeholder="Reply in thread..."
           completions={completions}
           disabled={sending}
         />
@@ -116,6 +155,7 @@ export function MessageBubble({
   onTaskClick,
   onAgentClick,
   onContextMenu,
+  isThreadParent,
 }: {
   message: engine.ChatMessage
   agentColorMap: Map<string, { color: string; icon: string; name: string }>
@@ -126,6 +166,7 @@ export function MessageBubble({
   onTaskClick?: (taskId: string) => void
   onAgentClick?: (agentId: string) => void
   onContextMenu?: (e: React.MouseEvent, msg: engine.ChatMessage) => void
+  isThreadParent?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const [reactions, setReactions] = useState<Record<string, string[]>>({})
@@ -156,6 +197,7 @@ export function MessageBubble({
       await engine.toggleReaction(message.id, emoji)
     } catch { /* ignore */ }
   }, [message.id])
+
   const isAgent = message.senderType === 'agent'
   const isSystem = message.senderType === 'system'
   const isHuman = message.senderType === 'human'
@@ -211,9 +253,12 @@ export function MessageBubble({
 
   const reactionEntries = Object.entries(reactions).filter(([, users]) => users.length > 0)
 
+  // Show hover actions (reply + emoji) — not for compact/threadParent views
+  const showHoverActions = !compact && !isThreadParent
+
   return (
     <div
-      className={`group/msg flex gap-2 ${isHuman ? 'justify-end' : ''} ${compact ? '' : ''}`}
+      className={`group/msg relative flex gap-2 ${isHuman ? 'justify-end' : ''} ${compact ? '' : 'py-0.5'}`}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, message) : undefined}
     >
       {/* Avatar (left side, non-human only) */}
@@ -268,20 +313,33 @@ export function MessageBubble({
         )}
         </>)}
         {/* Thread badge */}
-        {!compact && message.replyCount > 0 && onThreadClick && (
-          <button
-            onClick={() => onThreadClick(message)}
-            className="mt-1 flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-forest-green hover:bg-forest-green/10 transition-colors"
-          >
-            <span className="material-symbols-outlined text-[13px]">chat_bubble</span>
-            {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}
-            {message.latestReplyAt && (
-              <span className="text-text-muted ml-1">
-                {formatRelativeTime(message.latestReplyAt)}
-              </span>
-            )}
-          </button>
-        )}
+        {!compact && !isThreadParent && message.replyCount > 0 && onThreadClick && (() => {
+          const isRecent = message.latestReplyAt && (Date.now() - new Date(message.latestReplyAt).getTime()) < 300000
+          return (
+            <button
+              onClick={() => onThreadClick(message)}
+              className={`mt-1.5 flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors border ${
+                isRecent
+                  ? 'text-forest-green bg-forest-green/10 border-forest-green/30 shadow-sm'
+                  : 'text-forest-green bg-forest-green/5 hover:bg-forest-green/10 border-forest-green/15'
+              }`}
+            >
+              {isRecent && (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-forest-green opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-forest-green" />
+                </span>
+              )}
+              <span className="material-symbols-outlined text-[14px]">forum</span>
+              {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}
+              {message.latestReplyAt && (
+                <span className="text-text-muted ml-0.5">
+                  {formatRelativeTime(message.latestReplyAt)}
+                </span>
+              )}
+            </button>
+          )
+        })()}
         {/* Emoji reactions */}
         {!compact && (
           <div className="flex flex-wrap items-center gap-1 mt-1 relative">
@@ -299,27 +357,6 @@ export function MessageBubble({
                 <span className="text-[10px] text-text-muted">{users.length}</span>
               </button>
             ))}
-            {/* Add reaction button — visible on hover */}
-            <button
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="flex items-center rounded-full border border-border-subtle bg-white px-1.5 py-0.5 text-[11px] text-text-muted opacity-0 group-hover/msg:opacity-100 transition-opacity hover:border-forest-green/30"
-            >
-              <span className="material-symbols-outlined text-[13px]">add_reaction</span>
-            </button>
-            {/* Quick emoji picker */}
-            {showEmojiPicker && (
-              <div className="absolute bottom-full left-0 mb-1 flex gap-0.5 rounded-lg border border-border-subtle bg-white p-1 shadow-lg z-10">
-                {QUICK_EMOJIS.map(emoji => (
-                  <button
-                    key={emoji}
-                    onClick={() => toggleReaction(emoji)}
-                    className="rounded p-1 text-sm hover:bg-light-surface-alt transition-colors"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -331,6 +368,46 @@ export function MessageBubble({
           style={{ backgroundColor: color + '18' }}
         >
           <span className="material-symbols-outlined text-[14px]" style={{ color }}>{icon}</span>
+        </div>
+      )}
+
+      {/* Hover action toolbar — Discord-style, appears top-right of message on hover */}
+      {showHoverActions && (
+        <div className={`absolute ${isHuman ? 'left-0 -translate-x-1/2' : 'right-0 translate-x-1/2'} -top-2 opacity-0 group-hover/msg:opacity-100 transition-opacity z-10 pointer-events-none group-hover/msg:pointer-events-auto`}>
+          <div className="flex items-center gap-0.5 rounded-lg border border-border-subtle bg-white shadow-md px-1 py-0.5">
+            {/* Reply in thread */}
+            {onThreadClick && (
+              <button
+                onClick={() => onThreadClick(message)}
+                className="rounded p-1 text-text-muted hover:text-forest-green hover:bg-forest-green/10 transition-colors"
+                title="Reply in thread"
+              >
+                <span className="material-symbols-outlined text-[16px]">forum</span>
+              </button>
+            )}
+            {/* Add reaction */}
+            <button
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+              className="rounded p-1 text-text-muted hover:text-amber-500 hover:bg-amber-50 transition-colors"
+              title="Add reaction"
+            >
+              <span className="material-symbols-outlined text-[16px]">add_reaction</span>
+            </button>
+          </div>
+          {/* Quick emoji picker — anchored to the hover toolbar */}
+          {showEmojiPicker && (
+            <div className="absolute top-full left-0 mt-1 flex gap-0.5 rounded-lg border border-border-subtle bg-white p-1.5 shadow-lg z-20">
+              {QUICK_EMOJIS.map(emoji => (
+                <button
+                  key={emoji}
+                  onClick={() => toggleReaction(emoji)}
+                  className="rounded p-1 text-sm hover:bg-light-surface-alt transition-colors"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

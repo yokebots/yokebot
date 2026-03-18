@@ -19,9 +19,10 @@ interface ContextPaneProps {
   teamChannelId: string | null
   splitRatio: number
   onSplitRatioChange: (ratio: number) => void
+  onOpenThread?: (msg: import('@/lib/engine').ChatMessage) => void
 }
 
-export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatioChange }: ContextPaneProps) {
+export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatioChange, onOpenThread }: ContextPaneProps) {
   const hasViewerTabs = workspace.viewerTabs.length > 0
   const activeTab = workspace.viewerTabs.find(t => t.id === workspace.activeTabId)
 
@@ -149,6 +150,7 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
             const tab: ViewerTab = { id: `agent:${agentId}`, type: 'agent-detail', label: agentName, icon: 'smart_toy', resourceId: agentId }
             workspace.addViewerTab(tab)
           }}
+          onOpenThread={onOpenThread}
         />
       </div>
 

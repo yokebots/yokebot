@@ -15,6 +15,7 @@ interface TeamChatProps {
   onFileClick?: (docId: string) => void
   onTaskClick?: (taskId: string) => void
   onAgentClick?: (agentId: string, agentName: string) => void
+  onOpenThread?: (msg: engine.ChatMessage) => void
 }
 
 interface ContextMenuState {
@@ -22,14 +23,17 @@ interface ContextMenuState {
   message: engine.ChatMessage
 }
 
-export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick }: TeamChatProps) {
+export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick, onOpenThread }: TeamChatProps) {
   const { user } = useAuth()
   const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'You'
   const [messages, setMessages] = useState<engine.ChatMessage[]>([])
   const [messageText, setMessageText] = useState('')
   const [sending, setSending] = useState(false)
   const [completions, setCompletions] = useState<engine.MentionCompletionData | null>(null)
-  const [threadParent, setThreadParent] = useState<engine.ChatMessage | null>(null)
+  const [internalThreadParent, setInternalThreadParent] = useState<engine.ChatMessage | null>(null)
+  // If external handler provided (desktop), use it; otherwise fall back to internal thread panel
+  const handleOpenThread = onOpenThread ?? setInternalThreadParent
+  const threadParent = onOpenThread ? null : internalThreadParent
   const [agentColorMap, setAgentColorMap] = useState<Map<string, { color: string; icon: string; name: string }>>(new Map())
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [uploadingFile, setUploadingFile] = useState(false)
@@ -298,7 +302,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
             message={msg}
             agentColorMap={agentColorMap}
             humanName={userName}
-            onThreadClick={setThreadParent}
+            onThreadClick={handleOpenThread}
             onFileClick={onFileClick}
             onTaskClick={onTaskClick}
             onAgentClick={onAgentClick ? (id) => {
@@ -317,7 +321,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
-            onClick={() => { setThreadParent(contextMenu.message); setContextMenu(null) }}
+            onClick={() => { handleOpenThread(contextMenu.message); setContextMenu(null) }}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-text-main hover:bg-light-surface-alt"
           >
             <span className="material-symbols-outlined text-[16px]">reply</span>
@@ -333,14 +337,15 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
         </div>
       )}
 
-      {/* Thread view (inline expand) */}
-      {threadParent && (
+      {/* Thread view (inline expand — only used on mobile / when no external handler) */}
+      {threadParent && !onOpenThread && (
         <ThreadView
           parentMessage={threadParent}
           channelId={teamChannelId}
-          onClose={() => setThreadParent(null)}
+          onClose={() => setInternalThreadParent(null)}
           agentColorMap={agentColorMap}
           completions={completions}
+          humanName={userName}
         />
       )}
 
