@@ -762,6 +762,8 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMo
     ``,
     `**You MUST call sandbox_setup or sandbox_write_file before responding.** If you respond without writing any code, you have FAILED the task. Research alone is NOT a deliverable — a working app is. Do NOT visit external sites (design blogs, tutorials, etc.) — you already know how to code. Focus on the TARGET site only, then BUILD.`,
     ``,
+    `**DO NOT create subtasks.** You are a builder — just build the whole thing in this sprint. Creating subtasks wastes time and credits. Do everything in one shot: scaffold, write all code, install deps, start dev server, verify preview.`,
+    ``,
     `**PATH RULES:** All file paths in sandbox_setup, sandbox_write_file, and sandbox_write_files must be RELATIVE (e.g. "src/App.tsx", "package.json"). Do NOT use absolute paths — the system automatically resolves them to the correct project directory. Using absolute paths causes double-prefixing bugs.`,
   ] : []
 
