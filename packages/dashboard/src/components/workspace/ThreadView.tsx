@@ -253,9 +253,6 @@ export function MessageBubble({
 
   const reactionEntries = Object.entries(reactions).filter(([, users]) => users.length > 0)
 
-  // Show hover actions (reply + emoji) — not for compact/threadParent views
-  const showHoverActions = !compact && !isThreadParent
-
   return (
     <div
       className={`group/msg relative flex gap-2 ${isHuman ? 'justify-end' : ''} ${compact ? '' : 'py-0.5'}`}
@@ -340,7 +337,7 @@ export function MessageBubble({
             </button>
           )
         })()}
-        {/* Emoji reactions */}
+        {/* Emoji reactions + action buttons */}
         {!compact && (
           <div className="flex flex-wrap items-center gap-1 mt-1 relative">
             {reactionEntries.map(([emoji, users]) => (
@@ -357,6 +354,40 @@ export function MessageBubble({
                 <span className="text-[10px] text-text-muted">{users.length}</span>
               </button>
             ))}
+            {/* Add reaction button — visible on hover */}
+            {!isThreadParent && (
+              <button
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                className="flex items-center rounded-full border border-border-subtle bg-white px-1.5 py-0.5 text-[11px] text-text-muted opacity-0 group-hover/msg:opacity-100 transition-opacity hover:border-forest-green/30"
+                title="Add reaction"
+              >
+                <span className="material-symbols-outlined text-[13px]">add_reaction</span>
+              </button>
+            )}
+            {/* Reply in thread button — visible on hover */}
+            {!isThreadParent && onThreadClick && (
+              <button
+                onClick={() => onThreadClick(message)}
+                className="flex items-center rounded-full border border-border-subtle bg-white px-1.5 py-0.5 text-[11px] text-text-muted opacity-0 group-hover/msg:opacity-100 transition-opacity hover:border-forest-green/30 hover:text-forest-green"
+                title="Reply in thread"
+              >
+                <span className="material-symbols-outlined text-[13px]">forum</span>
+              </button>
+            )}
+            {/* Quick emoji picker */}
+            {showEmojiPicker && (
+              <div className="absolute bottom-full left-0 mb-1 flex gap-0.5 rounded-lg border border-border-subtle bg-white p-1 shadow-lg z-10">
+                {QUICK_EMOJIS.map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={() => toggleReaction(emoji)}
+                    className="rounded p-1 text-sm hover:bg-light-surface-alt transition-colors"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -371,45 +402,6 @@ export function MessageBubble({
         </div>
       )}
 
-      {/* Hover action toolbar — Discord-style, appears top-right of message on hover */}
-      {showHoverActions && (
-        <div className={`absolute ${isHuman ? 'left-0 -translate-x-1/2' : 'right-0 translate-x-1/2'} -top-2 opacity-0 group-hover/msg:opacity-100 transition-opacity z-10 pointer-events-none group-hover/msg:pointer-events-auto`}>
-          <div className="flex items-center gap-0.5 rounded-lg border border-border-subtle bg-white shadow-md px-1 py-0.5">
-            {/* Reply in thread */}
-            {onThreadClick && (
-              <button
-                onClick={() => onThreadClick(message)}
-                className="rounded p-1 text-text-muted hover:text-forest-green hover:bg-forest-green/10 transition-colors"
-                title="Reply in thread"
-              >
-                <span className="material-symbols-outlined text-[16px]">forum</span>
-              </button>
-            )}
-            {/* Add reaction */}
-            <button
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="rounded p-1 text-text-muted hover:text-amber-500 hover:bg-amber-50 transition-colors"
-              title="Add reaction"
-            >
-              <span className="material-symbols-outlined text-[16px]">add_reaction</span>
-            </button>
-          </div>
-          {/* Quick emoji picker — anchored to the hover toolbar */}
-          {showEmojiPicker && (
-            <div className="absolute top-full left-0 mt-1 flex gap-0.5 rounded-lg border border-border-subtle bg-white p-1.5 shadow-lg z-20">
-              {QUICK_EMOJIS.map(emoji => (
-                <button
-                  key={emoji}
-                  onClick={() => toggleReaction(emoji)}
-                  className="rounded p-1 text-sm hover:bg-light-surface-alt transition-colors"
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }
