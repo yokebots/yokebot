@@ -12,7 +12,7 @@ import 'dotenv/config'
 import { homedir } from 'os'
 import { join } from 'path'
 import { createDb } from './db/index.ts'
-import { startScheduler, stopScheduler } from './scheduler.ts'
+import { startScheduler, drainScheduler } from './scheduler.ts'
 import { initWorkspace, type WorkspaceConfig } from './workspace.ts'
 import { setFallbackConfig, setHostedResolver, resolveModelConfig } from './model.ts'
 
@@ -55,10 +55,10 @@ async function main() {
 
   console.log(`[worker] Scheduler running. Skills: ${SKILLS_DIR}`)
 
-  // Graceful shutdown
+  // Graceful shutdown — drain in-flight sprints before exiting
   const shutdown = async () => {
-    console.log('[worker] Shutting down...')
-    stopScheduler()
+    console.log('[worker] Draining sprints...')
+    await drainScheduler(280_000)
     await db.close()
     process.exit(0)
   }

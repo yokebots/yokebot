@@ -21,7 +21,7 @@ export interface AgentConfig {
   templateId?: string
 }
 
-export type AgentStatus = 'running' | 'paused' | 'stopped' | 'error'
+export type AgentStatus = 'running' | 'idle' | 'paused' | 'stopped' | 'error'
 
 export interface Agent {
   id: string
@@ -41,6 +41,7 @@ export interface Agent {
   activeHoursEnd: number
   planMode: boolean | null  // null = use team default
   templateId: string | null
+  sprintStartedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -173,6 +174,7 @@ function rowToAgent(row: Record<string, unknown>): Agent {
     activeHoursStart: row.active_hours_start as number,
     activeHoursEnd: row.active_hours_end as number,
     templateId: (row.template_id as string) ?? null,
+    sprintStartedAt: (row.sprint_started_at as string) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   }

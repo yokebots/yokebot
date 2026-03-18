@@ -2035,6 +2035,20 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 47,
+    name: 'add_sprint_started_at_to_agents',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sprint_started_at TIMESTAMPTZ')
+      } else {
+        const cols = await db.query<Record<string, unknown>>('PRAGMA table_info(agents)')
+        if (!cols.some((c) => c.name === 'sprint_started_at')) {
+          await db.exec('ALTER TABLE agents ADD COLUMN sprint_started_at TEXT')
+        }
+      }
+    },
+  },
 ]
 
 /**

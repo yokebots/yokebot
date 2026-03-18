@@ -103,6 +103,21 @@ const TZ_CACHE_TTL = 300_000
 const MAX_CONCURRENT_PER_TEAM = 35
 const activeHeartbeatsPerTeam = new Map<string, number>()
 
+// ---- Graceful drain: in-flight sprint tracking ----
+const inFlightSprints = new Set<string>()
+let draining = false
+
+async function markSprintStart(db: Db, agentId: string): Promise<void> {
+  await db.run(
+    `UPDATE agents SET sprint_started_at = ${db.now()} WHERE id = $1`,
+    [agentId],
+  )
+}
+
+async function markSprintEnd(db: Db, agentId: string): Promise<void> {
+  await db.run('UPDATE agents SET sprint_started_at = NULL WHERE id = $1', [agentId])
+}
+
 async function getTeamTimezoneCached(db: Db, teamId: string): Promise<string | null> {
   const cached = teamTimezoneCache.get(teamId)
   if (cached && Date.now() - cached.ts < TZ_CACHE_TTL) return cached.tz
@@ -161,6 +176,25 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
     running = filtered
   }
 
+  // Clear stale sprint markers (>10 min = impossible for a legit sprint)
+  await db.run(
+    `UPDATE agents SET sprint_started_at = NULL WHERE sprint_started_at IS NOT NULL AND sprint_started_at < ${
+      db.driver === 'postgres' ? "NOW() - INTERVAL '10 minutes'" : "datetime('now', '-10 minutes')"
+    }`,
+  )
+
+  // Recover orphaned sprints from previous instance crash/timeout
+  const orphanedIds = new Set<string>()
+  const orphaned = running.filter(a => a.sprintStartedAt != null)
+  if (orphaned.length > 0) {
+    console.log(`[scheduler] Recovering ${orphaned.length} orphaned sprint(s)...`)
+    for (const agent of orphaned) {
+      await markSprintEnd(db, agent.id)
+      orphanedIds.add(agent.id)
+      console.log(`[scheduler] Recovered "${agent.name}" (sprint started ${agent.sprintStartedAt})`)
+    }
+  }
+
   // Group by team + heartbeat interval for staggering
   const groups = new Map<string, Agent[]>()
   for (const agent of running) {
@@ -174,7 +208,8 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
     const staggerMs = Math.floor(intervalMs / group.length)
 
     group.forEach((agent, index) => {
-      const offsetMs = index * staggerMs
+      const isOrphaned = orphanedIds.has(agent.id)
+      const offsetMs = isOrphaned ? 0 : index * staggerMs
       scheduleAgentWithOffset(db, agent, offsetMs)
     })
   }
@@ -231,6 +266,44 @@ export function stopScheduler(): void {
   }
   state.running = false
   console.log('[scheduler] Stopped')
+}
+
+/**
+ * Gracefully drain in-flight sprints before shutdown.
+ * Stops all timers (no new heartbeats), then waits for in-flight sprints to finish.
+ * Times out after `timeoutMs` (default 280s) — Railway sends SIGKILL at 300s.
+ */
+export function drainScheduler(timeoutMs = 280_000): Promise<void> {
+  draining = true
+
+  // Stop all timers — no new heartbeats
+  for (const [id, timer] of state.timers) {
+    clearTimeout(timer)
+    clearInterval(timer)
+    state.timers.delete(id)
+  }
+  if (sequenceTimer) { clearInterval(sequenceTimer); sequenceTimer = null }
+  if (workflowTimer) { clearInterval(workflowTimer); workflowTimer = null }
+  state.running = false
+
+  console.log(`[scheduler] Draining... ${inFlightSprints.size} sprint(s) in flight`)
+  if (inFlightSprints.size === 0) return Promise.resolve()
+
+  return new Promise<void>((resolve) => {
+    const deadline = setTimeout(() => {
+      console.warn(`[scheduler] Drain timeout — ${inFlightSprints.size} sprint(s) orphaned`)
+      resolve()
+    }, timeoutMs)
+
+    const check = setInterval(() => {
+      if (inFlightSprints.size === 0) {
+        clearInterval(check)
+        clearTimeout(deadline)
+        console.log('[scheduler] All sprints drained')
+        resolve()
+      }
+    }, 500)
+  })
 }
 
 /**
@@ -311,11 +384,11 @@ export async function respondToMention(
   if (!agent) return
   if (agent.teamId !== teamId) return
 
-  // Auto-resume paused agents on @mention — human signal means "wake up"
-  if (agent.status === 'paused') {
+  // Auto-resume paused/idle agents on @mention — human signal means "wake up"
+  if (agent.status === 'paused' || agent.status === 'idle') {
     await setAgentStatus(db, agent.id, 'running')
     scheduleAgent(db, agent)
-    console.log(`[scheduler] Auto-resumed "${agent.name}" on @mention`)
+    console.log(`[scheduler] Auto-resumed "${agent.name}" (was ${agent.status}) on @mention`)
   } else if (agent.status !== 'running') {
     return
   }
@@ -431,7 +504,7 @@ export async function respondToMention(
   }
 
   // ---- Phase 2: Background work via react loop (fire-and-forget) ----
-  if (needsWork) {
+  if (needsWork && !draining) {
     // Show "working" indicator while doing the heavy lifting
     broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'working')
 
@@ -483,6 +556,11 @@ export async function respondToMention(
     }
 
     // Fire and forget — don't block the mention response
+    // Track in-flight sprint for graceful drain
+    const mentionKey = `${agentId}:mention`
+    inFlightSprints.add(mentionKey)
+    void markSprintStart(db, agentId)
+
     // Check if this agent has a routing profile for multi-phase execution
     const mentionRoutingProfile = getRoutingProfile(agent.templateId ?? '')
 
@@ -523,6 +601,8 @@ export async function respondToMention(
     }).catch((err) => {
       console.error(`[scheduler] Mention work error for "${agent.name}":`, err)
     }).finally(() => {
+      markSprintEnd(db, agentId).catch(() => {})
+      inFlightSprints.delete(mentionKey)
       broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
     })
   }
@@ -745,6 +825,8 @@ async function pickBestChannel(db: Db, agent: { teamId: string; department: stri
  * Single heartbeat cycle for an agent.
  */
 async function heartbeat(db: Db, agent: Agent): Promise<void> {
+  if (draining) return
+
   // Re-check agent status from DB — if stopped/paused since scheduling, bail out
   const { getAgent } = await import('./agent.ts')
   const fresh = await getAgent(db, agent.id)
@@ -760,9 +842,14 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     return
   }
   activeHeartbeatsPerTeam.set(agent.teamId, teamCount + 1)
+
+  inFlightSprints.add(agent.id)
   try {
+    await markSprintStart(db, agent.id)
     await heartbeatInner(db, agent)
   } finally {
+    await markSprintEnd(db, agent.id).catch(() => {})
+    inFlightSprints.delete(agent.id)
     const current = activeHeartbeatsPerTeam.get(agent.teamId) ?? 1
     if (current <= 1) activeHeartbeatsPerTeam.delete(agent.teamId)
     else activeHeartbeatsPerTeam.set(agent.teamId, current - 1)
