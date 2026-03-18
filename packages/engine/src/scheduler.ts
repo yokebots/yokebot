@@ -494,7 +494,7 @@ export async function respondToMention(
     mentionResetCooldowns.set(mentionResetKey, resetNow)
     try {
       await db.run(
-        `UPDATE tasks SET sprint_count = 0, status = 'todo', blocked_reason = NULL, blocked_approval_id = NULL, blocked_reason_text = NULL WHERE assigned_agent_id = $1 AND team_id = $2 AND status = 'blocked'`,
+        `UPDATE tasks SET sprint_count = 0, status = 'todo', blocked_reason = NULL, blocked_approval_id = NULL, blocked_reason_text = NULL WHERE assigned_agent_id = $1 AND team_id = $2 AND status IN ('blocked', 'backlog')`,
         [agentId, teamId],
       )
       console.log(`[scheduler] @mention reset: unblocked tasks for "${agent.name}"`)
@@ -658,7 +658,7 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
   const tasks = await listTasks(db, { agentId, teamId })
   const actionable: Task[] = []
   for (const task of tasks) {
-    if (task.status !== 'todo' && task.status !== 'in_progress') continue
+    if (task.status !== 'todo' && task.status !== 'in_progress' && task.status !== 'backlog') continue
     if (await isTaskBlocked(db, task.id)) continue
     // Auto-block tasks that have been sprinted on too many times without progress
     const row = await db.queryOne<{ sprint_count: number; last_sprint_at: string | null }>(
@@ -1067,7 +1067,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
       if (assignedTasks.length === 0) {
         // Check if agent has ANY tasks (including blocked) — if so, all are blocked, skip LLM call
         const allTasks = await listTasks(db, { agentId: agent.id, teamId: agent.teamId })
-        const nonDone = allTasks.filter(t => t.status !== 'done')
+        const nonDone = allTasks.filter(t => t.status !== 'done' && t.status !== 'archived')
         if (nonDone.length > 0) {
           console.log(`[scheduler] "${agent.name}" has ${nonDone.length} task(s) but all blocked/max-sprinted — skipping heartbeat (no LLM call)`)
           return
