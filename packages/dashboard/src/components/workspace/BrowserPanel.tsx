@@ -84,13 +84,16 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
     const connect = async () => {
       if (cancelled) return
       try {
+        console.log(`[BrowserPanel] Connecting to session ${activeSessionId} (attempt ${reconnectAttempts + 1})`)
         const wsUrl = await engine.getBrowserStreamUrl(activeSessionId)
+        console.log(`[BrowserPanel] WebSocket URL: ${wsUrl.replace(/token=[^&]+/, 'token=<redacted>')}`)
         if (cancelled) return
 
         ws = new WebSocket(wsUrl)
         wsRef.current = ws
 
         ws.onopen = () => {
+          console.log(`[BrowserPanel] WebSocket connected!`)
           if (!cancelled) {
             setConnected(true)
             setLoading(false)
@@ -121,19 +124,22 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
           } catch { /* ignore */ }
         }
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
+          console.log(`[BrowserPanel] WebSocket closed: code=${event.code} reason=${event.reason}`)
           if (!cancelled) {
             setConnected(false)
             // Auto-reconnect with exponential backoff
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
               const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000)
               reconnectAttempts++
+              console.log(`[BrowserPanel] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`)
               reconnectTimer = setTimeout(connect, delay)
             }
           }
         }
 
-        ws.onerror = () => {
+        ws.onerror = (event) => {
+          console.error(`[BrowserPanel] WebSocket error:`, event)
           if (!cancelled) {
             setError('WebSocket connection failed')
             setConnected(false)
