@@ -2049,6 +2049,96 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 48,
+    name: 'add_sandbox_projects_table',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS sandbox_projects (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            directory TEXT NOT NULL,
+            framework TEXT,
+            dev_port INTEGER,
+            startup_command TEXT,
+            preview_url TEXT,
+            is_active BOOLEAN DEFAULT true,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(team_id, slug)
+          );
+          ALTER TABLE sandbox_projects ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sandbox_project_id TEXT REFERENCES sandbox_projects(id) ON DELETE SET NULL;
+          ALTER TABLE tasks ADD COLUMN IF NOT EXISTS short_id INTEGER;
+          ALTER TABLE published_apps ADD COLUMN IF NOT EXISTS sandbox_project_id TEXT;
+        `)
+      } else {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS sandbox_projects (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            directory TEXT NOT NULL,
+            framework TEXT,
+            dev_port INTEGER,
+            startup_command TEXT,
+            preview_url TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(team_id, slug)
+          )
+        `)
+        const taskCols = await db.query<Record<string, unknown>>('PRAGMA table_info(tasks)')
+        if (!taskCols.some((c) => c.name === 'sandbox_project_id')) {
+          await db.exec('ALTER TABLE tasks ADD COLUMN sandbox_project_id TEXT')
+        }
+        if (!taskCols.some((c) => c.name === 'short_id')) {
+          await db.exec('ALTER TABLE tasks ADD COLUMN short_id INTEGER')
+        }
+        const pubCols = await db.query<Record<string, unknown>>('PRAGMA table_info(published_apps)')
+        if (!pubCols.some((c) => c.name === 'sandbox_project_id')) {
+          await db.exec('ALTER TABLE published_apps ADD COLUMN sandbox_project_id TEXT')
+        }
+      }
+    },
+  },
+  {
+    version: 49,
+    name: 'backfill_task_short_ids',
+    async up(db: Db) {
+      // Backfill existing tasks with sequential short IDs per team (ordered by created_at)
+      if (db.driver === 'postgres') {
+        await db.exec(`
+          WITH ranked AS (
+            SELECT id, team_id, ROW_NUMBER() OVER (PARTITION BY team_id ORDER BY created_at) AS rn
+            FROM tasks WHERE short_id IS NULL
+          )
+          UPDATE tasks SET short_id = ranked.rn
+          FROM ranked WHERE tasks.id = ranked.id
+        `)
+        await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_team_short_id ON tasks(team_id, short_id)`)
+      } else {
+        // SQLite: backfill with a simple loop
+        const teams = await db.query<{ team_id: string }>('SELECT DISTINCT team_id FROM tasks WHERE short_id IS NULL')
+        for (const t of teams) {
+          const tasks = await db.query<{ id: string }>('SELECT id FROM tasks WHERE team_id = $1 AND short_id IS NULL ORDER BY created_at', [t.team_id])
+          let idx = 1
+          // Get max existing short_id first
+          const maxRow = await db.queryOne<{ max_id: number | null }>('SELECT MAX(short_id) AS max_id FROM tasks WHERE team_id = $1', [t.team_id])
+          idx = (maxRow?.max_id ?? 0) + 1
+          for (const task of tasks) {
+            await db.run('UPDATE tasks SET short_id = $1 WHERE id = $2', [idx++, task.id])
+          }
+        }
+        await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_team_short_id ON tasks(team_id, short_id)')
+      }
+    },
+  },
 ]
 
 /**

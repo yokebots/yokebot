@@ -195,7 +195,19 @@ export function MessageBubble({
   const isLong = displayContent.length > COLLAPSE_THRESHOLD
   const mobileCollapsed = isLong && !expanded
 
-  const timeStr = new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const timeStr = (() => {
+    const d = new Date(message.createdAt)
+    const now = new Date()
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    const isToday = d.toDateString() === now.toDateString()
+    if (isToday) return time
+    const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1)
+    if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`
+    const daysDiff = Math.floor((now.getTime() - d.getTime()) / 86400000)
+    if (daysDiff < 7) return `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
+    if (d.getFullYear() === now.getFullYear()) return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} ${time}`
+  })()
 
   const reactionEntries = Object.entries(reactions).filter(([, users]) => users.length > 0)
 

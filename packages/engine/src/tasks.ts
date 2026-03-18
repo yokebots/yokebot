@@ -23,16 +23,20 @@ export interface Task {
   headerImage: string | null; attachments: TaskAttachment[]
   tags: TaskTag[]
   blockedReason: BlockedReason | null; blockedApprovalId: string | null; blockedReasonText: string | null; scratchpad: string | null; estimatedCredits: number | null; sprintCount: number
+  sandboxProjectId: string | null; shortId: number | null
   createdAt: string; updatedAt: string
 }
 
 export async function createTask(db: Db, teamId: string, title: string, opts?: {
-  description?: string; priority?: TaskPriority; assignedAgentId?: string; assignedUserId?: string; parentTaskId?: string; deadline?: string; status?: TaskStatus
+  description?: string; priority?: TaskPriority; assignedAgentId?: string; assignedUserId?: string; parentTaskId?: string; deadline?: string; status?: TaskStatus; sandboxProjectId?: string
 }): Promise<Task> {
   const id = randomUUID()
+  // Generate next short_id for this team
+  const shortIdRow = await db.queryOne<{ next_id: number }>('SELECT COALESCE(MAX(short_id), 0) + 1 AS next_id FROM tasks WHERE team_id = $1', [teamId])
+  const shortId = shortIdRow?.next_id ?? 1
   await db.run(
-    'INSERT INTO tasks (id, team_id, title, description, status, priority, assigned_agent_id, assigned_user_id, parent_task_id, deadline) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-    [id, teamId, title, opts?.description ?? null, opts?.status ?? 'backlog', opts?.priority ?? 'medium', opts?.assignedAgentId ?? null, opts?.assignedUserId ?? null, opts?.parentTaskId ?? null, opts?.deadline ?? null],
+    'INSERT INTO tasks (id, team_id, title, description, status, priority, assigned_agent_id, assigned_user_id, parent_task_id, deadline, sandbox_project_id, short_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)',
+    [id, teamId, title, opts?.description ?? null, opts?.status ?? 'backlog', opts?.priority ?? 'medium', opts?.assignedAgentId ?? null, opts?.assignedUserId ?? null, opts?.parentTaskId ?? null, opts?.deadline ?? null, opts?.sandboxProjectId ?? null, shortId],
   )
   return (await getTask(db, id))!
 }
@@ -100,7 +104,7 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   return tasks
 }
 
-export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'assignedUserId' | 'deadline' | 'headerImage' | 'blockedReason' | 'scratchpad' | 'estimatedCredits'>> & { attachments?: string }): Promise<Task | null> {
+export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedAgentId' | 'assignedUserId' | 'deadline' | 'headerImage' | 'blockedReason' | 'scratchpad' | 'estimatedCredits' | 'sandboxProjectId'>> & { attachments?: string }): Promise<Task | null> {
   const fields: string[] = []
   const values: unknown[] = []
   let paramIdx = 1
@@ -117,6 +121,7 @@ export async function updateTask(db: Db, id: string, updates: Partial<Pick<Task,
   if (updates.blockedReason !== undefined) { fields.push(`blocked_reason = $${paramIdx++}`); values.push(updates.blockedReason) }
   if (updates.scratchpad !== undefined) { fields.push(`scratchpad = $${paramIdx++}`); values.push(updates.scratchpad) }
   if (updates.estimatedCredits !== undefined) { fields.push(`estimated_credits = $${paramIdx++}`); values.push(updates.estimatedCredits) }
+  if (updates.sandboxProjectId !== undefined) { fields.push(`sandbox_project_id = $${paramIdx++}`); values.push(updates.sandboxProjectId) }
 
   if (fields.length === 0) return getTask(db, id)
 
@@ -177,8 +182,50 @@ function rowToTask(row: Record<string, unknown>): Task {
     scratchpad: (row.scratchpad as string | null) ?? null,
     estimatedCredits: (row.estimated_credits as number | null) ?? null,
     sprintCount: (row.sprint_count as number) ?? 0,
+    sandboxProjectId: (row.sandbox_project_id as string | null) ?? null,
+    shortId: (row.short_id as number | null) ?? null,
     createdAt: row.created_at as string, updatedAt: row.updated_at as string,
   }
+}
+
+// ---- Task Deduplication ----
+
+const FILLER_WORDS = new Set(['a', 'an', 'the', 'to', 'for', 'of', 'in', 'on', 'and', 'or', 'is', 'it', 'my', 'our', 'this', 'that', 'with', 'me', 'we', 'be'])
+
+function normalizeTitle(title: string): string {
+  return title.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => !FILLER_WORDS.has(w)).join(' ')
+}
+
+function levenshteinSimilarity(a: string, b: string): number {
+  if (a === b) return 1
+  const lenA = a.length, lenB = b.length
+  if (lenA === 0 || lenB === 0) return 0
+  const matrix: number[][] = Array.from({ length: lenA + 1 }, (_, i) => [i])
+  for (let j = 0; j <= lenB; j++) matrix[0][j] = j
+  for (let i = 1; i <= lenA; i++) {
+    for (let j = 1; j <= lenB; j++) {
+      matrix[i][j] = a[i - 1] === b[j - 1]
+        ? matrix[i - 1][j - 1]
+        : Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + 1)
+    }
+  }
+  return 1 - matrix[lenA][lenB] / Math.max(lenA, lenB)
+}
+
+/** Check for duplicate tasks by fuzzy title match. Returns warning string if duplicate found, null otherwise. */
+export async function checkForDuplicateTask(db: Db, teamId: string, title: string): Promise<string | null> {
+  const normalized = normalizeTitle(title)
+  if (!normalized) return null
+  const existing = await listTasks(db, { teamId })
+  const active = existing.filter(t => t.status !== 'done' && t.status !== 'archived')
+  for (const task of active) {
+    const sim = levenshteinSimilarity(normalized, normalizeTitle(task.title))
+    if (sim > 0.85) {
+      const shortRef = task.shortId ? `TASK-${task.shortId}` : task.id.slice(0, 8)
+      return `Similar task exists: "${task.title}" (${shortRef}, status: ${task.status}). Use update_task to modify the existing task instead of creating a duplicate.`
+    }
+  }
+  return null
 }
 
 /** Block a task with a specific reason, optional linked approval, and optional explanation text. */

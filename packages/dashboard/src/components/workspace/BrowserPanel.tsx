@@ -120,6 +120,10 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
             } else if (msg.type === 'error') {
               setNavigating(false)
               setError(msg.message)
+              // Stop reconnecting if session is gone (e.g. after deploy)
+              if (msg.code === 'SESSION_NOT_FOUND') {
+                cancelled = true
+              }
             }
           } catch { /* ignore */ }
         }
@@ -128,6 +132,11 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
           console.log(`[BrowserPanel] WebSocket closed: code=${event.code} reason=${event.reason}`)
           if (!cancelled) {
             setConnected(false)
+            // Don't reconnect if session is definitively gone
+            if (event.code === 4004) {
+              setError('Browser session has ended')
+              return
+            }
             // Auto-reconnect with exponential backoff
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
               const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000)

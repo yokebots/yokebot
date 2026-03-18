@@ -450,28 +450,32 @@ const CLEANUP_FILES = ['lovable.config.ts', 'replit.nix', '.replit']
 
 /**
  * Import a project from a Git URL into the team's sandbox.
- * Clones the repo, auto-detects the framework, installs deps, starts dev server.
+ * Creates a new sandbox project, clones the repo, auto-detects framework, installs deps, starts dev server.
+ * Never touches other projects — each import gets its own isolated directory.
  */
-export async function importProject(db: Db, teamId: string, repoUrl: string): Promise<{
+export async function importProject(db: Db, teamId: string, repoUrl: string, projectName?: string): Promise<{
   status: string
   framework: string
   port: number
   previewUrl?: string
+  projectId: string
+  projectDir: string
 }> {
-  const PROJECT_DIR = '/home/daytona/app'
+  // Derive project name from repo URL if not provided
+  const derivedName = projectName ?? repoUrl.replace(/\.git$/, '').split('/').pop() ?? 'imported-app'
 
-  // 1. Clean existing project
-  await execCommand(db, teamId, `rm -rf ${PROJECT_DIR}`)
-  await execCommand(db, teamId, `mkdir -p ${PROJECT_DIR}`)
+  // Create a new sandbox project (allocates unique dir + port)
+  const project = await createSandboxProject(db, teamId, derivedName)
+  const PROJECT_DIR = project.directory
 
-  // 2. Clone the repo
-  console.log(`[sandbox] Importing project from ${repoUrl} for team ${teamId}`)
+  // 1. Clone the repo into the project directory
+  console.log(`[sandbox:${project.slug}] Importing project from ${repoUrl} for team ${teamId}`)
   const cloneResult = await execCommand(db, teamId, `git clone --depth 1 "${repoUrl}" ${PROJECT_DIR}`)
   if (cloneResult.exitCode !== 0) {
     throw new Error(`Failed to clone repository: ${cloneResult.stderr || cloneResult.stdout}`)
   }
 
-  // 3. Clean up tool-specific files
+  // 2. Clean up tool-specific files
   const cleanupCmds = [
     ...CLEANUP_DIRS.map(d => `rm -rf ${PROJECT_DIR}/${d}`),
     ...CLEANUP_FILES.map(f => `rm -f ${PROJECT_DIR}/${f}`),
@@ -479,18 +483,16 @@ export async function importProject(db: Db, teamId: string, repoUrl: string): Pr
   ]
   await execCommand(db, teamId, cleanupCmds.join(' && '))
 
-  // 4. Detect framework
+  // 3. Detect framework
   let framework: FrameworkInfo
   const pkgResult = await execCommand(db, teamId, `cat ${PROJECT_DIR}/package.json 2>/dev/null`)
   if (pkgResult.exitCode === 0 && pkgResult.stdout.trim()) {
     framework = detectFrameworkFromPackageJson(pkgResult.stdout)
   } else {
-    // Check for static site (just HTML)
     const htmlCheck = await execCommand(db, teamId, `test -f ${PROJECT_DIR}/index.html && echo "yes" || echo "no"`)
     if (htmlCheck.stdout.trim() === 'yes') {
       framework = { name: 'static', devCommand: 'npx serve -s . -p 3000', port: 3000 }
     } else {
-      // Check for Python
       const pyCheck = await execCommand(db, teamId, `test -f ${PROJECT_DIR}/requirements.txt && echo "yes" || echo "no"`)
       if (pyCheck.stdout.trim() === 'yes') {
         framework = { name: 'python', devCommand: 'python -m http.server 3000', port: 3000 }
@@ -500,29 +502,40 @@ export async function importProject(db: Db, teamId: string, repoUrl: string): Pr
     }
   }
 
-  console.log(`[sandbox] Detected framework: ${framework.name} for team ${teamId}`)
+  // Override port with project's allocated port
+  const devPort = project.devPort ?? framework.port
+  const devCommand = framework.devCommand.replace(/\d{4}$/, String(devPort))
 
-  // 5. Install dependencies (if package.json exists)
+  console.log(`[sandbox:${project.slug}] Detected framework: ${framework.name} for team ${teamId}`)
+
+  // 4. Install dependencies
   if (pkgResult.exitCode === 0) {
     const installResult = await execCommand(db, teamId, `cd ${PROJECT_DIR} && npm install`)
     if (installResult.exitCode !== 0) {
-      // Retry with clean slate
       await execCommand(db, teamId, `cd ${PROJECT_DIR} && rm -rf node_modules package-lock.json && npm install`)
     }
   }
 
-  // 6. Start dev server
-  const startCmd = `cd ${PROJECT_DIR} && ${framework.devCommand} &`
+  // 5. Start dev server with project-specific port
+  const startCmd = `cd ${PROJECT_DIR} && ${devCommand} &`
   await execCommand(db, teamId, startCmd)
 
-  // 7. Save startup command for resume
+  // 6. Save project metadata
+  await updateSandboxProject(db, project.id, {
+    framework: framework.name,
+    startupCommand: startCmd,
+    devPort,
+  })
+
+  // Also update the sandbox session startup command for resume
   await setStartupCommand(db, teamId, startCmd)
 
-  // 8. Wait and get preview URL
+  // 7. Wait and get preview URL
   await new Promise(resolve => setTimeout(resolve, 5000))
   let previewUrl: string | undefined
   try {
-    previewUrl = await getPreviewUrl(db, teamId, framework.port)
+    previewUrl = await getPreviewUrl(db, teamId, devPort)
+    await updateSandboxProject(db, project.id, { previewUrl })
   } catch {
     // Preview not ready yet — caller can get it later
   }
@@ -530,8 +543,173 @@ export async function importProject(db: Db, teamId: string, repoUrl: string): Pr
   return {
     status: 'imported',
     framework: framework.name,
-    port: framework.port,
+    port: devPort,
     previewUrl,
+    projectId: project.id,
+    projectDir: PROJECT_DIR,
+  }
+}
+
+// ---- Sandbox Project Management ----
+
+export interface SandboxProject {
+  id: string
+  teamId: string
+  name: string
+  slug: string
+  directory: string
+  framework: string | null
+  devPort: number | null
+  startupCommand: string | null
+  previewUrl: string | null
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+const PROJECTS_BASE = '/home/daytona/projects'
+const DEFAULT_PROJECT_DIR = `${PROJECTS_BASE}/_default`
+
+/** Generate a URL-safe slug from a project name. */
+function generateSlug(name: string): string {
+  const base = name.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 30)
+    .replace(/-$/, '')
+  const suffix = Math.random().toString(36).slice(2, 6)
+  return `${base}-${suffix}`
+}
+
+/** Create a new sandbox project. Returns the project with its directory created. */
+export async function createSandboxProject(db: Db, teamId: string, name: string, opts?: {
+  framework?: string; devPort?: number
+}): Promise<SandboxProject> {
+  const id = `sp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+  const slug = generateSlug(name)
+  const directory = `${PROJECTS_BASE}/${slug}`
+
+  // Assign a unique dev port — find next available starting from 5173
+  let devPort = opts?.devPort ?? 5173
+  if (!opts?.devPort) {
+    const existing = await db.query<{ dev_port: number | null }>(
+      'SELECT dev_port FROM sandbox_projects WHERE team_id = $1 AND is_active = true ORDER BY dev_port DESC LIMIT 1',
+      [teamId],
+    )
+    if (existing.length > 0 && existing[0].dev_port) {
+      devPort = existing[0].dev_port + 1
+    }
+  }
+
+  await db.run(
+    `INSERT INTO sandbox_projects (id, team_id, name, slug, directory, framework, dev_port, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7, true)`,
+    [id, teamId, name, slug, directory, opts?.framework ?? null, devPort],
+  )
+
+  // Create the directory in the sandbox
+  await execCommand(db, teamId, `mkdir -p ${directory}`)
+
+  console.log(`[sandbox] Created project "${name}" → ${directory} (port ${devPort}) for team ${teamId}`)
+
+  return (await getSandboxProject(db, id))!
+}
+
+/** Get a sandbox project by ID. */
+export async function getSandboxProject(db: Db, id: string): Promise<SandboxProject | null> {
+  const row = await db.queryOne<Record<string, unknown>>(
+    'SELECT * FROM sandbox_projects WHERE id = $1', [id],
+  )
+  return row ? rowToSandboxProject(row) : null
+}
+
+/** List active sandbox projects for a team. */
+export async function listSandboxProjects(db: Db, teamId: string): Promise<SandboxProject[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    'SELECT * FROM sandbox_projects WHERE team_id = $1 AND is_active = true ORDER BY created_at DESC',
+    [teamId],
+  )
+  return rows.map(rowToSandboxProject)
+}
+
+/** Get the default project directory for backward compat. Creates _default project if needed. */
+export async function getOrCreateDefaultProject(db: Db, teamId: string): Promise<SandboxProject> {
+  const existing = await db.queryOne<Record<string, unknown>>(
+    `SELECT * FROM sandbox_projects WHERE team_id = $1 AND slug = '_default'`, [teamId],
+  )
+  if (existing) return rowToSandboxProject(existing)
+
+  const id = `sp_default_${teamId.slice(0, 8)}`
+  await db.run(
+    `INSERT INTO sandbox_projects (id, team_id, name, slug, directory, dev_port, is_active) VALUES ($1, $2, $3, $4, $5, $6, true)`,
+    [id, teamId, 'Default Project', '_default', DEFAULT_PROJECT_DIR, 5173],
+  )
+  // Create directory + symlink for backward compat
+  await execCommand(db, teamId, `mkdir -p ${DEFAULT_PROJECT_DIR}`)
+  // Symlink /home/daytona/app → /home/daytona/projects/_default for backward compat
+  await execCommand(db, teamId, `[ -L /home/daytona/app ] || [ ! -e /home/daytona/app ] && ln -sfn ${DEFAULT_PROJECT_DIR} /home/daytona/app || true`)
+
+  return (await getSandboxProject(db, id))!
+}
+
+/** Update a sandbox project's fields. */
+export async function updateSandboxProject(db: Db, id: string, updates: Partial<Pick<SandboxProject, 'framework' | 'startupCommand' | 'previewUrl' | 'devPort' | 'isActive'>>): Promise<void> {
+  const fields: string[] = []
+  const values: unknown[] = []
+  let paramIdx = 1
+  if (updates.framework !== undefined) { fields.push(`framework = $${paramIdx++}`); values.push(updates.framework) }
+  if (updates.startupCommand !== undefined) { fields.push(`startup_command = $${paramIdx++}`); values.push(updates.startupCommand) }
+  if (updates.previewUrl !== undefined) { fields.push(`preview_url = $${paramIdx++}`); values.push(updates.previewUrl) }
+  if (updates.devPort !== undefined) { fields.push(`dev_port = $${paramIdx++}`); values.push(updates.devPort) }
+  if (updates.isActive !== undefined) { fields.push(`is_active = $${paramIdx++}`); values.push(updates.isActive) }
+  if (fields.length === 0) return
+  fields.push(`updated_at = ${db.now()}`)
+  values.push(id)
+  await db.run(`UPDATE sandbox_projects SET ${fields.join(', ')} WHERE id = $${paramIdx}`, values)
+}
+
+/** Validate that a path is within the given project directory. Throws on escape. */
+export function validateProjectPath(path: string, projectDir: string): string {
+  const resolved = normalizeSandboxPathToProject(path, projectDir)
+  if (!resolved.startsWith(projectDir + '/') && resolved !== projectDir) {
+    throw new Error(`Path "${path}" is outside the active project "${projectDir}". Cannot access files outside the active project.`)
+  }
+  return resolved
+}
+
+/** Normalize a file path to the given project directory. */
+export function normalizeSandboxPathToProject(path: string, projectDir: string): string {
+  // Already within this project dir
+  if (path.startsWith(projectDir + '/') || path === projectDir) return path
+  // Rewrite /home/daytona/<other-name>/... to this project dir
+  const m = path.match(/^\/home\/daytona\/(?:app|projects\/[^/]+|[^/]+)\/(.+)$/)
+  if (m) return `${projectDir}/${m[1]}`
+  // Bare /home/daytona/<anything> → project dir
+  if (/^\/home\/daytona\/[^/]+$/.test(path)) return projectDir
+  // Relative path → prefix with project dir
+  if (!path.startsWith('/')) return `${projectDir}/${path.replace(/^\.\//, '')}`
+  return path
+}
+
+/** Normalize cd commands in shell strings to the project directory. */
+export function normalizeSandboxCommandToProject(command: string, projectDir: string): string {
+  return command.replace(/\/home\/daytona\/(?:app|[^/\s&]+)/g, projectDir)
+}
+
+function rowToSandboxProject(row: Record<string, unknown>): SandboxProject {
+  return {
+    id: row.id as string,
+    teamId: row.team_id as string,
+    name: row.name as string,
+    slug: row.slug as string,
+    directory: row.directory as string,
+    framework: (row.framework as string | null) ?? null,
+    devPort: (row.dev_port as number | null) ?? null,
+    startupCommand: (row.startup_command as string | null) ?? null,
+    previewUrl: (row.preview_url as string | null) ?? null,
+    isActive: row.is_active === true || row.is_active === 1,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
   }
 }
 

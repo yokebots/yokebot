@@ -13,7 +13,7 @@ import type { Db } from './db/types.ts'
 import { chatCompletionWithFallback, type ChatMessage, type ToolDef, type ToolCall, type ModelConfig, type CompletionResponse } from './model.ts'
 import { getMessages, addMessage, getAgent } from './agent.ts'
 import { listFiles, readFile, writeFile, renameFile, deleteFile } from './workspace.ts'
-import { createTask, listTasks, updateTask } from './tasks.ts'
+import { createTask, listTasks, updateTask, checkForDuplicateTask } from './tasks.ts'
 import { applyTagsByName } from './tags.ts'
 import { getDmChannel, sendMessage, getTaskThread, getChannel, listChannels, createChannel, broadcastAgentProgress, type AgentProgressEvent } from './chat.ts'
 import { createApproval, getApproval } from './approval.ts'
@@ -133,6 +133,7 @@ const OFFLOAD_SKIP = new Set([
   'browser_snapshot',
   'sandbox_read_file', 'sandbox_list_files', 'sandbox_preview',
   'sandbox_import', 'sandbox_write_files', 'sandbox_setup',
+  'create_project', 'list_projects',
   // Compound tools — results are short summaries
   'create_tasks', 'write_workspace_files', 'add_source_of_record_rows',
 ])
@@ -245,6 +246,8 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   sandbox_import: 'sandbox',
   sandbox_write_files: 'sandbox',
   sandbox_setup: 'sandbox',
+  create_project: 'sandbox',
+  list_projects: 'sandbox',
   // Compound tools — batch operations to save credits
   create_tasks: 'tasks',
   write_workspace_files: 'workspace',
@@ -272,6 +275,7 @@ const ESSENTIAL_BROWSER_TOOLS = new Set([
 const ESSENTIAL_SANDBOX_TOOLS = new Set([
   'think', 'respond', 'sandbox_exec', 'sandbox_write_file', 'sandbox_read_file',
   'sandbox_list_files', 'sandbox_setup', 'sandbox_preview', 'sandbox_write_files',
+  'create_project', 'list_projects',
 ])
 const ESSENTIAL_WORKSPACE_TOOLS = new Set([
   'think', 'respond', 'read_workspace_file', 'write_workspace_file',
@@ -333,6 +337,8 @@ export interface RuntimeConfig {
   onFileWritten?: (teamId: string, path: string) => void // SSE broadcast callback
   extraToolCategories?: ToolCategory[] // task-context category boosts
   restrictToolCategories?: ToolCategory[] // REPLACE template categories (for phase routing)
+  sandboxProjectDir?: string // resolved sandbox project directory for this sprint
+  sandboxProjectId?: string  // resolved sandbox project ID for this sprint
 }
 
 const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -351,6 +357,10 @@ export interface ToolContext {
   /** Mutable tools array — install_skill pushes new tools into the live session */
   tools?: ToolDef[]
   onFileWritten?: (teamId: string, path: string) => void
+  /** Active sandbox project directory for this sprint (resolved once, immutable) */
+  sandboxProjectDir?: string
+  /** Active sandbox project ID for this sprint */
+  sandboxProjectId?: string
 }
 
 /** Human-readable labels for common tools */
@@ -370,6 +380,8 @@ const TOOL_LABELS: Record<string, string> = {
   write_workspace_file: 'Writing file',
   read_workspace_file: 'Reading file',
   list_workspace_files: 'Browsing files',
+  create_project: 'Creating project',
+  list_projects: 'Listing projects',
   create_task: 'Creating task',
   update_task: 'Updating task',
   list_tasks: 'Reviewing tasks',
@@ -470,7 +482,7 @@ function getBuiltinTools(): ToolDef[] {
     }, ['filePath', 'reason']),
 
     // Tasks (Mission Control)
-    toolDef('create_task', 'Create a new task in Mission Control.', {
+    toolDef('create_task', 'Create a new task in Mission Control. ALWAYS check list_tasks first to avoid creating duplicates.', {
       title: { type: 'string', description: 'Task title' },
       description: { type: 'string', description: 'Task description' },
       priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Task priority' },
@@ -479,6 +491,7 @@ function getBuiltinTools(): ToolDef[] {
       assignedUserId: { type: 'string', description: 'Human team member user ID to assign the task to. Use list_team_members to look up IDs.' },
       deadline: { type: 'string', description: 'Deadline in ISO 8601 format (e.g. 2026-03-15). Default to TODAY unless the user specifies a later date or there are many active tasks ahead of this one.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Tag names to apply (e.g. ["VIP", "follow-up"]). Tags are auto-created if they don\'t exist.' },
+      projectId: { type: 'string', description: 'Link this task to an existing sandbox project ID. Use list_projects to find project IDs.' },
     }, ['title']),
 
     toolDef('update_task', 'Update an existing task. Can change any field: status, priority, description, title, assigned agent/user, or deadline.', {
@@ -491,6 +504,7 @@ function getBuiltinTools(): ToolDef[] {
       assignedUserId: { type: 'string', description: 'Human team member user ID to assign the task to. Use list_team_members to look up IDs.' },
       deadline: { type: 'string', description: 'New deadline in ISO 8601 format (e.g. 2026-03-15)' },
       estimatedCredits: { type: 'number', description: 'Estimated total credits this task will cost to complete' },
+      projectId: { type: 'string', description: 'Link this task to a sandbox project ID' },
     }, ['taskId']),
 
     toolDef('delete_task', 'Request deletion of a task. Requires human approval — the task will NOT be deleted until a human approves.', {
@@ -732,10 +746,18 @@ function getBuiltinTools(): ToolDef[] {
       files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'Absolute path (e.g. "/home/daytona/app/src/App.tsx")' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'Array of { path, content } objects' },
     }, ['files']),
 
-    toolDef('sandbox_setup', 'Create a complete project in one call: writes all files, installs deps, starts dev server, returns preview URL. Project is always created at /home/daytona/app. Install and start commands are handled automatically — just provide the files.', {
-      files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'File path (e.g. "/home/daytona/app/src/App.tsx" or "src/App.tsx")' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'All project files to write' },
-      preview_port: { type: 'number', description: 'Port the dev server listens on (default: 5173)' },
+    toolDef('sandbox_setup', 'Create a complete project in one call: writes all files, installs deps, starts dev server, returns preview URL. Uses the active project directory. Install and start commands are handled automatically — just provide the files.', {
+      files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string', description: 'File path (e.g. "src/App.tsx" — relative to project root)' }, content: { type: 'string', description: 'File content' } }, required: ['path', 'content'] }, description: 'All project files to write' },
+      preview_port: { type: 'number', description: 'Port the dev server listens on (default: project port or 5173)' },
     }, ['files']),
+
+    // ---- Sandbox Project Management ----
+    toolDef('create_project', 'Create a new sandbox project with its own isolated directory. Use this ONLY when building something genuinely new — always call list_projects first to check if a project already exists for what you need.', {
+      name: { type: 'string', description: 'Human-readable project name (e.g. "Booking App", "Landing Page")' },
+      framework: { type: 'string', description: 'Optional framework hint (vite, next, cra, remix, astro, svelte)' },
+    }, ['name']),
+
+    toolDef('list_projects', 'List all sandbox projects for this team. ALWAYS call this before create_project to avoid duplicates. Shows project name, directory, framework, port, and preview URL.', {}, []),
 
     // ---- Compound tools — batch operations to save credits ----
     toolDef('create_tasks', 'Create MULTIPLE tasks in Mission Control in a single call. MUCH more efficient than calling create_task repeatedly. Use this whenever you need to create 2+ tasks.', {
@@ -770,25 +792,43 @@ function getBuiltinTools(): ToolDef[] {
  * Execute a single tool call and return the result string.
  */
 // ---- Sandbox path normalization ----
-// Agents may use arbitrary project directory names (e.g. /home/daytona/booking-app/).
-// We enforce a canonical project directory so the sandbox stays consistent.
-const SANDBOX_PROJECT_DIR = '/home/daytona/app'
+// Path normalization is now project-aware. The active project directory comes from ctx.sandboxProjectDir.
+// Fallback to /home/daytona/app for backward compat when no project is set.
+const SANDBOX_FALLBACK_DIR = '/home/daytona/app'
 
-/** Normalize a file path — rewrite /home/daytona/<anything>/ to /home/daytona/app/ */
-function normalizeSandboxPath(path: string): string {
-  // Already canonical
-  if (path.startsWith(SANDBOX_PROJECT_DIR + '/') || path === SANDBOX_PROJECT_DIR) return path
-  // Rewrite /home/daytona/<other-name>/... to canonical
-  const m = path.match(/^\/home\/daytona\/[^/]+\/(.+)$/)
-  if (m) return `${SANDBOX_PROJECT_DIR}/${m[1]}`
-  // If it's just /home/daytona/<other-name> with no subpath, return project dir
-  if (/^\/home\/daytona\/[^/]+$/.test(path)) return SANDBOX_PROJECT_DIR
+/** Resolve the active project directory from context, with fallback. */
+function getProjectDir(ctx: ToolContext): string {
+  return ctx.sandboxProjectDir ?? SANDBOX_FALLBACK_DIR
+}
+
+/** Normalize a file path to the active project directory. */
+function normalizeSandboxPath(path: string, projectDir?: string): string {
+  const dir = projectDir ?? SANDBOX_FALLBACK_DIR
+  // Already within this project dir
+  if (path.startsWith(dir + '/') || path === dir) return path
+  // Rewrite /home/daytona/<other-name>/... to this project dir
+  const m = path.match(/^\/home\/daytona\/(?:app|projects\/[^/]+|[^/]+)\/(.+)$/)
+  if (m) return `${dir}/${m[1]}`
+  // Bare /home/daytona/<anything> → project dir
+  if (/^\/home\/daytona\/[^/]+$/.test(path)) return dir
+  // Relative path → prefix with project dir
+  if (!path.startsWith('/')) return `${dir}/${path.replace(/^\.\//, '')}`
   return path
 }
 
-/** Normalize cd commands in shell strings — rewrite cd /home/daytona/<x> to canonical */
-function normalizeSandboxCommand(command: string): string {
-  return command.replace(/\/home\/daytona\/[^/\s&]+/g, SANDBOX_PROJECT_DIR)
+/** Normalize cd commands in shell strings to the active project directory. */
+function normalizeSandboxCommand(command: string, projectDir?: string): string {
+  const dir = projectDir ?? SANDBOX_FALLBACK_DIR
+  return command.replace(/\/home\/daytona\/(?:app|projects\/[^/]+|[^/\s&]+)/g, dir)
+}
+
+/** Validate a path doesn't escape the project directory. */
+function validateProjectPath(path: string, projectDir: string): string {
+  const resolved = normalizeSandboxPath(path, projectDir)
+  if (!resolved.startsWith(projectDir + '/') && resolved !== projectDir) {
+    throw new Error(`Path "${path}" is outside the active project "${projectDir}". Cannot access files outside the active project. Switch tasks to work on a different project.`)
+  }
+  return resolved
 }
 
 async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<string> {
@@ -883,6 +923,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           return `Error: Deadline "${args.deadline}" is in the past. Today is ${today.toISOString().split('T')[0]}. Please set a future deadline.`
         }
       }
+      // Deduplication check — warn agent if similar task exists
+      const dupWarning = await checkForDuplicateTask(ctx.db, ctx.teamId, args.title as string)
+      if (dupWarning) return dupWarning
       // Validate assignedAgentId belongs to this team
       // AdvisorBot (team manager) cannot assign tasks to himself — his job is to delegate
       let targetAgentId = (args.assignedAgentId as string) ?? ctx.agentId
@@ -903,6 +946,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         assignedAgentId: targetAgentId,
         assignedUserId: args.assignedUserId as string | undefined,
         deadline: args.deadline as string | undefined,
+        sandboxProjectId: args.projectId as string | undefined,
       })
       // Apply tags if provided
       const tagNames = Array.isArray(args.tags) ? (args.tags as string[]).filter(Boolean) : []
@@ -911,19 +955,20 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         const tags = await applyTagsByName(ctx.db, ctx.teamId, tagNames, 'task', task.id)
         appliedTags = tags.map((t) => t.name)
       }
-      // Auto-create task thread and post initial summary
+      // Post task summary to team channel (no more task threads)
       try {
-        const thread = await getTaskThread(ctx.db, task.id, ctx.teamId)
-        const parts = [`**${task.title}**`]
+        const teamChannel = await getTeamChannel(ctx.db, ctx.teamId)
+        const parts = [`@[${task.title}](task:${task.id}) — Created`]
         if (task.description) parts.push(task.description)
         parts.push(`Priority: ${task.priority}`)
         if (task.deadline) parts.push(`Deadline: ${task.deadline}`)
         if (appliedTags.length > 0) parts.push(`Tags: ${appliedTags.join(', ')}`)
         parts.push(`Status: ${task.status}`)
-        await sendMessage(ctx.db, thread.id, 'agent', ctx.agentId, parts.join('\n'), undefined, ctx.teamId)
-      } catch { /* thread creation is best-effort */ }
+        await sendMessage(ctx.db, teamChannel.id, 'agent', ctx.agentId, parts.join('\n'), task.id, ctx.teamId)
+      } catch { /* team channel post is best-effort */ }
       await logActivity(ctx.db, 'task_created', ctx.agentId, `Created task: ${task.title}`, undefined, ctx.teamId)
-      return `Task created: "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${appliedTags.length ? `, tags: ${appliedTags.join(', ')}` : ''})`
+      const shortRef = task.shortId ? ` TASK-${task.shortId}` : ''
+      return `Task created: "${task.title}" (id: ${task.id}${shortRef}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${appliedTags.length ? `, tags: ${appliedTags.join(', ')}` : ''}${task.sandboxProjectId ? `, project: ${task.sandboxProjectId}` : ''})`
     }
 
     case 'update_task': {
@@ -954,6 +999,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       if (args.assignedUserId) updates.assignedUserId = args.assignedUserId
       if (args.deadline) updates.deadline = args.deadline
       if (args.estimatedCredits != null) updates.estimatedCredits = args.estimatedCredits as number
+      if (args.projectId) updates.sandboxProjectId = args.projectId as string
       const task = await updateTask(ctx.db, args.taskId as string, updates)
       if (!task) return `Task not found: ${args.taskId as string}`
       // Workflow step chaining: if task is done, advance linked workflow
@@ -1469,8 +1515,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     // ---- Sandbox (Daytona app-building) ----
     case 'sandbox_exec': {
       const { execCommand: sbExec } = await import('./sandbox.ts')
-      // Normalize any non-standard project paths in the command to /home/daytona/app
-      let command = normalizeSandboxCommand(args.command as string)
+      const projectDir = getProjectDir(ctx)
+      // Normalize any non-standard project paths in the command to the active project dir
+      let command = normalizeSandboxCommand(args.command as string, projectDir)
 
       // Intercept interactive project scaffolding commands — they hang in the sandbox
       if (/\b(npm\s+create|npx\s+create-|npm\s+init)\b/i.test(command)) {
@@ -1484,10 +1531,10 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
       // If the command doesn't reference a directory, prefix with cd to project dir
       if (!command.includes('/home/daytona') && !command.startsWith('cd ')) {
-        command = `cd ${SANDBOX_PROJECT_DIR} && ${command}`
+        command = `cd ${projectDir} && ${command}`
       }
 
-      const result = await sbExec(ctx.db, ctx.teamId, command)
+      const result = await sbExec(ctx.db, ctx.teamId, command, projectDir)
       await logActivity(ctx.db, 'sandbox_exec', ctx.agentId, `Sandbox: ${command.slice(0, 100)}`, undefined, ctx.teamId)
       return result.exitCode === 0
         ? result.stdout || '(no output)'
@@ -1496,10 +1543,15 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_write_file': {
       const { sandboxWriteFile } = await import('./sandbox.ts')
+      const projectDir = getProjectDir(ctx)
       // Defensive: ensure path is a string
       const rawPath = args.path
-      if (!rawPath || typeof rawPath !== 'string') return 'Error: "path" must be a string (e.g. "/home/daytona/app/src/App.tsx")'
-      const path = normalizeSandboxPath(rawPath)
+      if (!rawPath || typeof rawPath !== 'string') return 'Error: "path" must be a string (e.g. "src/App.tsx")'
+      const path = normalizeSandboxPath(rawPath, projectDir)
+      // Validate path stays within project
+      if (ctx.sandboxProjectDir) {
+        try { validateProjectPath(path, ctx.sandboxProjectDir) } catch (e) { return (e as Error).message }
+      }
       // Defensive: ensure content is a string
       let content = args.content
       if (content === undefined || content === null) return 'Error: "content" is required'
@@ -1512,14 +1564,19 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_read_file': {
       const { sandboxReadFile } = await import('./sandbox.ts')
-      const path = normalizeSandboxPath(args.path as string)
+      const projectDir = getProjectDir(ctx)
+      const path = normalizeSandboxPath(args.path as string, projectDir)
+      if (ctx.sandboxProjectDir) {
+        try { validateProjectPath(path, ctx.sandboxProjectDir) } catch (e) { return (e as Error).message }
+      }
       const content = await sandboxReadFile(ctx.db, ctx.teamId, path)
       return content
     }
 
     case 'sandbox_list_files': {
       const { sandboxListFiles } = await import('./sandbox.ts')
-      const dir = normalizeSandboxPath((args.directory as string) ?? '/home/daytona/app')
+      const projectDir = getProjectDir(ctx)
+      const dir = normalizeSandboxPath((args.directory as string) ?? projectDir, projectDir)
       const files = await sandboxListFiles(ctx.db, ctx.teamId, dir)
       if (files.length === 0) return `No files found in "${dir}".`
       return files.map(f => `${f.isDirectory ? '[dir] ' : ''}${f.path} (${f.size} bytes)`).join('\n')
@@ -1527,10 +1584,11 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_preview': {
       const { getPreviewUrl, setStartupCommand } = await import('./sandbox.ts')
+      const projectDir = getProjectDir(ctx)
       const port = (args.port as number) || 5173
       const url = await getPreviewUrl(ctx.db, ctx.teamId, port)
       // Auto-save a startup command so the dev server restarts on sandbox resume
-      const defaultCmd = `cd ${SANDBOX_PROJECT_DIR} && npm run dev -- --host 0.0.0.0 &`
+      const defaultCmd = `cd ${projectDir} && npm run dev -- --host 0.0.0.0 &`
       await setStartupCommand(ctx.db, ctx.teamId, defaultCmd)
       await logActivity(ctx.db, 'sandbox_preview', ctx.agentId, `Sandbox preview: port ${port}`, undefined, ctx.teamId)
       return `Preview URL: ${url}\n\nThe preview is now accessible in the dashboard.`
@@ -1538,12 +1596,13 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_install': {
       const { execCommand: sbExec } = await import('./sandbox.ts')
-      let command = normalizeSandboxCommand(args.command as string)
+      const projectDir = getProjectDir(ctx)
+      let command = normalizeSandboxCommand(args.command as string, projectDir)
       // Always run install from the project directory
       if (!command.includes('/home/daytona') && !command.startsWith('cd ')) {
-        command = `cd ${SANDBOX_PROJECT_DIR} && ${command}`
+        command = `cd ${projectDir} && ${command}`
       }
-      const result = await sbExec(ctx.db, ctx.teamId, command)
+      const result = await sbExec(ctx.db, ctx.teamId, command, projectDir)
       await logActivity(ctx.db, 'sandbox_install', ctx.agentId, `Sandbox install: ${command.slice(0, 100)}`, undefined, ctx.teamId)
       return result.exitCode === 0
         ? `Packages installed successfully.\n${result.stdout.slice(-500)}`
@@ -1559,11 +1618,18 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         await logActivity(ctx.db, 'sandbox_import', ctx.agentId, `Imported project from ${repoUrl} (${result.framework})`, undefined, ctx.teamId)
         const lines = [
           `Project imported successfully!`,
+          `Project ID: ${result.projectId}`,
+          `Directory: ${result.projectDir}`,
           `Framework: ${result.framework}`,
           `Port: ${result.port}`,
         ]
         if (result.previewUrl) lines.push(`Preview URL: ${result.previewUrl}`)
         else lines.push('Preview not ready yet — call sandbox_preview to get the URL.')
+        // Link to current task if we have one
+        if (ctx.currentTaskId) {
+          await updateTask(ctx.db, ctx.currentTaskId, { sandboxProjectId: result.projectId })
+          lines.push(`Linked to current task.`)
+        }
         return lines.join('\n')
       } catch (err) {
         return `Error importing project: ${(err as Error).message}`
@@ -1572,6 +1638,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'sandbox_write_files': {
       const { sandboxWriteFile } = await import('./sandbox.ts')
+      const projectDir = getProjectDir(ctx)
       // Defensive: ensure files is an array
       let rawFileList = args.files as Array<{ path: string; content: string }>
       if (!rawFileList) return 'Error: "files" array is required.'
@@ -1586,7 +1653,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         }
       }
       const files = rawFileList.map(f => ({
-        path: typeof f.path === 'string' ? normalizeSandboxPath(f.path) : String(f.path ?? ''),
+        path: typeof f.path === 'string' ? normalizeSandboxPath(f.path, projectDir) : String(f.path ?? ''),
         content: typeof f.content === 'string' ? f.content : JSON.stringify(f.content, null, 2),
       }))
       if (!files.length) return 'Error: No files provided.'
@@ -1608,7 +1675,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
     }
 
     case 'sandbox_setup': {
-      const { sandboxWriteFile, execCommand: sbExec, getPreviewUrl, setStartupCommand } = await import('./sandbox.ts')
+      const { sandboxWriteFile, execCommand: sbExec, getPreviewUrl, setStartupCommand, updateSandboxProject } = await import('./sandbox.ts')
       // Defensive: ensure files is an array
       let rawFiles = args.files as Array<{ path: string; content: string }>
       if (!rawFiles) return 'Error: "files" array is required. Pass an array of { path, content } objects.'
@@ -1616,41 +1683,31 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         try { rawFiles = JSON.parse(rawFiles) } catch { return 'Error: "files" must be a JSON array of { path, content } objects.' }
       }
       if (!Array.isArray(rawFiles)) {
-        // If it's a single object with path+content, wrap in array
         if (typeof rawFiles === 'object' && (rawFiles as Record<string, unknown>).path) {
           rawFiles = [rawFiles as unknown as { path: string; content: string }]
         } else {
           return 'Error: "files" must be an array of { path, content } objects.'
         }
       }
-      const previewPort = (args.preview_port as number) || 5173
 
-      // Hardcoded project directory — agents cannot choose a different location
-      const PROJECT_DIR = '/home/daytona/app'
+      // Use the active project directory (resolved from task → project link)
+      const PROJECT_DIR = getProjectDir(ctx)
+      const previewPort = (args.preview_port as number) || 5173
       const output: string[] = []
 
-      // Normalize all file paths and content types
-      // Agents may pass paths like /home/daytona/booking-app/src/App.tsx — rewrite them
-      // Content may come as objects from XML parser — coerce to strings
+      // Normalize all file paths to the project directory
       const files = rawFiles.map(f => {
         let path = typeof f.path === 'string' ? f.path : String(f.path ?? '')
         const content = typeof f.content === 'string' ? f.content : JSON.stringify(f.content, null, 2)
-        // If path starts with /home/daytona/<something>/, rewrite to PROJECT_DIR
-        const homeMatch = path.match(/^\/home\/daytona\/[^/]+\/(.+)$/)
-        if (homeMatch) {
-          path = `${PROJECT_DIR}/${homeMatch[1]}`
-        } else if (!path.startsWith(PROJECT_DIR)) {
-          // Relative paths or other absolute paths — prefix with PROJECT_DIR
-          path = `${PROJECT_DIR}/${path.replace(/^\/+/, '')}`
-        }
+        path = normalizeSandboxPath(path, PROJECT_DIR)
         return { path, content }
       })
 
-      // Hardcoded install and start commands — ignore what the agent passes
+      // Install and start commands use the project directory
       const installCmd = `cd ${PROJECT_DIR} && npm install`
       const startCmd = `cd ${PROJECT_DIR} && npm run dev -- --host 0.0.0.0 &`
 
-      // 1. Clean slate — remove any old project at this location
+      // 1. Clean slate — remove old content in this project directory only
       await sbExec(ctx.db, ctx.teamId, `rm -rf ${PROJECT_DIR}`)
 
       // 2. Collect all unique directories and create them in one command
@@ -1695,18 +1752,62 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
       // 6. Save startup command for auto-restart on resume
       await setStartupCommand(ctx.db, ctx.teamId, startCmd)
+      // Also update the sandbox project metadata if we have one
+      if (ctx.sandboxProjectId) {
+        await updateSandboxProject(ctx.db, ctx.sandboxProjectId, { startupCommand: startCmd })
+      }
 
       // 7. Wait for dev server to be ready, then get preview URL
       await new Promise(resolve => setTimeout(resolve, 5000))
       try {
         const url = await getPreviewUrl(ctx.db, ctx.teamId, previewPort)
         output.push(`Preview URL: ${url}`)
+        if (ctx.sandboxProjectId) {
+          await updateSandboxProject(ctx.db, ctx.sandboxProjectId, { previewUrl: url })
+        }
       } catch {
         output.push('Preview URL not ready yet — call sandbox_preview later')
       }
 
       await logActivity(ctx.db, 'sandbox_setup', ctx.agentId, `Sandbox: scaffolded project (${files.length} files)`, undefined, ctx.teamId)
       return output.join('\n')
+    }
+
+    // ---- Sandbox Project Management ----
+    case 'create_project': {
+      const { createSandboxProject, listSandboxProjects } = await import('./sandbox.ts')
+      const name = args.name as string
+      if (!name) return 'Error: "name" is required (e.g. "Booking App", "Landing Page").'
+      // Check for existing projects with similar name
+      const existing = await listSandboxProjects(ctx.db, ctx.teamId)
+      const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '')
+      const duplicate = existing.find(p => p.name.toLowerCase().replace(/[^a-z0-9]/g, '') === normalized)
+      if (duplicate) {
+        return `A project with a similar name already exists: "${duplicate.name}" (id: ${duplicate.id}, dir: ${duplicate.directory}). Use this project instead of creating a new one.`
+      }
+      const project = await createSandboxProject(ctx.db, ctx.teamId, name, {
+        framework: args.framework as string | undefined,
+      })
+      // Auto-link to current task if we have one
+      if (ctx.currentTaskId) {
+        await updateTask(ctx.db, ctx.currentTaskId, { sandboxProjectId: project.id })
+      }
+      await logActivity(ctx.db, 'sandbox_project_created', ctx.agentId, `Created project: ${project.name} (${project.slug})`, undefined, ctx.teamId)
+      return `Project created: "${project.name}" (id: ${project.id}, dir: ${project.directory}, port: ${project.devPort}). All sandbox tools now operate in this directory.`
+    }
+
+    case 'list_projects': {
+      const { listSandboxProjects } = await import('./sandbox.ts')
+      const projects = await listSandboxProjects(ctx.db, ctx.teamId)
+      if (projects.length === 0) return 'No sandbox projects found for this team. Use create_project to create one.'
+      return projects.map(p => {
+        const parts = [`- **${p.name}** (id: ${p.id})`]
+        parts.push(`  Dir: ${p.directory}`)
+        if (p.framework) parts.push(`  Framework: ${p.framework}`)
+        if (p.devPort) parts.push(`  Port: ${p.devPort}`)
+        if (p.previewUrl) parts.push(`  Preview: ${p.previewUrl}`)
+        return parts.join('\n')
+      }).join('\n')
     }
 
     // ---- Compound tools — batch operations to save credits ----
@@ -1727,6 +1828,9 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
             continue
           }
         }
+        // Dedup check
+        const dupWarning = await checkForDuplicateTask(ctx.db, ctx.teamId, t.title as string)
+        if (dupWarning) { results.push(`Skipped "${t.title}": ${dupWarning}`); continue }
         // Validate assignedAgentId
         let targetAgentId = (t.assignedAgentId as string) ?? ctx.agentId
         if (targetAgentId === ctx.agentId && callerAgent?.templateId === 'advisor-bot') {
@@ -1747,6 +1851,7 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           assignedAgentId: targetAgentId,
           assignedUserId: t.assignedUserId as string | undefined,
           deadline: t.deadline as string | undefined,
+          sandboxProjectId: t.projectId as string | undefined,
         })
         // Apply tags if provided
         const tagNames = Array.isArray(t.tags) ? (t.tags as string[]).filter(Boolean) : []
@@ -1755,19 +1860,15 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
           const tags = await applyTagsByName(ctx.db, ctx.teamId, tagNames, 'task', task.id)
           appliedTags = tags.map((tg) => tg.name)
         }
-        // Auto-create task thread (best-effort)
+        // Post to team channel (no more task threads)
         try {
-          const thread = await getTaskThread(ctx.db, task.id, ctx.teamId)
-          const parts = [`**${task.title}**`]
-          if (task.description) parts.push(task.description)
-          parts.push(`Priority: ${task.priority}`)
-          if (task.deadline) parts.push(`Deadline: ${task.deadline}`)
-          if (appliedTags.length > 0) parts.push(`Tags: ${appliedTags.join(', ')}`)
-          parts.push(`Status: ${task.status}`)
-          await sendMessage(ctx.db, thread.id, 'agent', ctx.agentId, parts.join('\n'), undefined, ctx.teamId)
+          const teamChannel = await getTeamChannel(ctx.db, ctx.teamId)
+          await sendMessage(ctx.db, teamChannel.id, 'agent', ctx.agentId,
+            `@[${task.title}](task:${task.id}) — Created (${task.priority})`, task.id, ctx.teamId)
         } catch { /* best-effort */ }
         await logActivity(ctx.db, 'task_created', ctx.agentId, `Created task: ${task.title}`, undefined, ctx.teamId)
-        results.push(`Created "${task.title}" (id: ${task.id}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${appliedTags.length ? `, tags: ${appliedTags.join(', ')}` : ''})`)
+        const shortRef = task.shortId ? ` TASK-${task.shortId}` : ''
+        results.push(`Created "${task.title}" (id: ${task.id}${shortRef}, priority: ${task.priority}${task.deadline ? `, deadline: ${task.deadline}` : ''}${appliedTags.length ? `, tags: ${appliedTags.join(', ')}` : ''})`)
         created++
       }
       return `${created}/${tasks.length} tasks created:\n${results.join('\n')}`
@@ -2233,7 +2334,7 @@ export async function runReactLoop(
     })
   }
 
-  const toolCtx: ToolContext = { db, agentId, teamId, channelId, skillsDir, skipCredits: config.skipCredits, currentTaskId: config.currentTaskId, tools, onFileWritten: config.onFileWritten }
+  const toolCtx: ToolContext = { db, agentId, teamId, channelId, skillsDir, skipCredits: config.skipCredits, currentTaskId: config.currentTaskId, tools, onFileWritten: config.onFileWritten, sandboxProjectDir: config.sandboxProjectDir, sandboxProjectId: config.sandboxProjectId }
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
   let consecutiveNoToolIterations = 0 // Track iterations without real tool calls (only think/text)

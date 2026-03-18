@@ -89,6 +89,8 @@ const SQLITE_DDL = `
     assigned_user_id TEXT,
     parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     deadline TEXT,
+    sandbox_project_id TEXT,
+    short_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -98,6 +100,23 @@ const SQLITE_DDL = `
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     depends_on TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     PRIMARY KEY (task_id, depends_on)
+  );
+
+  -- Sandbox projects (per-project isolation in Daytona sandbox)
+  CREATE TABLE IF NOT EXISTS sandbox_projects (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    framework TEXT,
+    dev_port INTEGER,
+    startup_command TEXT,
+    preview_url TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(team_id, slug)
   );
 
   -- Chat messages (built-in chat: DMs, task threads, group channels)
@@ -698,6 +717,8 @@ const POSTGRES_DDL = `
     assigned_user_id TEXT,
     parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     deadline TEXT,
+    sandbox_project_id TEXT,
+    short_id INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -708,6 +729,24 @@ const POSTGRES_DDL = `
     depends_on TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     PRIMARY KEY (task_id, depends_on)
   );
+
+  -- Sandbox projects (per-project isolation in Daytona sandbox)
+  CREATE TABLE IF NOT EXISTS sandbox_projects (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    directory TEXT NOT NULL,
+    framework TEXT,
+    dev_port INTEGER,
+    startup_command TEXT,
+    preview_url TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(team_id, slug)
+  );
+  ALTER TABLE sandbox_projects ENABLE ROW LEVEL SECURITY;
 
   -- Chat messages
   CREATE TABLE IF NOT EXISTS chat_messages (

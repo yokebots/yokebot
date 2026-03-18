@@ -155,9 +155,13 @@ async function handleUpgrade(
   // 3. Verify session exists
   const session = getSessionInfo(sessionId)
   if (!session) {
-    console.log(`[browser-stream] Session ${sessionId} not found`)
-    socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
-    socket.destroy()
+    console.log(`[browser-stream] Session ${sessionId} not found — upgrading to send error`)
+    // Upgrade the connection so the client gets a proper error message
+    // (raw 404 on socket is invisible to the browser WebSocket API)
+    wss.handleUpgrade(req, socket, head, (clientWs) => {
+      sendToClient(clientWs, { type: 'error', message: 'Browser session has ended', code: 'SESSION_NOT_FOUND' })
+      clientWs.close(4004, 'Session not found')
+    })
     return
   }
 
@@ -225,7 +229,9 @@ async function startStreamProxy(
   let pageTargetId: string
   try {
     pageTargetId = await getPageTargetId(cdpWsUrl)
+    console.log(`[browser-stream] Found page target: ${pageTargetId}`)
   } catch (err) {
+    console.log(`[browser-stream] Failed to find page target: ${(err as Error).message}`)
     sendToClient(clientWs, { type: 'error', message: `Failed to find page target: ${(err as Error).message}` })
     clientWs.close()
     return
@@ -236,6 +242,8 @@ async function startStreamProxy(
   const cdpWs = new WebSocket(cdpWsUrl)
   const pendingCallbacks = new Map<number, (result: unknown) => void>()
   let cdpSessionId: string | undefined // CDP session ID for the attached page target
+  let frameCount = 0
+  let cdpEventCount = 0
 
   // Wait for CDP connection
   await new Promise<void>((resolve, reject) => {
@@ -287,6 +295,8 @@ async function startStreamProxy(
       // When using flatten: true, events come with a sessionId field
       if (msg.method === 'Page.screencastFrame') {
         const { data: frameData, metadata, sessionId: frameSessionId } = msg.params
+        if (frameCount === 0) console.log(`[browser-stream] First screencast frame received for ${sessionId} (${(frameData as string)?.length ?? 0} bytes)`)
+        frameCount++
         sendToClient(clientWs, {
           type: 'frame',
           data: frameData,
@@ -313,6 +323,11 @@ async function startStreamProxy(
       if (msg.method === 'Target.targetCreated' && msg.params?.targetInfo?.type === 'page') {
         pageTargetId = msg.params.targetInfo.targetId
       }
+      // Log other CDP events for debugging (first 5 only)
+      if (msg.method && cdpEventCount < 5) {
+        cdpEventCount++
+        console.log(`[browser-stream] CDP event: ${msg.method}`)
+      }
     } catch { /* ignore parse errors */ }
   })
 
@@ -324,9 +339,11 @@ async function startStreamProxy(
     }) as { sessionId?: string } | undefined
     cdpSessionId = result?.sessionId
     if (!cdpSessionId) {
+      console.log(`[browser-stream] Failed to attach to page target ${pageTargetId} — no session ID returned`)
       sendToClient(clientWs, { type: 'error', message: 'Failed to attach to page target' })
       return
     }
+    console.log(`[browser-stream] Attached to page target ${pageTargetId}, CDP session: ${cdpSessionId}`)
 
     // Enable page events and start screencast on the attached session
     cdpSendToPage('Page.enable', {})
@@ -337,6 +354,7 @@ async function startStreamProxy(
       maxHeight: 800,
       everyNthFrame: 1,
     })
+    console.log(`[browser-stream] Screencast started for session ${sessionId}`)
   }
 
   // Re-attach after cross-origin navigation

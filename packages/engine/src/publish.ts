@@ -195,8 +195,16 @@ async function updateAppStatus(db: Db, appId: string, status: PublishStatus, ext
 export async function publishStatic(
   db: Db,
   teamId: string,
-  opts: { appName: string; displayName: string; subdomain: string; createdBy: string | null },
+  opts: { appName: string; displayName: string; subdomain: string; createdBy: string | null; sandboxProjectId?: string },
 ): Promise<PublishedApp> {
+  // Resolve project directory from sandbox_project_id if provided
+  let projectDir = '/home/daytona/app'
+  if (opts.sandboxProjectId) {
+    const { getSandboxProject } = await import('./sandbox.ts')
+    const project = await getSandboxProject(db, opts.sandboxProjectId)
+    if (project) projectDir = project.directory
+  }
+
   const app = await createPublishedAppRecord(db, {
     ...opts,
     teamId,
@@ -208,16 +216,16 @@ export async function publishStatic(
     const { execCommand, sandboxListFiles, sandboxReadFile } = await import('./sandbox.ts')
 
     // Build the app
-    console.log(`[publish] Building static app "${app.subdomain}" for team ${teamId}`)
-    const buildResult = await execCommand(db, teamId, 'cd /app && npm run build', '/app')
+    console.log(`[publish] Building static app "${app.subdomain}" for team ${teamId} from ${projectDir}`)
+    const buildResult = await execCommand(db, teamId, `cd ${projectDir} && npm run build`, projectDir)
     if (buildResult.exitCode !== 0) {
       throw new Error(`Build failed: ${buildResult.stderr || buildResult.stdout}`)
     }
 
     // Find the dist directory
-    const distFiles = await collectFiles(db, teamId, '/app/dist')
+    const distFiles = await collectFiles(db, teamId, `${projectDir}/dist`)
     if (distFiles.length === 0) {
-      throw new Error('Build produced no output files in /app/dist')
+      throw new Error(`Build produced no output files in ${projectDir}/dist`)
     }
 
     // Upload to R2
@@ -228,7 +236,7 @@ export async function publishStatic(
     console.log(`[publish] Uploading ${distFiles.length} files to R2: ${prefix}/`)
     for (const file of distFiles) {
       const content = await sandboxReadFile(db, teamId, file.path)
-      const key = `${prefix}${file.path.replace('/app/dist', '')}`
+      const key = `${prefix}${file.path.replace(`${projectDir}/dist`, '')}`
       await r2.send(new PutObjectCommand({
         Bucket: bucket,
         Key: key,
@@ -263,9 +271,17 @@ export async function publishStatic(
 export async function publishCustomDomain(
   db: Db,
   teamId: string,
-  opts: { appName: string; displayName: string; subdomain: string; customDomain: string; createdBy: string | null },
+  opts: { appName: string; displayName: string; subdomain: string; customDomain: string; createdBy: string | null; sandboxProjectId?: string },
 ): Promise<PublishedApp> {
   if (!opts.customDomain) throw new Error('Custom domain is required for this hosting type')
+
+  // Resolve project directory
+  let projectDir = '/home/daytona/app'
+  if (opts.sandboxProjectId) {
+    const { getSandboxProject } = await import('./sandbox.ts')
+    const project = await getSandboxProject(db, opts.sandboxProjectId)
+    if (project) projectDir = project.directory
+  }
 
   const app = await createPublishedAppRecord(db, {
     ...opts,
@@ -277,16 +293,16 @@ export async function publishCustomDomain(
     const { execCommand, sandboxReadFile } = await import('./sandbox.ts')
 
     // Build the app
-    console.log(`[publish] Building custom-domain app "${opts.customDomain}" for team ${teamId}`)
-    const buildResult = await execCommand(db, teamId, 'cd /app && npm run build', '/app')
+    console.log(`[publish] Building custom-domain app "${opts.customDomain}" for team ${teamId} from ${projectDir}`)
+    const buildResult = await execCommand(db, teamId, `cd ${projectDir} && npm run build`, projectDir)
     if (buildResult.exitCode !== 0) {
       throw new Error(`Build failed: ${buildResult.stderr || buildResult.stdout}`)
     }
 
     // Collect and upload dist files to R2
-    const distFiles = await collectFiles(db, teamId, '/app/dist')
+    const distFiles = await collectFiles(db, teamId, `${projectDir}/dist`)
     if (distFiles.length === 0) {
-      throw new Error('Build produced no output files in /app/dist')
+      throw new Error(`Build produced no output files in ${projectDir}/dist`)
     }
 
     const r2 = getR2()
@@ -296,7 +312,7 @@ export async function publishCustomDomain(
     console.log(`[publish] Uploading ${distFiles.length} files to R2: ${prefix}/`)
     for (const file of distFiles) {
       const content = await sandboxReadFile(db, teamId, file.path)
-      const key = `${prefix}${file.path.replace('/app/dist', '')}`
+      const key = `${prefix}${file.path.replace(`${projectDir}/dist`, '')}`
       await r2.send(new PutObjectCommand({
         Bucket: bucket,
         Key: key,
@@ -403,8 +419,16 @@ async function collectFiles(
 export async function publishDynamic(
   db: Db,
   teamId: string,
-  opts: { appName: string; displayName: string; subdomain: string; customDomain?: string; createdBy: string | null },
+  opts: { appName: string; displayName: string; subdomain: string; customDomain?: string; createdBy: string | null; sandboxProjectId?: string },
 ): Promise<PublishedApp> {
+  // Resolve project directory
+  let projectDir = '/home/daytona/app'
+  if (opts.sandboxProjectId) {
+    const { getSandboxProject } = await import('./sandbox.ts')
+    const project = await getSandboxProject(db, opts.sandboxProjectId)
+    if (project) projectDir = project.directory
+  }
+
   const app = await createPublishedAppRecord(db, {
     ...opts,
     teamId,
@@ -415,8 +439,8 @@ export async function publishDynamic(
     const { execCommand } = await import('./sandbox.ts')
 
     // Build the app first to validate it compiles
-    console.log(`[publish] Building dynamic app "${app.subdomain}" for team ${teamId}`)
-    const buildResult = await execCommand(db, teamId, 'cd /app && npm run build', '/app')
+    console.log(`[publish] Building dynamic app "${app.subdomain}" for team ${teamId} from ${projectDir}`)
+    const buildResult = await execCommand(db, teamId, `cd ${projectDir} && npm run build`, projectDir)
 
     // Create Railway project
     console.log(`[publish] Creating Railway project for "${app.subdomain}"`)
@@ -534,7 +558,7 @@ export async function publishDynamic(
 
     // Create a Dockerfile in the sandbox for Railway deployment
     const { sandboxWriteFile } = await import('./sandbox.ts')
-    await sandboxWriteFile(db, teamId, '/app/Dockerfile', [
+    await sandboxWriteFile(db, teamId, `${projectDir}/Dockerfile`, [
       'FROM node:20-slim',
       'WORKDIR /app',
       'COPY package*.json ./',
@@ -548,7 +572,7 @@ export async function publishDynamic(
     // Trigger deployment via Railway service domain (Railway auto-deploys when code is pushed)
     // For now, we set up the project + service + domain. The actual deployment trigger
     // uses Railway's deployment API with the source code from the sandbox.
-    const deployResult = await triggerRailwayDeploy(db, teamId, project.id, service.id, envId)
+    const deployResult = await triggerRailwayDeploy(db, teamId, project.id, service.id, envId, projectDir)
 
     const publishedUrl = opts.customDomain
       ? `https://${opts.customDomain}`
@@ -575,12 +599,12 @@ export async function publishDynamic(
 
 /** Trigger a Railway deployment by uploading source code from the sandbox */
 async function triggerRailwayDeploy(
-  db: Db, teamId: string, projectId: string, serviceId: string, envId: string,
+  db: Db, teamId: string, projectId: string, serviceId: string, envId: string, sourceDir = '/home/daytona/app',
 ): Promise<string> {
   const { execCommand } = await import('./sandbox.ts')
 
   // Create a tarball of the app
-  const tarResult = await execCommand(db, teamId, 'cd /app && tar czf /tmp/deploy.tar.gz --exclude=node_modules --exclude=.git .', '/app')
+  const tarResult = await execCommand(db, teamId, `cd ${sourceDir} && tar czf /tmp/deploy.tar.gz --exclude=node_modules --exclude=.git .`, sourceDir)
   if (tarResult.exitCode !== 0) {
     throw new Error(`Failed to create deployment archive: ${tarResult.stderr}`)
   }

@@ -704,23 +704,25 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
   return actionable
 }
 
-/** Build a task-focused user prompt with full context (subtasks, thread). */
-async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMode = true, templateId?: string): Promise<string> {
+/** Build a task-focused user prompt with full context (subtasks, team chat messages for this task). */
+async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMode = true, templateId?: string, sandboxProjectDir?: string): Promise<string> {
   const subtasks = await getSubtasks(db, task.id)
   const subtaskLines = subtasks.length > 0
     ? subtasks.map(s => `  - [${s.status}] ${s.title} (${s.id})`).join('\n')
     : '  (none)'
 
-  // Get recent thread messages for context
+  // Get recent messages about this task from team channel (not task thread)
   let threadContext = ''
   try {
-    const thread = await getTaskThread(db, task.id, teamId)
-    const messages = await getChannelMessages(db, thread.id, 5)
-    if (messages.length > 0) {
-      threadContext = '\n\nRecent thread messages:\n' +
-        messages.map(m => `  [${m.senderType}] ${m.content.slice(0, 300)}`).join('\n')
+    const teamChannel = await getTeamChannel(db, teamId)
+    const messages = await getChannelMessages(db, teamChannel.id, 50)
+    // Filter to messages tagged with this task's ID
+    const taskMessages = messages.filter(m => m.taskId === task.id).slice(-5)
+    if (taskMessages.length > 0) {
+      threadContext = '\n\nRecent task messages:\n' +
+        taskMessages.map(m => `  [${m.senderType}] ${m.content.slice(0, 300)}`).join('\n')
     }
-  } catch { /* no thread yet */ }
+  } catch { /* no messages yet */ }
 
   // Check for recently resolved approvals linked to this task
   let approvalContext = ''
@@ -760,6 +762,24 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMo
     `**You MUST call sandbox_setup or sandbox_write_file before responding.** If you respond without writing any code, you have FAILED the task. Research alone is NOT a deliverable — a working app is. Do NOT visit external sites (design blogs, tutorials, etc.) — you already know how to code. Focus on the TARGET site only, then BUILD.`,
   ] : []
 
+  // Sandbox project context
+  let projectContext = ''
+  if (sandboxProjectDir) {
+    projectContext = `\n## Sandbox Project\nThis task's code lives at: \`${sandboxProjectDir}\`\nAll sandbox tools operate in this directory. You CANNOT access files outside this directory.\n`
+  }
+
+  // List team projects for context
+  let projectListContext = ''
+  try {
+    const { listSandboxProjects } = await import('./sandbox.ts')
+    const projects = await listSandboxProjects(db, teamId)
+    if (projects.length > 0) {
+      projectListContext = `\n## Team Projects\n${projects.map(p => `- ${p.name} (${p.slug}, dir: ${p.directory}${p.previewUrl ? `, preview: ${p.previewUrl}` : ''})`).join('\n')}\n`
+    }
+  } catch { /* best-effort */ }
+
+  const shortRef = task.shortId ? ` (TASK-${task.shortId})` : ''
+
   return [
     `You are sprinting on a task. Focus ALL your effort on making progress.`,
     ``,
@@ -767,13 +787,15 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMo
     ...builderOverride,
     ``,
     `## Current Task`,
-    `Title: ${task.title}`,
+    `Title: ${task.title}${shortRef}`,
     `ID: ${task.id}`,
     `Status: ${task.status}`,
     `Priority: ${task.priority}${deadlineStr}`,
     task.description ? `\nDescription:\n${task.description}` : '',
     approvalContext,
     scratchpadSection,
+    projectContext,
+    projectListContext,
     `## Subtasks`,
     subtaskLines,
     threadContext,
@@ -787,8 +809,11 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMo
     `6. Before finishing your work, use update_scratchpad to save notes about what you tried, what worked/failed, and what to do next time.`,
     `7. For complex tasks requiring many steps, break the work into subtasks using add_subtask. Each subtask gets its own fresh sprint with full context — this is more effective than trying to do everything in one long session.`,
     `8. If you created subtasks, do NOT mark the parent as "done" until all subtasks are complete. Check their status first.`,
+    `9. Before creating a task, ALWAYS check if a similar one exists using list_tasks.`,
+    `10. When discussing tasks in chat, reference them as @[Task Title](task:{id}) so they render as clickable links.`,
+    `11. If the user's request could apply to multiple projects, STOP and ask which project they mean. List the options. Never guess — wrong project = wasted work and credits.`,
     ...(planMode ? [
-      `9. **PLAN MODE is ON.** Before doing any work, estimate the total credit cost and set it on this task using update_task with estimatedCredits. Then use request_approval with a cost breakdown (e.g. "~7 iterations × 20 credits + render_video 50 credits = ~190 credits") so the human can approve before you spend credits. Do NOT proceed with expensive work until approved.`,
+      `12. **PLAN MODE is ON.** Before doing any work, estimate the total credit cost and set it on this task using update_task with estimatedCredits. Then use request_approval with a cost breakdown (e.g. "~7 iterations × 20 credits + render_video 50 credits = ~190 credits") so the human can approve before you spend credits. Do NOT proceed with expensive work until approved.`,
     ] : []),
   ].join('\n')
 }
@@ -1103,8 +1128,21 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               }
             }
           } else {
-            // ---- Standard single-model flow (unchanged) ----
-            const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode, agent.templateId ?? undefined)
+            // ---- Standard single-model flow ----
+            // Resolve sandbox project directory from task → project link
+            let sandboxProjectDir: string | undefined
+            let sandboxProjectId: string | undefined
+            if (task.sandboxProjectId) {
+              try {
+                const { getSandboxProject } = await import('./sandbox.ts')
+                const project = await getSandboxProject(db, task.sandboxProjectId)
+                if (project) {
+                  sandboxProjectDir = project.directory
+                  sandboxProjectId = project.id
+                }
+              } catch { /* best-effort */ }
+            }
+            const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode, agent.templateId ?? undefined, sandboxProjectDir)
             const taskBoosts = detectTaskCategories(task.title, task.description)
             const runtimeConfig = {
               maxIterations: remainingBudget,
@@ -1113,6 +1151,8 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               onFileWritten: broadcastFileWritten,
               skipCredits: HOSTED_MODE && costPerIteration > 0, // credits already reserved
               extraToolCategories: taskBoosts.length > 0 ? taskBoosts : undefined,
+              sandboxProjectDir,
+              sandboxProjectId,
             }
 
             const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
@@ -1160,17 +1200,9 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
             && (cleanResponse.trim().startsWith('{') || cleanResponse.trim().startsWith('```'))
             && cleanResponse.includes('"assessment"')
 
-          // Post sprint result to the task thread (skip no-ops and JSON dumps)
-          try {
-            const thread = await getTaskThread(db, task.id, agent.teamId)
-            if (!isNoOpResponse && !looksLikeJsonDump) {
-              await sendMessage(db, thread.id, 'agent', agent.id, cleanResponse!, task.id, agent.teamId)
-            }
-          } catch { /* thread post is best-effort */ }
-
           const status = result.taskCompleted ? 'DONE' : result.taskBlocked ? 'BLOCKED' : 'continuing'
 
-          // Cross-post brief summary to team channel (skip no-ops and JSON dumps)
+          // Post sprint result to team channel (all discussion lives here now)
           if (!isNoOpResponse && !looksLikeJsonDump) {
             try {
               const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'
@@ -1218,7 +1250,17 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
                 )
                 result = { iterations: routedResult.totalIterations, response: routedResult.response, taskCompleted: routedResult.taskCompleted, taskBlocked: routedResult.taskBlocked }
               } else {
-                const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode, agent.templateId ?? undefined)
+                // Resolve sandbox project for subtask too
+                let subSandboxProjectDir: string | undefined
+                let subSandboxProjectId: string | undefined
+                if (task.sandboxProjectId) {
+                  try {
+                    const { getSandboxProject } = await import('./sandbox.ts')
+                    const project = await getSandboxProject(db, task.sandboxProjectId)
+                    if (project) { subSandboxProjectDir = project.directory; subSandboxProjectId = project.id }
+                  } catch { /* best-effort */ }
+                }
+                const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode, agent.templateId ?? undefined, subSandboxProjectDir)
                 const taskBoosts = detectTaskCategories(task.title, task.description)
                 const runtimeConfig = {
                   maxIterations: remainingBudget,
@@ -1227,6 +1269,8 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
                   onFileWritten: broadcastFileWritten,
                   skipCredits: HOSTED_MODE && costPerIteration > 0,
                   extraToolCategories: taskBoosts.length > 0 ? taskBoosts : undefined,
+                  sandboxProjectDir: subSandboxProjectDir,
+                  sandboxProjectId: subSandboxProjectId,
                 }
 
                 const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
@@ -1261,13 +1305,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               const isNoOpResponse = !cleanResponse || cleanResponse.includes('[no-op]') || cleanResponse.trim() === 'no-op' || cleanResponse.trim().length === 0
               const looksLikeJsonDump = cleanResponse && (cleanResponse.trim().startsWith('{') || cleanResponse.trim().startsWith('```')) && cleanResponse.includes('"assessment"')
 
-              try {
-                const thread = await getTaskThread(db, task.id, agent.teamId)
-                if (!isNoOpResponse && !looksLikeJsonDump) {
-                  await sendMessage(db, thread.id, 'agent', agent.id, cleanResponse!, task.id, agent.teamId)
-                }
-              } catch { /* best-effort */ }
-
+              // Post sprint result to team channel (all discussion lives here now)
               if (!isNoOpResponse && !looksLikeJsonDump) {
                 try {
                   const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'

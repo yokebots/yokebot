@@ -1430,7 +1430,7 @@ async function main() {
 
             // Quick LLM call to pick the best agent
             const agentList = available.map((a, i) => `${i + 1}. ${a.name} — ${a.department ?? 'general'}`).join('\n')
-            const routerModel = await resolveModelConfig(db, 'gemma-3-27b')
+            const routerModel = await resolveModelConfig(db, 'qwen-3.5-9b')
             const result = await chatCompletion(routerModel, [
               { role: 'system', content: 'You are a routing assistant. Given a user message and a list of agents, reply with ONLY the number of the most relevant agent. Nothing else.' },
               { role: 'user', content: `Agents:\n${agentList}\n\nMessage: "${content.slice(0, 300)}"\n\nWhich agent number should respond?` },
@@ -2738,6 +2738,61 @@ async function main() {
       const { importProject } = await import('./sandbox.ts')
       const result = await importProject(db, teamId, repoUrl)
       res.json(result)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  // ===== Sandbox Projects =====
+
+  app.get('/api/sandbox/projects', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { listSandboxProjects } = await import('./sandbox.ts')
+      const projects = await listSandboxProjects(db, teamId)
+      res.json(projects)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.post('/api/sandbox/projects', async (req, res) => {
+    if (!requireRole(req, res, 'member')) return
+    const teamId = req.user!.activeTeamId!
+    const { name, framework } = req.body as { name: string; framework?: string }
+    if (!name) return res.status(400).json({ error: 'name is required' })
+    try {
+      const { createSandboxProject } = await import('./sandbox.ts')
+      const project = await createSandboxProject(db, teamId, name, { framework })
+      res.status(201).json(project)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/sandbox/projects/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { getSandboxProject } = await import('./sandbox.ts')
+      const project = await getSandboxProject(db, req.params.id)
+      if (!project) return res.status(404).json({ error: 'Project not found' })
+      if (project.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+      res.json(project)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.get('/api/sandbox/projects/:id/files', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { getSandboxProject, sandboxListFiles } = await import('./sandbox.ts')
+      const project = await getSandboxProject(db, req.params.id)
+      if (!project) return res.status(404).json({ error: 'Project not found' })
+      if (project.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+      const dir = (req.query.dir as string) || project.directory
+      const files = await sandboxListFiles(db, teamId, dir)
+      res.json(files)
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }

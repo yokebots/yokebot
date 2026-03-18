@@ -223,6 +223,19 @@ export async function getTeamChannel(db: Db, teamId: string): Promise<ChatChanne
   return createChannel(db, teamId, 'Team Chat', 'team')
 }
 
+/** Get messages for a specific task from the team channel (filtered by task_id). */
+export async function getMessagesByTaskId(db: Db, teamId: string, taskId: string, limit = 50): Promise<ChatMessage[]> {
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT m.*, 0 AS reply_count, NULL AS latest_reply_at
+     FROM chat_messages m
+     JOIN chat_channels c ON c.id = m.channel_id AND c.team_id = $1 AND c.type = 'team'
+     WHERE m.task_id = $2
+     ORDER BY m.id DESC LIMIT $3`,
+    [teamId, taskId, limit],
+  )
+  return rows.map(rowToMessage).reverse()
+}
+
 // ---- Search ----
 
 export interface ChatSearchResult {
