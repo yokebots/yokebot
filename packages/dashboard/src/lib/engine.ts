@@ -1938,17 +1938,11 @@ export async function getAgentBrowserScreenshot(agentId: string): Promise<{ scre
 
 /** Build a WebSocket URL for CDP Screencast streaming. */
 export async function getBrowserStreamUrl(sessionId: string): Promise<string> {
-  // Force token refresh — getSession() returns a cached token that may be expired,
-  // causing the WebSocket upgrade to fail with 401 and showing a blank browser viewer.
-  let token = ''
-  try {
-    const { data: refreshData } = await supabase.auth.refreshSession()
-    token = refreshData.session?.access_token ?? ''
-  } catch { /* fall through to cached session */ }
-  if (!token) {
-    const { data } = await supabase.auth.getSession()
-    token = data.session?.access_token ?? ''
-  }
+  // Use the same token source as all other API calls.
+  // Previously this tried refreshSession() which fails in many scenarios
+  // (e.g. expired refresh token, test users, stale Supabase client state),
+  // resulting in an empty token and a blank browser viewer.
+  const token = await getToken() ?? ''
   const wsBase = ENGINE_URL.replace(/^http/, 'ws')
   return `${wsBase}/api/browser-sessions/${sessionId}/stream?token=${encodeURIComponent(token)}`
 }
