@@ -278,7 +278,15 @@ export async function executeBrowserTool(
       }
 
       case 'browser_press_key': {
-        const key = (args.key as string) ?? ''
+        const rawKey = (args.key as string) ?? ''
+        // Normalize common key casing: models send "pagedown" but Playwright expects "PageDown"
+        const keyMap: Record<string, string> = {
+          pagedown: 'PageDown', pageup: 'PageUp', arrowdown: 'ArrowDown', arrowup: 'ArrowUp',
+          arrowleft: 'ArrowLeft', arrowright: 'ArrowRight', enter: 'Enter', escape: 'Escape',
+          tab: 'Tab', backspace: 'Backspace', delete: 'Delete', home: 'Home', end: 'End',
+          space: ' ', ' ': ' ',
+        }
+        const key = keyMap[rawKey.toLowerCase()] ?? rawKey
         await page.keyboard.press(key)
         output = `Pressed "${key}"`
         // Auto-include updated page snapshot after key press (Enter/Tab can change page state)
@@ -413,13 +421,18 @@ async function capturePageSnapshot(session: BrowserSessionState): Promise<string
  * Tries multiple strategies: getByRole, getByText, CSS selector.
  */
 async function clickByRef(page: import('playwright').Page, ref: string): Promise<void> {
-  // Parse bracket notation from accessibility tree: [role "name"] or [role "name" value="val"]
+  // Parse bracket notation from accessibility tree: [role "name"] or role "name" (without brackets)
   let parsedName = ref
   let parsedRole: string | undefined
-  const bracketMatch = ref.match(/^\[(\w+)\s+"([^"]+)"/)
+  const bracketMatch = ref.match(/^\[?(\w+)\s+"([^"]+)"/)
   if (bracketMatch) {
-    parsedRole = bracketMatch[1].toLowerCase()
-    parsedName = bracketMatch[2]
+    const candidateRole = bracketMatch[1].toLowerCase()
+    // Only treat as role+name if the first word is a known accessibility role
+    const knownRoles = ['link', 'button', 'textbox', 'heading', 'menuitem', 'tab', 'checkbox', 'radio', 'combobox', 'search', 'navigation', 'img', 'list', 'listitem']
+    if (knownRoles.includes(candidateRole)) {
+      parsedRole = candidateRole
+      parsedName = bracketMatch[2]
+    }
   }
 
   // If we extracted a role, try role-aware matching first

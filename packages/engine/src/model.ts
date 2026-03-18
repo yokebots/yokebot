@@ -792,8 +792,9 @@ const yokebotAdapter: ToolFormatAdapter = {
   matches(modelId: string): boolean {
     const id = modelId.toLowerCase()
     // Models that need native tool format (don't support OpenAI tools reliably via proxy)
+    // NOTE: Nemotron removed — it uses Qwen3-Coder XML format natively, and DeepInfra/OpenRouter
+    // handle the translation via their tool parsers. Our JSON-in-tags format caused 36x duplicate spam.
     return id.includes('qwen3.5') || id.includes('qwen3-5')
-      || id.includes('nemotron')
       || id.includes('step-3')
   },
 

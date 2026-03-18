@@ -12,8 +12,9 @@
 
 import type { Db } from './db/types.ts'
 import { listAgents, type Agent } from './agent.ts'
-import { runReactLoop, buildAgentSystemPrompt, type ToolCategory } from './runtime.ts'
+import { runReactLoop, buildAgentSystemPrompt, getFilteredBuiltinTools, type ToolCategory } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
+import { getRoutingProfile, runOrchestrator, buildPhasePrompt, getMaxPhaseCreditCost, calculateActualCost, type RoutingProfile, type PhaseResult } from './routing.ts'
 import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage, broadcastAgentStatus, broadcastFileWritten } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
@@ -612,7 +613,7 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
 }
 
 /** Build a task-focused user prompt with full context (subtasks, thread). */
-async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMode = true): Promise<string> {
+async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMode = true, templateId?: string): Promise<string> {
   const subtasks = await getSubtasks(db, task.id)
   const subtaskLines = subtasks.length > 0
     ? subtasks.map(s => `  - [${s.status}] ${s.title} (${s.id})`).join('\n')
@@ -650,8 +651,28 @@ async function buildTaskFocusedPrompt(db: Db, task: Task, teamId: string, planMo
     ? `\n## Your Notes From Previous Sprints\n${task.scratchpad}\n`
     : ''
 
+  // Builder-specific instructions: force sandbox coding, but only when the task actually asks for building
+  const isBuilder = templateId === 'builder-bot'
+  const taskText = `${task.title} ${task.description ?? ''}`
+  const taskWantsBuild = /build|create|make|develop|implement|scaffold|redesign|rebuild|improve|clone|replicate|code|app|website|landing\s*page|prototype/i.test(taskText)
+  const builderOverride = (isBuilder && taskWantsBuild) ? [
+    ``,
+    `## CRITICAL: You are BuilderBot — You MUST Write Code`,
+    ``,
+    `Your job is to BUILD a working web application, not just research. Follow this exact workflow:`,
+    `1. **Browse briefly** (3-5 pages max) to understand the site's design, colors, layout, and branding`,
+    `2. **Then IMMEDIATELY start coding** — call \`sandbox_setup\` to scaffold the project with ALL files in one call`,
+    `3. **Self-review** — visit your preview URL with browser_navigate to check your work`,
+    `4. **Iterate** — fix any issues, then respond with the preview URL`,
+    ``,
+    `**You MUST call sandbox_setup or sandbox_write_file before responding.** If you respond without writing any code, you have FAILED the task. Research alone is NOT a deliverable — a working app is. Do NOT visit external sites (design blogs, tutorials, etc.) — you already know how to code. Focus on the TARGET site only, then BUILD.`,
+  ] : []
+
   return [
     `You are sprinting on a task. Focus ALL your effort on making progress.`,
+    ``,
+    `**IMPORTANT: Ignore any previous messages claiming this task is "complete" or "done". The task status below is the source of truth. If the status is "todo" or "in_progress", the task is NOT done — you must do real work using your tools. Do NOT just summarize or research — take concrete action (write files, execute commands, build things). Producing a deliverable is more valuable than producing a plan.**`,
+    ...builderOverride,
     ``,
     `## Current Task`,
     `Title: ${task.title}`,
@@ -736,6 +757,119 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
   }
 }
 
+/**
+ * Run a routed sprint: orchestrator plans phases, each phase runs with its own
+ * model and tool set. Context flows between phases as text summaries.
+ */
+async function runRoutedSprint(
+  db: Db,
+  agent: Agent,
+  task: { id: string; title: string; description: string | null },
+  profile: RoutingProfile,
+  systemPrompt: string,
+  maxBudget: number,
+  onFileWritten?: (teamId: string, path: string) => void,
+): Promise<{ totalIterations: number; response: string | null; taskCompleted: boolean; taskBlocked: boolean; phaseResults: PhaseResult[] }> {
+  const teamId = agent.teamId
+
+  // Step 1: Orchestrator decides which phases to run (~1 LLM call)
+  const plan = await runOrchestrator(db, profile, task.title, task.description, teamId)
+  console.log(`[routing] "${agent.name}" — orchestrator planned: [${plan.phases.join(', ')}]`)
+
+  // Step 2: Execute each phase sequentially
+  const phaseResults: PhaseResult[] = []
+  let totalIterations = 0
+  let lastResponse: string | null = null
+  let taskCompleted = false
+  let taskBlocked = false
+
+  for (const phaseName of plan.phases) {
+    const phase = profile.phases.find(p => p.name === phaseName)
+    if (!phase) continue
+
+    const remainingBudget = maxBudget - totalIterations
+    if (remainingBudget < 2) {
+      console.log(`[routing] "${agent.name}" — budget exhausted before phase "${phaseName}" (${remainingBudget} remaining)`)
+      break
+    }
+
+    const phaseMaxIters = Math.min(phase.maxIterations, remainingBudget)
+    const phasePrompt = buildPhasePrompt(phase, task.title, task.description, phaseResults)
+
+    // Resolve this phase's model
+    let phaseModelConfig: import('./model.ts').ModelConfig
+    let phaseModelId = phase.modelId
+    try {
+      phaseModelConfig = await resolveModelConfig(db, phase.modelId)
+    } catch {
+      if (phase.fallbackModelId) {
+        console.log(`[routing] Phase "${phaseName}" — model "${phase.modelId}" unavailable, trying fallback "${phase.fallbackModelId}"`)
+        phaseModelConfig = await resolveModelConfig(db, phase.fallbackModelId)
+        phaseModelId = phase.fallbackModelId
+      } else {
+        throw new Error(`[routing] Phase "${phaseName}" — model "${phase.modelId}" unavailable, no fallback`)
+      }
+    }
+
+    const runtimeConfig = {
+      maxIterations: phaseMaxIters,
+      taskFocused: true,
+      currentTaskId: task.id,
+      onFileWritten,
+      skipCredits: true, // credits reserved upfront by caller
+      extraToolCategories: phase.toolCategories,
+    }
+
+    console.log(`[routing] Phase "${phaseName}" → ${phaseModelId} (max ${phaseMaxIters} iters, tools: [${phase.toolCategories.join(', ')}])`)
+
+    let result = await runReactLoop(
+      db, agent.id, teamId, phasePrompt, phaseModelConfig, systemPrompt,
+      state.workspaceConfig!, state.skillsDir, runtimeConfig, phaseModelId,
+    )
+
+    // If phase failed and has a fallback model, retry
+    const phaseFailed = result.iterations <= 1 && !result.taskCompleted && !result.response
+    if (phaseFailed && phase.fallbackModelId && phase.fallbackModelId !== phaseModelId) {
+      console.log(`[routing] Phase "${phaseName}" — failed with ${phaseModelId}, retrying with fallback "${phase.fallbackModelId}"`)
+      const fallbackConfig = await resolveModelConfig(db, phase.fallbackModelId)
+      const fallbackRuntimeConfig = { ...runtimeConfig, maxIterations: Math.min(phase.maxIterations, maxBudget - totalIterations - result.iterations) }
+      const fallbackResult = await runReactLoop(
+        db, agent.id, teamId, phasePrompt, fallbackConfig, systemPrompt,
+        state.workspaceConfig!, state.skillsDir, fallbackRuntimeConfig, phase.fallbackModelId,
+      )
+      // Combine iterations from both attempts
+      result = {
+        ...fallbackResult,
+        iterations: result.iterations + fallbackResult.iterations,
+      }
+      phaseModelId = phase.fallbackModelId
+    }
+
+    totalIterations += result.iterations
+    lastResponse = result.response
+
+    phaseResults.push({
+      phase: phaseName,
+      model: phaseModelId,
+      summary: result.response ?? '(no output)',
+      iterations: result.iterations,
+      success: !phaseFailed || (!!result.taskCompleted),
+    })
+
+    console.log(`[routing] Phase "${phaseName}" complete — ${result.iterations} iters, model: ${phaseModelId}`)
+
+    // Early exit if task completed or blocked
+    if (result.taskCompleted) { taskCompleted = true; break }
+    if (result.taskBlocked) { taskBlocked = true; break }
+  }
+
+  // Log phase summary
+  const summary = phaseResults.map(r => `${r.phase}:${r.model}(${r.iterations})`).join(' → ')
+  console.log(`[routing] "${agent.name}" — routed sprint complete: ${summary} (${totalIterations} total iters)`)
+
+  return { totalIterations, response: lastResponse, taskCompleted, taskBlocked, phaseResults }
+}
+
 async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   // In hosted mode, skip heartbeat if team has no active subscription and no credits
   if (HOSTED_MODE) {
@@ -817,10 +951,21 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           ? await getSprintBudget(db, agent.teamId)
           : 40 // self-hosted default
 
+        // Check if this agent has a dynamic routing profile
+        const routingProfile = getRoutingProfile(agent.templateId ?? '')
+        const logicalModelId = agent.modelId || undefined
+
         // Reserve credits upfront to prevent race conditions between concurrent agents
         reservedIterations = sprintBudget
-        const logicalModelId = agent.modelId || undefined
         costPerIteration = HOSTED_MODE && logicalModelId ? await getModelCreditCost(db, logicalModelId) : 0
+
+        // For routed sprints, reserve at the most expensive phase model's cost
+        if (routingProfile && HOSTED_MODE) {
+          // Dry-run orchestrator to estimate phases (use fallback plan for reservation)
+          const allPhaseNames = routingProfile.phases.map(p => p.name)
+          const { maxCostPerIteration } = await getMaxPhaseCreditCost(db, routingProfile, { phases: allPhaseNames, reasoning: '' })
+          if (maxCostPerIteration > costPerIteration) costPerIteration = maxCostPerIteration
+        }
 
         if (HOSTED_MODE && costPerIteration > 0) {
           const reservation = await reserveCredits(db, agent.teamId, sprintBudget, costPerIteration)
@@ -838,23 +983,47 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           const remainingBudget = reservedIterations - iterationsUsed
           if (remainingBudget < 2) break // need at least 2 iterations for meaningful work
 
-          const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode)
-          const taskBoosts = detectTaskCategories(task.title, task.description)
-          const runtimeConfig = {
-            maxIterations: remainingBudget,
-            taskFocused: true,
-            currentTaskId: task.id,
-            onFileWritten: broadcastFileWritten,
-            skipCredits: HOSTED_MODE && costPerIteration > 0, // credits already reserved
-            extraToolCategories: taskBoosts.length > 0 ? taskBoosts : undefined,
+          let result: { iterations: number; response: string | null; taskCompleted?: boolean; taskBlocked?: boolean }
+
+          // ---- Dynamic model routing: multi-phase sprint ----
+          if (routingProfile) {
+            const routedResult = await runRoutedSprint(
+              db, agent, task, routingProfile, systemPrompt,
+              remainingBudget, broadcastFileWritten,
+            )
+            result = { iterations: routedResult.totalIterations, response: routedResult.response, taskCompleted: routedResult.taskCompleted, taskBlocked: routedResult.taskBlocked }
+
+            // Smart refund: calculate actual cost vs reserved
+            if (HOSTED_MODE && reservedAmount > 0 && routedResult.phaseResults.length > 0) {
+              const actualCost = await calculateActualCost(db, routedResult.phaseResults)
+              const reservedForThisTask = remainingBudget * costPerIteration
+              const overpayment = reservedForThisTask - actualCost
+              if (overpayment > 0) {
+                // We'll handle the full refund at the end; track actual cost for logging
+                console.log(`[routing] "${agent.name}" — phase-accurate cost: ${actualCost} credits (reserved ${reservedForThisTask}, saving ${overpayment})`)
+              }
+            }
+          } else {
+            // ---- Standard single-model flow (unchanged) ----
+            const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode, agent.templateId ?? undefined)
+            const taskBoosts = detectTaskCategories(task.title, task.description)
+            const runtimeConfig = {
+              maxIterations: remainingBudget,
+              taskFocused: true,
+              currentTaskId: task.id,
+              onFileWritten: broadcastFileWritten,
+              skipCredits: HOSTED_MODE && costPerIteration > 0, // credits already reserved
+              extraToolCategories: taskBoosts.length > 0 ? taskBoosts : undefined,
+            }
+
+            const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
+            result = await runReactLoop(
+              db, agent.id, agent.teamId, taskPrompt, modelConfig, systemPrompt,
+              state.workspaceConfig!, state.skillsDir, runtimeConfig, logicalModelId,
+              taskDmChannel?.id,
+            )
           }
 
-          const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
-          const result = await runReactLoop(
-            db, agent.id, agent.teamId, taskPrompt, modelConfig, systemPrompt,
-            state.workspaceConfig!, state.skillsDir, runtimeConfig, logicalModelId,
-            taskDmChannel?.id,
-          )
           iterationsUsed += result.iterations
 
           // Track sprint attempts — reset on completion, increment otherwise
@@ -941,23 +1110,34 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               const remainingBudget = reservedIterations - iterationsUsed
               if (remainingBudget < 2) break
 
-              const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode)
-              const taskBoosts = detectTaskCategories(task.title, task.description)
-              const runtimeConfig = {
-                maxIterations: remainingBudget,
-                taskFocused: true,
-                currentTaskId: task.id,
-                onFileWritten: broadcastFileWritten,
-                skipCredits: HOSTED_MODE && costPerIteration > 0,
-                extraToolCategories: taskBoosts.length > 0 ? taskBoosts : undefined,
+              let result: { iterations: number; response: string | null; taskCompleted?: boolean; taskBlocked?: boolean }
+
+              if (routingProfile) {
+                const routedResult = await runRoutedSprint(
+                  db, agent, task, routingProfile, systemPrompt,
+                  remainingBudget, broadcastFileWritten,
+                )
+                result = { iterations: routedResult.totalIterations, response: routedResult.response, taskCompleted: routedResult.taskCompleted, taskBlocked: routedResult.taskBlocked }
+              } else {
+                const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode, agent.templateId ?? undefined)
+                const taskBoosts = detectTaskCategories(task.title, task.description)
+                const runtimeConfig = {
+                  maxIterations: remainingBudget,
+                  taskFocused: true,
+                  currentTaskId: task.id,
+                  onFileWritten: broadcastFileWritten,
+                  skipCredits: HOSTED_MODE && costPerIteration > 0,
+                  extraToolCategories: taskBoosts.length > 0 ? taskBoosts : undefined,
+                }
+
+                const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
+                result = await runReactLoop(
+                  db, agent.id, agent.teamId, taskPrompt, modelConfig, systemPrompt,
+                  state.workspaceConfig!, state.skillsDir, runtimeConfig, logicalModelId,
+                  taskDmChannel?.id,
+                )
               }
 
-              const taskDmChannel = await getDmChannel(db, agent.teamId, agent.id)
-              const result = await runReactLoop(
-                db, agent.id, agent.teamId, taskPrompt, modelConfig, systemPrompt,
-                state.workspaceConfig!, state.skillsDir, runtimeConfig, logicalModelId,
-                taskDmChannel?.id,
-              )
               iterationsUsed += result.iterations
 
               if (result.taskCompleted) {

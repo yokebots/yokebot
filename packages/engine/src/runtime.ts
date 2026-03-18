@@ -2310,13 +2310,18 @@ export async function runReactLoop(
 
       // Broadcast the assistant's reasoning text (if any) before tool calls
       if (completion.content && completion.content.trim() && !wasNudged) {
-        const newReasoning = completion.content.slice(0, 500)
-        // Skip near-duplicate reasoning
-        const isDuplicate = lastReasoningText && newReasoning.length > 20 &&
-          lastReasoningText.startsWith(newReasoning.slice(0, Math.floor(newReasoning.length * 0.6)))
-        if (!isDuplicate) {
-          emitProgress('thinking', `Reasoning`, i + 1, newReasoning)
-          lastReasoningText = newReasoning
+        const trimmed = completion.content.trim()
+        // Skip raw JSON blobs — some models dump structured JSON as "thinking" noise
+        const looksLikeJson = trimmed.startsWith('{') && trimmed.endsWith('}')
+        if (!looksLikeJson) {
+          const newReasoning = completion.content.slice(0, 500)
+          // Skip near-duplicate reasoning
+          const isDuplicate = lastReasoningText && newReasoning.length > 20 &&
+            lastReasoningText.startsWith(newReasoning.slice(0, Math.floor(newReasoning.length * 0.6)))
+          if (!isDuplicate) {
+            emitProgress('thinking', `Reasoning`, i + 1, newReasoning)
+            lastReasoningText = newReasoning
+          }
         }
       }
       wasNudged = false
@@ -2422,6 +2427,21 @@ export async function runReactLoop(
               : 'Good progress! Keep exploring — click through more pages on the site before responding. You should visit at least 3-4 different pages to give a thorough analysis. Use browser_click to navigate to other sections.',
           })
           response = null // Reset so the loop continues
+          wasNudged = true
+          continue
+        }
+
+        // Builder agents MUST write code before responding — but only if the task asks for building
+        const sandboxToolCount = toolCallLog.filter(tc => tc.name.startsWith('sandbox_')).length
+        const isBuilderAgent = agentRow?.templateId === 'builder-bot'
+        const taskWantsBuild = /build|create|make|develop|implement|scaffold|redesign|rebuild|improve|clone|replicate|code|app|website|landing\s*page|prototype/i.test(userMessage)
+        if (isBuilderAgent && taskWantsBuild && sandboxToolCount === 0 && browserToolCount > 0 && i < config.maxIterations - 2) {
+          console.log(`[runtime] Builder agent tried to respond after ${browserToolCount} browser calls but 0 sandbox calls — nudging to build (iteration ${i + 1})`)
+          messages.push({
+            role: 'user',
+            content: 'STOP — you have NOT built anything yet. You browsed the site but never wrote any code. Your task is to BUILD a working web app, not just research. You MUST call sandbox_setup NOW to scaffold the project with all files (package.json, vite.config.ts, src/App.tsx, src/index.css, etc.) based on what you learned from browsing. Do NOT respond until you have a working preview URL. Start coding NOW.',
+          })
+          response = null
           wasNudged = true
           continue
         }
