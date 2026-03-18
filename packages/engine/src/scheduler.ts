@@ -893,6 +893,8 @@ async function runRoutedSprint(
   systemPrompt: string,
   maxBudget: number,
   onFileWritten?: (teamId: string, path: string) => void,
+  sandboxProjectDir?: string,
+  sandboxProjectId?: string,
 ): Promise<{ totalIterations: number; response: string | null; taskCompleted: boolean; taskBlocked: boolean; phaseResults: PhaseResult[] }> {
   const teamId = agent.teamId
 
@@ -942,6 +944,8 @@ async function runRoutedSprint(
       onFileWritten,
       skipCredits: true, // credits reserved upfront by caller
       restrictToolCategories: phase.toolCategories,
+      sandboxProjectDir,
+      sandboxProjectId,
     }
 
     console.log(`[routing] Phase "${phaseName}" → ${phaseModelId} (max ${phaseMaxIters} iters, tools: [${phase.toolCategories.join(', ')}])`)
@@ -1107,6 +1111,54 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           const remainingBudget = reservedIterations - iterationsUsed
           if (remainingBudget < 2) break // need at least 2 iterations for meaningful work
 
+          // Auto-set task status to in_progress when sprint starts
+          if (task.status === 'todo' || task.status === 'backlog') {
+            await db.run(`UPDATE tasks SET status = 'in_progress' WHERE id = $1`, [task.id])
+          }
+
+          // Resolve sandbox project directory from task → project link
+          // If task has no project, auto-create one from the task title (for builder agents)
+          let sandboxProjectDir: string | undefined
+          let sandboxProjectId: string | undefined
+          if (task.sandboxProjectId) {
+            try {
+              const { getSandboxProject } = await import('./sandbox.ts')
+              const project = await getSandboxProject(db, task.sandboxProjectId)
+              if (project) {
+                sandboxProjectDir = project.directory
+                sandboxProjectId = project.id
+              }
+            } catch { /* best-effort */ }
+          } else {
+            // Auto-create a sandbox project for tasks that involve building
+            // Check if this agent has sandbox capabilities (builder-bot, game-dev, etc.)
+            const sandboxTemplates = new Set(['builder-bot', 'game-dev', 'full-stack-dev', 'frontend-dev', 'backend-dev'])
+            const hasSandbox = sandboxTemplates.has(agent.templateId ?? '')
+            if (hasSandbox) {
+              try {
+                const { listSandboxProjects, createSandboxProject } = await import('./sandbox.ts')
+                const existing = await listSandboxProjects(db, agent.teamId)
+                if (existing.length === 0) {
+                  // No projects yet — create one from task title
+                  const projectName = task.title.replace(/\b(scaffold|build|create|set up|implement)\b/gi, '').trim() || task.title
+                  const project = await createSandboxProject(db, agent.teamId, projectName)
+                  sandboxProjectDir = project.directory
+                  sandboxProjectId = project.id
+                  await db.run(`UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2`, [project.id, task.id])
+                  console.log(`[scheduler] Auto-created sandbox project "${project.name}" for task "${task.title}"`)
+                } else if (existing.length === 1) {
+                  // Only one project — auto-link the task to it
+                  sandboxProjectDir = existing[0].directory
+                  sandboxProjectId = existing[0].id
+                  await db.run(`UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2`, [existing[0].id, task.id])
+                }
+                // If multiple projects exist, let the agent decide (don't auto-link)
+              } catch (err) {
+                console.error(`[scheduler] Auto-create project failed:`, err)
+              }
+            }
+          }
+
           let result: { iterations: number; response: string | null; taskCompleted?: boolean; taskBlocked?: boolean }
 
           // ---- Dynamic model routing: multi-phase sprint ----
@@ -1114,6 +1166,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
             const routedResult = await runRoutedSprint(
               db, agent, task, routingProfile, systemPrompt,
               remainingBudget, broadcastFileWritten,
+              sandboxProjectDir, sandboxProjectId,
             )
             result = { iterations: routedResult.totalIterations, response: routedResult.response, taskCompleted: routedResult.taskCompleted, taskBlocked: routedResult.taskBlocked }
 
@@ -1129,19 +1182,6 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
             }
           } else {
             // ---- Standard single-model flow ----
-            // Resolve sandbox project directory from task → project link
-            let sandboxProjectDir: string | undefined
-            let sandboxProjectId: string | undefined
-            if (task.sandboxProjectId) {
-              try {
-                const { getSandboxProject } = await import('./sandbox.ts')
-                const project = await getSandboxProject(db, task.sandboxProjectId)
-                if (project) {
-                  sandboxProjectDir = project.directory
-                  sandboxProjectId = project.id
-                }
-              } catch { /* best-effort */ }
-            }
             const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode, agent.templateId ?? undefined, sandboxProjectDir)
             const taskBoosts = detectTaskCategories(task.title, task.description)
             const runtimeConfig = {
@@ -1241,25 +1281,43 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               const remainingBudget = reservedIterations - iterationsUsed
               if (remainingBudget < 2) break
 
+              // Auto-set subtask status to in_progress
+              if (task.status === 'todo' || task.status === 'backlog') {
+                await db.run(`UPDATE tasks SET status = 'in_progress' WHERE id = $1`, [task.id])
+              }
+
+              // Resolve sandbox project for subtask
+              let subSandboxProjectDir: string | undefined
+              let subSandboxProjectId: string | undefined
+              if (task.sandboxProjectId) {
+                try {
+                  const { getSandboxProject } = await import('./sandbox.ts')
+                  const project = await getSandboxProject(db, task.sandboxProjectId)
+                  if (project) { subSandboxProjectDir = project.directory; subSandboxProjectId = project.id }
+                } catch { /* best-effort */ }
+              } else {
+                // Inherit project from parent tasks if available
+                try {
+                  const { listSandboxProjects } = await import('./sandbox.ts')
+                  const existing = await listSandboxProjects(db, agent.teamId)
+                  if (existing.length === 1) {
+                    subSandboxProjectDir = existing[0].directory
+                    subSandboxProjectId = existing[0].id
+                    await db.run(`UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2`, [existing[0].id, task.id])
+                  }
+                } catch { /* best-effort */ }
+              }
+
               let result: { iterations: number; response: string | null; taskCompleted?: boolean; taskBlocked?: boolean }
 
               if (routingProfile) {
                 const routedResult = await runRoutedSprint(
                   db, agent, task, routingProfile, systemPrompt,
                   remainingBudget, broadcastFileWritten,
+                  subSandboxProjectDir, subSandboxProjectId,
                 )
                 result = { iterations: routedResult.totalIterations, response: routedResult.response, taskCompleted: routedResult.taskCompleted, taskBlocked: routedResult.taskBlocked }
               } else {
-                // Resolve sandbox project for subtask too
-                let subSandboxProjectDir: string | undefined
-                let subSandboxProjectId: string | undefined
-                if (task.sandboxProjectId) {
-                  try {
-                    const { getSandboxProject } = await import('./sandbox.ts')
-                    const project = await getSandboxProject(db, task.sandboxProjectId)
-                    if (project) { subSandboxProjectDir = project.directory; subSandboxProjectId = project.id }
-                  } catch { /* best-effort */ }
-                }
                 const taskPrompt = await buildTaskFocusedPrompt(db, task, agent.teamId, effectivePlanMode, agent.templateId ?? undefined, subSandboxProjectDir)
                 const taskBoosts = detectTaskCategories(task.title, task.description)
                 const runtimeConfig = {

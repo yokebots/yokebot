@@ -2218,3 +2218,32 @@ export async function reviewSkillProposal(teamId: string, proposalId: string, ap
     body: JSON.stringify({ approved }),
   })
 }
+
+// ---- Sandbox Projects ----
+
+export interface SandboxProject {
+  id: string
+  teamId: string
+  name: string
+  slug: string
+  directory: string
+  framework: string | null
+  devPort: number | null
+  startupCommand: string | null
+  previewUrl: string | null
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export async function listSandboxProjects(): Promise<SandboxProject[]> {
+  return request('/api/sandbox/projects')
+}
+
+export async function getSandboxProject(id: string): Promise<SandboxProject> {
+  return request(`/api/sandbox/projects/${id}`)
+}
+
+export async function listSandboxProjectFiles(id: string): Promise<{ path: string; size: number; modifiedAt: string }[]> {
+  return request(`/api/sandbox/projects/${id}/files`)
+}

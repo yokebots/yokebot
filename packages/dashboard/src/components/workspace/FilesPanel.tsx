@@ -1215,38 +1215,48 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  const [projects, setProjects] = useState<engine.SandboxProject[]>([])
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
 
-  // Fetch sandbox status on expand
+  // Fetch sandbox status + projects on expand
   useEffect(() => {
     if (!expanded) return
     engine.getSandboxStatus().then(setStatus).catch(() => {})
+    engine.listSandboxProjects().then(p => {
+      setProjects(p)
+      // Auto-select first project if none selected
+      if (p.length > 0 && !activeProjectId) setActiveProjectId(p[0].id)
+    }).catch(() => {})
   }, [expanded])
+
+  const activeProject = projects.find(p => p.id === activeProjectId)
 
   // Fetch files when expanded and sandbox is running
   useEffect(() => {
     if (!expanded || status?.status !== 'running') return
     setLoading(true)
-    engine.listSandboxFiles(currentDir)
+    // If we have an active project, browse its directory
+    const dir = activeProject ? `${activeProject.directory}${currentDir === '/' ? '' : currentDir}` : currentDir
+    engine.listSandboxFiles(dir)
       .then(setFiles)
       .catch(() => setFiles([]))
       .finally(() => setLoading(false))
-  }, [expanded, status?.status, currentDir])
+  }, [expanded, status?.status, currentDir, activeProjectId])
 
   const openPreview = useCallback(() => {
     workspace.addViewerTab({
       id: 'sandbox-preview',
       type: 'sandbox-preview' as import('@/pages/WorkspacePage').ViewerTabType,
-      label: 'Preview',
+      label: activeProject ? activeProject.name : 'Preview',
       icon: 'preview',
       resourceId: '',
     })
-  }, [workspace, status])
+  }, [workspace, status, activeProject])
 
   const openSandboxFile = useCallback((entry: engine.SandboxFileEntry) => {
     if (entry.isDirectory) {
       setCurrentDir(entry.path)
     } else {
-      // Open sandbox file as a regular file tab (read-only view)
       workspace.addViewerTab({
         id: `sandbox-file:${entry.path}`,
         type: 'file' as import('@/pages/WorkspacePage').ViewerTabType,
@@ -1265,8 +1275,12 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
       const result = await engine.importProject(importUrl.trim())
       setShowImport(false)
       setImportUrl('')
-      // Refresh status and open preview
+      // Refresh status + projects
       engine.getSandboxStatus().then(setStatus).catch(() => {})
+      engine.listSandboxProjects().then(p => {
+        setProjects(p)
+        if (p.length > 0) setActiveProjectId(p[p.length - 1].id) // select newest
+      }).catch(() => {})
       if (result.previewUrl) openPreview()
     } catch (err) {
       setImportError((err as Error).message)
@@ -1274,6 +1288,24 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
       setImporting(false)
     }
   }, [importUrl, openPreview])
+
+  // Refresh projects when sandbox status changes (agent may have created one)
+  useEffect(() => {
+    if (status?.status === 'running') {
+      const interval = setInterval(() => {
+        engine.listSandboxProjects().then(p => {
+          setProjects(prev => {
+            if (p.length !== prev.length) {
+              if (p.length > 0 && !activeProjectId) setActiveProjectId(p[0].id)
+              return p
+            }
+            return prev
+          })
+        }).catch(() => {})
+      }, 10000)
+      return () => clearInterval(interval)
+    }
+  }, [status?.status])
 
   return (
     <div className="shrink-0 flex flex-col" style={{ height: expanded ? height : undefined }}>
@@ -1286,6 +1318,9 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
         </span>
         <span className="material-symbols-outlined text-[14px]">deployed_code</span>
         Sandbox
+        {projects.length > 0 && (
+          <span className="ml-0.5 text-[10px] text-text-muted font-normal">({projects.length} project{projects.length !== 1 ? 's' : ''})</span>
+        )}
         {status?.status === 'running' && (
           <span className="ml-1 h-2 w-2 rounded-full bg-green-500" />
         )}
@@ -1293,7 +1328,38 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
 
       {expanded && (
         <div className="px-2 pb-2 overflow-y-auto flex-1 min-h-0">
-          {/* Import Project button — always visible */}
+          {/* Project tabs — shown when multiple projects exist */}
+          {projects.length > 1 && (
+            <div className="flex gap-0.5 px-1 py-1 overflow-x-auto">
+              {projects.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => { setActiveProjectId(p.id); setCurrentDir('/') }}
+                  className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-1 text-[10px] transition-colors ${
+                    p.id === activeProjectId
+                      ? 'bg-forest-green/10 text-forest-green font-semibold border border-forest-green/20'
+                      : 'text-text-muted hover:bg-light-surface-alt border border-transparent'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[12px]">folder_special</span>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Single project header */}
+          {projects.length === 1 && (
+            <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-muted">
+              <span className="material-symbols-outlined text-[12px] text-forest-green">folder_special</span>
+              <span className="font-medium text-text-main">{projects[0].name}</span>
+              {projects[0].framework && (
+                <span className="rounded bg-forest-green/10 px-1 py-0.5 text-[9px] text-forest-green">{projects[0].framework}</span>
+              )}
+            </div>
+          )}
+
+          {/* Import Project button */}
           <div className="px-2 py-1">
             {!showImport ? (
               <button
@@ -1355,7 +1421,6 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
                   setStatus({ ...status, status: 'starting' as any })
                   try {
                     await engine.startSandbox()
-                    // Poll until running
                     for (let i = 0; i < 15; i++) {
                       await new Promise(r => setTimeout(r, 2000))
                       const s = await engine.getSandboxStatus()
