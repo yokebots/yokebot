@@ -2119,6 +2119,7 @@ You have a built-in browser that lets you navigate ANY website on the internet, 
 **Browser rules — MANDATORY:**
 - **Read the page snapshot** returned by each browser action to understand what's on the page. Never guess.
 - **Use element names from the snapshot** to click/type — don't guess selectors.
+- **Passing refs:** The snapshot shows elements like [link "About Us"], [button "Submit"]. Pass ONLY the quoted name as the ref parameter — e.g. for [link "About Us"], use ref: "About Us". Do NOT include brackets or role prefix.
 - **If you encounter login pages, CAPTCHAs, or ambiguous choices**, use \`browser_ask_human\` to get the human's input. Do NOT guess passwords or make assumptions.
 - **Close the browser when done** with \`browser_close\` to free resources.
 - **The human can see everything you do** in the browser in real-time. Don't browse anything inappropriate or unnecessary.
@@ -2259,6 +2260,9 @@ export async function runReactLoop(
 
   console.log(`[runtime] v2 — react loop start for agent ${agentId}, maxIters=${config.maxIterations}`)
 
+  let wasNudged = false
+  let lastReasoningText = ''
+
   for (let i = 0; i < config.maxIterations; i++) {
     // Deduct LLM credits before each ReAct iteration (hosted mode only, skip for free agents like AdvisorBot)
     if (HOSTED_MODE && logicalModelId && !config.skipCredits) {
@@ -2277,7 +2281,7 @@ export async function runReactLoop(
     const maskedMessages = maskOldObservations(messages)
     trimmedMessages = trimMessagesToFit(maskedMessages, maxInputTokens, toolsTokens)
 
-    emitProgress('thinking', `Reasoning...`, i + 1)
+    if (!wasNudged) emitProgress('thinking', `Reasoning...`, i + 1)
     let completion: CompletionResponse
     try {
       completion = await chatCompletionWithFallback(modelConfig, trimmedMessages, tools)
@@ -2305,9 +2309,17 @@ export async function runReactLoop(
       })
 
       // Broadcast the assistant's reasoning text (if any) before tool calls
-      if (completion.content && completion.content.trim()) {
-        emitProgress('thinking', `Reasoning`, i + 1, completion.content.slice(0, 500))
+      if (completion.content && completion.content.trim() && !wasNudged) {
+        const newReasoning = completion.content.slice(0, 500)
+        // Skip near-duplicate reasoning
+        const isDuplicate = lastReasoningText && newReasoning.length > 20 &&
+          lastReasoningText.startsWith(newReasoning.slice(0, Math.floor(newReasoning.length * 0.6)))
+        if (!isDuplicate) {
+          emitProgress('thinking', `Reasoning`, i + 1, newReasoning)
+          lastReasoningText = newReasoning
+        }
       }
+      wasNudged = false
 
       for (const toolCall of completion.tool_calls) {
         // Broadcast tool_start progress with rich argument context
@@ -2394,18 +2406,23 @@ export async function runReactLoop(
         const isEarlyBrowserExit = browserToolCount > 0 && browserToolCount < 5 && i < Math.floor(config.maxIterations * 0.3)
         // Detect when the model falsely claims it cannot browse (e.g. "I cannot browse external URLs")
         // Must match self-referential refusal patterns, not site critiques like "the site cannot handle..."
-        const looksLikeFalseRefusal = /\bI\b.*(?:cannot|can't|unable to|don't have|not able to).*(?:browse|navigate|access.*(?:website|url|external))/i.test(response)
+        const looksLikeFalseRefusal = /\b(?:I|it's|it is)\b.*(?:cannot|can't|unable to|don't have|not able to|isn't able to|am not able to).*(?:browse|navigate|search|visit|view|open|reach|access.*(?:website|url|web|external|internet|site|page))/i.test(response)
 
-        if ((isEarlyBrowserExit || looksLikeFalseRefusal) && i < config.maxIterations - 1) {
-          console.log(`[runtime] Intercepted early respond during browser work (${browserToolCount} browser calls, iteration ${i + 1}) — nudging to continue`)
+        // Catch zero-tool refusal: model responds on first iteration without calling any tools and the task mentions a URL
+        const hasUrlInTask = /https?:\/\/|\.com|\.org|\.net|\.io|website|web\s*site/i.test(userMessage)
+        const zeroToolRefusal = i === 0 && toolCallLog.length === 0 && hasUrlInTask
+
+        if ((isEarlyBrowserExit || looksLikeFalseRefusal || zeroToolRefusal) && i < config.maxIterations - 1) {
+          console.log(`[runtime] Intercepted early respond during browser work (${browserToolCount} browser calls, iteration ${i + 1}, falseRefusal=${looksLikeFalseRefusal}, zeroTool=${zeroToolRefusal}) — nudging to continue`)
           // Don't treat this as a final response — nudge the model to keep browsing
           messages.push({
             role: 'user',
-            content: looksLikeFalseRefusal
+            content: (looksLikeFalseRefusal || zeroToolRefusal)
               ? 'CORRECTION: You DO have browser access and you just used it successfully. The browser_navigate tool worked. Keep browsing and exploring the site. Do NOT say you cannot browse — you clearly can. Continue using browser tools to complete the task.'
               : 'Good progress! Keep exploring — click through more pages on the site before responding. You should visit at least 3-4 different pages to give a thorough analysis. Use browser_click to navigate to other sections.',
           })
           response = null // Reset so the loop continues
+          wasNudged = true
           continue
         }
 
@@ -2530,6 +2547,7 @@ export async function runReactLoop(
           role: 'user',
           content: 'Continue working on the task using your tools. Do not stop until you have completed the task or exhausted all approaches. Use the "respond" tool when you are truly finished.',
         })
+        wasNudged = true
         continue
       }
 
@@ -2558,6 +2576,7 @@ export async function runReactLoop(
       role: 'user',
       content: 'Continue. Use your tools to take action. Call browser_click to explore more pages on the site.',
     })
+    wasNudged = true
     continue
   }
 

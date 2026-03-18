@@ -18,7 +18,10 @@ interface BrowserPanelProps {
  */
 export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
   const isAgentSession = sessionId.startsWith('agent:')
-  const agentId = isAgentSession ? sessionId.slice('agent:'.length) : null
+  // Parse compound format: "agent:{agentId}:{browserSessionId}" or legacy "agent:{agentId}"
+  const agentParts = isAgentSession ? sessionId.slice('agent:'.length).split(':') : []
+  const agentId = isAgentSession ? agentParts[0] : null
+  const knownBrowserSessionId = agentParts.length > 1 ? agentParts.slice(1).join(':') : null
 
   const [mode, setMode] = useState<BrowserMode>(isAgentSession ? 'agent_browser' : 'take_control')
   const [currentUrl, setCurrentUrl] = useState('')
@@ -37,32 +40,36 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
   const scrollAccRef = useRef({ x: 0, y: 0, deltaX: 0, deltaY: 0 })
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Initialize session — for agent sessions, first get the agent's session ID
+  // Initialize session — for agent sessions, use known session ID or fall back to lookup
   useEffect(() => {
     if (isAgentSession) {
-      // Agent browser mode — try to get existing screenshot to find active session
-      const init = async () => {
-        try {
-          const result = await engine.getAgentBrowserScreenshot(agentId!)
-          setCurrentUrl(result.url)
-          setUrlInput(result.url)
-          // We'll need the session ID from the engine to connect WebSocket
-          // For now, try listing sessions
-          const sessions = await engine.listBrowserSessions()
-          const agentSession = sessions.find(s => s.mode === 'agent_browser')
-          if (agentSession) {
-            setActiveSessionId(agentSession.id)
-          }
-        } catch {
-          // Agent may not have an active browser yet
-        }
+      if (knownBrowserSessionId) {
+        // Session ID passed directly from SSE event — skip lookup
+        setActiveSessionId(knownBrowserSessionId)
         setLoading(false)
+      } else {
+        // Legacy fallback — try to find the session
+        const init = async () => {
+          try {
+            const result = await engine.getAgentBrowserScreenshot(agentId!)
+            setCurrentUrl(result.url)
+            setUrlInput(result.url)
+            const sessions = await engine.listBrowserSessions()
+            const agentSession = sessions.find(s => s.mode === 'agent_browser')
+            if (agentSession) {
+              setActiveSessionId(agentSession.id)
+            }
+          } catch {
+            // Agent may not have an active browser yet
+          }
+          setLoading(false)
+        }
+        init()
       }
-      init()
     } else {
       setLoading(false)
     }
-  }, [sessionId, isAgentSession, agentId])
+  }, [sessionId, isAgentSession, agentId, knownBrowserSessionId])
 
   // WebSocket connection for CDP Screencast
   useEffect(() => {

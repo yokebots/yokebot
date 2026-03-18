@@ -133,11 +133,11 @@ export function WorkspacePage() {
     const agent = agents.find(a => a.id === data.agentId)
     const label = agent ? `${agent.name} Browser` : 'Agent Browser'
     addViewerTab({
-      id: `browser:${data.sessionId}`,
+      id: `browser:agent:${data.agentId}`,
       type: 'browser',
       label,
       icon: 'language',
-      resourceId: data.sessionId,
+      resourceId: `agent:${data.agentId}:${data.sessionId}`,
     })
   })
 

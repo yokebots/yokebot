@@ -842,7 +842,7 @@ Step 1 — Think and navigate:
 
 Step 2 — After seeing the page snapshot, click to explore more:
 <tool_call>
-{"name": "browser_click", "arguments": {"element": "About Us"}}
+{"name": "browser_click", "arguments": {"ref": "About Us"}}
 </tool_call>
 
 Step 3 — After exploring multiple pages, respond with findings:

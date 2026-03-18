@@ -413,35 +413,60 @@ async function capturePageSnapshot(session: BrowserSessionState): Promise<string
  * Tries multiple strategies: getByRole, getByText, CSS selector.
  */
 async function clickByRef(page: import('playwright').Page, ref: string): Promise<void> {
-  // Try text selector first (most common from accessibility tree)
+  // Parse bracket notation from accessibility tree: [role "name"] or [role "name" value="val"]
+  let parsedName = ref
+  let parsedRole: string | undefined
+  const bracketMatch = ref.match(/^\[(\w+)\s+"([^"]+)"/)
+  if (bracketMatch) {
+    parsedRole = bracketMatch[1].toLowerCase()
+    parsedName = bracketMatch[2]
+  }
+
+  // If we extracted a role, try role-aware matching first
+  if (parsedRole) {
+    const roleMap: Record<string, string> = {
+      link: 'link', button: 'button', textbox: 'textbox', heading: 'heading',
+      menuitem: 'menuitem', tab: 'tab', checkbox: 'checkbox', radio: 'radio',
+      combobox: 'combobox',
+    }
+    const pwRole = roleMap[parsedRole]
+    if (pwRole) {
+      try {
+        await page.getByRole(pwRole as any, { name: parsedName }).first().click({ timeout: 3000 })
+        return
+      } catch { /* try next */ }
+    }
+  }
+
+  // Try text selector (most common from accessibility tree)
   try {
-    await page.getByText(ref, { exact: false }).first().click({ timeout: 3000 })
+    await page.getByText(parsedName, { exact: false }).first().click({ timeout: 3000 })
     return
   } catch { /* try next */ }
 
   // Try role-based selectors
   try {
-    await page.getByRole('button', { name: ref }).first().click({ timeout: 2000 })
+    await page.getByRole('button', { name: parsedName }).first().click({ timeout: 2000 })
     return
   } catch { /* try next */ }
 
   try {
-    await page.getByRole('link', { name: ref }).first().click({ timeout: 2000 })
+    await page.getByRole('link', { name: parsedName }).first().click({ timeout: 2000 })
     return
   } catch { /* try next */ }
 
   try {
-    await page.getByRole('textbox', { name: ref }).first().click({ timeout: 2000 })
+    await page.getByRole('textbox', { name: parsedName }).first().click({ timeout: 2000 })
     return
   } catch { /* try next */ }
 
   // Fallback: try as CSS selector
   try {
-    await page.locator(ref).first().click({ timeout: 2000 })
+    await page.locator(parsedName).first().click({ timeout: 2000 })
     return
   } catch { /* try next */ }
 
-  throw new Error(`Could not find element: "${ref}"`)
+  throw new Error(`Could not find element: "${ref}" (parsed as "${parsedName}")`)
 }
 
 /**
