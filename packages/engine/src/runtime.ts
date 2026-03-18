@@ -332,6 +332,7 @@ export interface RuntimeConfig {
   currentTaskId?: string // for logging
   onFileWritten?: (teamId: string, path: string) => void // SSE broadcast callback
   extraToolCategories?: ToolCategory[] // task-context category boosts
+  restrictToolCategories?: ToolCategory[] // REPLACE template categories (for phase routing)
 }
 
 const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -2197,9 +2198,12 @@ export async function runReactLoop(
   const agentRow = await getAgent(db, agentId)
   const template = agentRow?.templateId ? (await import('./templates.ts')).TEMPLATES.find((t: any) => t.id === agentRow.templateId) : null
   const categories = template?.toolCategories ?? ALL_CATEGORIES
-  const effectiveCategories = config.extraToolCategories
-    ? [...new Set([...categories, ...config.extraToolCategories])]
-    : categories
+  // restrictToolCategories replaces template categories entirely (used by phase routing)
+  const effectiveCategories = config.restrictToolCategories
+    ? config.restrictToolCategories
+    : config.extraToolCategories
+      ? [...new Set([...categories, ...config.extraToolCategories])]
+      : categories
   const builtinTools = getFilteredBuiltinTools(effectiveCategories as ToolCategory[])
   let tools = [...builtinTools, ...skillTools, ...mcpTools]
 

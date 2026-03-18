@@ -829,7 +829,7 @@ async function runRoutedSprint(
       currentTaskId: task.id,
       onFileWritten,
       skipCredits: true, // credits reserved upfront by caller
-      extraToolCategories: phase.toolCategories,
+      restrictToolCategories: phase.toolCategories,
     }
 
     console.log(`[routing] Phase "${phaseName}" → ${phaseModelId} (max ${phaseMaxIters} iters, tools: [${phase.toolCategories.join(', ')}])`)
