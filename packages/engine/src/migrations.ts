@@ -2139,6 +2139,21 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 50,
+    name: 'add_task_type_column',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.exec(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'task'`)
+      } else {
+        // SQLite: check if column exists first
+        const cols = await db.query<{ name: string }>(`PRAGMA table_info(tasks)`)
+        if (!cols.some(c => c.name === 'type')) {
+          await db.exec(`ALTER TABLE tasks ADD COLUMN type TEXT NOT NULL DEFAULT 'task'`)
+        }
+      }
+    },
+  },
 ]
 
 /**

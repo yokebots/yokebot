@@ -207,6 +207,7 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   update_scratchpad: 'tasks',
   send_chat_message: 'chat',
   request_approval: 'approvals',
+  ask_human: 'core',
   create_source_of_record: 'data',
   query_source_of_record: 'data',
   add_source_of_record_row: 'data',
@@ -337,6 +338,7 @@ export interface RuntimeConfig {
   onFileWritten?: (teamId: string, path: string) => void // SSE broadcast callback
   extraToolCategories?: ToolCategory[] // task-context category boosts
   restrictToolCategories?: ToolCategory[] // REPLACE template categories (for phase routing)
+  skillFilter?: string[] // only allow these skills (empty = none, undefined = all installed)
   sandboxProjectDir?: string // resolved sandbox project directory for this sprint
   sandboxProjectId?: string  // resolved sandbox project ID for this sprint
 }
@@ -391,6 +393,7 @@ const TOOL_LABELS: Record<string, string> = {
   browser_type: 'Typing on page',
   browser_snapshot: 'Taking screenshot',
   browser_ask_human: 'Asking human for input',
+  ask_human: 'Asking human for input',
   browser_fill_form: 'Filling form',
   browser_download_file: 'Downloading file',
   query_source_of_record: 'Querying data',
@@ -538,6 +541,11 @@ function getBuiltinTools(): ToolDef[] {
       actionDetail: { type: 'string', description: 'Description of what you want to do and why' },
       riskLevel: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Risk level assessment' },
     }, ['actionType', 'actionDetail', 'riskLevel']),
+
+    toolDef('ask_human', 'Ask the human team members a question when you are stuck or need clarification. This creates a task for the human and PAUSES the current task until they respond. Use this when you genuinely cannot proceed without human input — do NOT use it for things you can figure out yourself.', {
+      question: { type: 'string', description: 'The question you need answered — be specific about what you need and why' },
+      urgency: { type: 'string', enum: ['low', 'medium', 'high'], description: 'How urgent is this question? Default: medium' },
+    }, ['question']),
 
     // Source of Record
     toolDef('create_source_of_record', 'Create a new Source of Record data table with columns. Use this instead of CSV files when you need structured, queryable data.', {
@@ -1127,6 +1135,31 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         ctx.currentTaskId,
       )
       return `Approval request created (id: ${approval.id}, status: pending). A human will review it.`
+    }
+
+    case 'ask_human': {
+      const question = args.question as string
+      const urgency = (args.urgency as string) ?? 'medium'
+      if (!ctx.currentTaskId) return 'Cannot ask_human outside of a task context. Use send_chat_message instead.'
+      // Find team owner to assign the clarification to
+      const { getTeamMembers } = await import('./teams.ts')
+      const members = await getTeamMembers(ctx.db, ctx.teamId)
+      const owner = members.find(m => m.role === 'owner') ?? members[0]
+      if (!owner) return 'No team members found to ask.'
+      // Create clarification task linked to the current task
+      const { createClarificationTask } = await import('./tasks.ts')
+      const clarTask = await createClarificationTask(ctx.db, ctx.teamId, question, ctx.currentTaskId, owner.userId, urgency as 'low' | 'medium' | 'high')
+      // Post question to team chat
+      const { getTeamChannel, sendMessage: sendChatMessage } = await import('./chat.ts')
+      try {
+        const teamChannel = await getTeamChannel(ctx.db, ctx.teamId)
+        const chatMsg = `@[${question}](task:${clarTask.id}) — **Needs your input** to continue working on this task. Please reply here or mark the clarification as done.`
+        await sendChatMessage(ctx.db, teamChannel.id, 'agent', ctx.agentId, chatMsg, ctx.currentTaskId, ctx.teamId)
+      } catch { /* best-effort */ }
+      // Send notification
+      const { notifyTeam } = await import('./notifications.ts')
+      void notifyTeam(ctx.db, ctx.teamId, 'clarification_needed', `Agent needs your input`, question, `/tasks/${clarTask.id}`)
+      return `Question sent to the team. Task "${ctx.currentTaskId}" is now paused until a human responds. You should stop working on this task and move on to other work.`
     }
 
     // ---- Source of Record ----
@@ -2284,7 +2317,16 @@ export async function runReactLoop(
   ])
 
   // Merge builtin tools with installed skill tools + MCP tools
-  const installedSkills = (await getAgentSkills(db, agentId)).map((s) => s.skillName)
+  let installedSkills = (await getAgentSkills(db, agentId)).map((s) => s.skillName)
+  // Phase routing can restrict which skills are available (undefined = all, [] = none)
+  if (config.skillFilter !== undefined) {
+    const allowed = new Set(config.skillFilter)
+    const before = installedSkills.length
+    installedSkills = installedSkills.filter(s => allowed.has(s))
+    if (before !== installedSkills.length) {
+      console.log(`[runtime] skillFilter applied: ${before} → ${installedSkills.length} skills (allowed: [${config.skillFilter.join(', ')}])`)
+    }
+  }
   const skillTools = getSkillTools(skillsDir, installedSkills)
   const mcpTools = await loadMcpTools(db, agentId)
 
@@ -2398,19 +2440,27 @@ export async function runReactLoop(
       break
     }
 
-    console.log(`[runtime] Iteration ${i + 1}: content=${completion.content ? completion.content.length + ' chars' : 'null'}, tool_calls=${completion.tool_calls.length}`)
+    // Filter out tool calls for tools not in the provided list (model hallucination / adapter recovery of stale tools)
+    const allowedToolNames = new Set(tools.map(t => t.function.name))
+    const validToolCalls = completion.tool_calls.filter(tc => {
+      if (allowedToolNames.has(tc.function.name)) return true
+      console.log(`[runtime] Rejected hallucinated tool call: ${tc.function.name} (not in provided tools)`)
+      return false
+    })
+
+    console.log(`[runtime] Iteration ${i + 1}: content=${completion.content ? completion.content.length + ' chars' : 'null'}, tool_calls=${validToolCalls.length}${validToolCalls.length < completion.tool_calls.length ? ` (${completion.tool_calls.length - validToolCalls.length} rejected)` : ''}`)
 
     // If the model returned tool calls, execute them
-    if (completion.tool_calls.length > 0) {
+    if (validToolCalls.length > 0) {
       // Reset no-tool counter — model is actually calling tools
-      const hasRealToolCall = completion.tool_calls.some(tc => tc.function.name !== 'think')
+      const hasRealToolCall = validToolCalls.some(tc => tc.function.name !== 'think')
       if (hasRealToolCall) consecutiveNoToolIterations = 0
 
-      // Add assistant message with tool calls
+      // Add assistant message with tool calls (only valid ones — hallucinated tools are excluded)
       messages.push({
         role: 'assistant',
         content: completion.content ?? '',
-        tool_calls: completion.tool_calls,
+        tool_calls: validToolCalls,
       })
 
       // Broadcast the assistant's reasoning text (if any) before tool calls
@@ -2431,7 +2481,7 @@ export async function runReactLoop(
       }
       wasNudged = false
 
-      for (const toolCall of completion.tool_calls) {
+      for (const toolCall of validToolCalls) {
         // Broadcast tool_start progress with rich argument context
         const toolLabel = getToolLabel(toolCall.function.name)
         let argPreview: string | undefined

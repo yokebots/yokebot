@@ -81,6 +81,7 @@ const SQLITE_DDL = `
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL DEFAULT 'task',
     title TEXT NOT NULL,
     description TEXT,
     status TEXT NOT NULL DEFAULT 'backlog',
@@ -709,6 +710,7 @@ const POSTGRES_DDL = `
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL DEFAULT 'task',
     title TEXT NOT NULL,
     description TEXT,
     status TEXT NOT NULL DEFAULT 'backlog',

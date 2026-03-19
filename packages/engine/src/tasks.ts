@@ -7,7 +7,8 @@ import { randomUUID } from 'crypto'
 
 export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'archived' | 'blocked'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
-export type BlockedReason = 'max_retries' | 'approval_pending' | 'dependency' | 'manual'
+export type TaskType = 'task' | 'approval' | 'clarification' | 'action_item'
+export type BlockedReason = 'system_error' | 'max_retries' | 'approval_pending' | 'needs_input' | 'dependency' | 'manual'
 
 export interface TaskAttachment {
   name: string; url: string; type: string; size: number
@@ -18,7 +19,7 @@ export interface TaskTag {
 }
 
 export interface Task {
-  id: string; teamId: string; title: string; description: string | null; status: TaskStatus; priority: TaskPriority
+  id: string; teamId: string; type: TaskType; title: string; description: string | null; status: TaskStatus; priority: TaskPriority
   assignedAgentId: string | null; assignedUserId: string | null; parentTaskId: string | null; deadline: string | null
   headerImage: string | null; attachments: TaskAttachment[]
   tags: TaskTag[]
@@ -28,15 +29,15 @@ export interface Task {
 }
 
 export async function createTask(db: Db, teamId: string, title: string, opts?: {
-  description?: string; priority?: TaskPriority; assignedAgentId?: string; assignedUserId?: string; parentTaskId?: string; deadline?: string; status?: TaskStatus; sandboxProjectId?: string
+  description?: string; priority?: TaskPriority; assignedAgentId?: string; assignedUserId?: string; parentTaskId?: string; deadline?: string; status?: TaskStatus; sandboxProjectId?: string; type?: TaskType
 }): Promise<Task> {
   const id = randomUUID()
   // Generate next short_id for this team
   const shortIdRow = await db.queryOne<{ next_id: number }>('SELECT COALESCE(MAX(short_id), 0) + 1 AS next_id FROM tasks WHERE team_id = $1', [teamId])
   const shortId = shortIdRow?.next_id ?? 1
   await db.run(
-    'INSERT INTO tasks (id, team_id, title, description, status, priority, assigned_agent_id, assigned_user_id, parent_task_id, deadline, sandbox_project_id, short_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)',
-    [id, teamId, title, opts?.description ?? null, opts?.status ?? 'backlog', opts?.priority ?? 'medium', opts?.assignedAgentId ?? null, opts?.assignedUserId ?? null, opts?.parentTaskId ?? null, opts?.deadline ?? null, opts?.sandboxProjectId ?? null, shortId],
+    'INSERT INTO tasks (id, team_id, title, description, status, priority, assigned_agent_id, assigned_user_id, parent_task_id, deadline, sandbox_project_id, short_id, type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)',
+    [id, teamId, title, opts?.description ?? null, opts?.status ?? 'backlog', opts?.priority ?? 'medium', opts?.assignedAgentId ?? null, opts?.assignedUserId ?? null, opts?.parentTaskId ?? null, opts?.deadline ?? null, opts?.sandboxProjectId ?? null, shortId, opts?.type ?? 'task'],
   )
   return (await getTask(db, id))!
 }
@@ -49,7 +50,7 @@ export async function getTask(db: Db, id: string): Promise<Task | null> {
   return task
 }
 
-export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; assignedUserId?: string; parentId?: string | null; teamId?: string; tags?: string }): Promise<Task[]> {
+export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId?: string; assignedUserId?: string; parentId?: string | null; teamId?: string; tags?: string; type?: string }): Promise<Task[]> {
   const params: unknown[] = []
   let paramIdx = 1
 
@@ -64,6 +65,11 @@ export async function listTasks(db: Db, filters?: { status?: TaskStatus; agentId
   if (!filters?.status || filters.status !== 'archived') { sql += ` AND t.status != 'archived'` }
   if (filters?.agentId) { sql += ` AND t.assigned_agent_id = $${paramIdx++}`; params.push(filters.agentId) }
   if (filters?.assignedUserId) { sql += ` AND t.assigned_user_id = $${paramIdx++}`; params.push(filters.assignedUserId) }
+  if (filters?.type) {
+    const types = filters.type.split(',').map(t => t.trim()).filter(Boolean)
+    if (types.length === 1) { sql += ` AND t.type = $${paramIdx++}`; params.push(types[0]) }
+    else if (types.length > 1) { const ph = types.map(() => `$${paramIdx++}`).join(', '); sql += ` AND t.type IN (${ph})`; params.push(...types) }
+  }
   if (filters?.parentId !== undefined) {
     if (filters.parentId === null) { sql += ' AND t.parent_task_id IS NULL' }
     else { sql += ` AND t.parent_task_id = $${paramIdx++}`; params.push(filters.parentId) }
@@ -171,7 +177,7 @@ function rowToTask(row: Record<string, unknown>): Task {
     if (raw) attachments = JSON.parse(raw) as TaskAttachment[]
   } catch { /* invalid JSON — default to empty */ }
   return {
-    id: row.id as string, teamId: row.team_id as string, title: row.title as string, description: row.description as string | null,
+    id: row.id as string, teamId: row.team_id as string, type: (row.type as TaskType) ?? 'task', title: row.title as string, description: row.description as string | null,
     status: row.status as TaskStatus, priority: row.priority as TaskPriority,
     assignedAgentId: row.assigned_agent_id as string | null, assignedUserId: (row.assigned_user_id as string | null) ?? null, parentTaskId: row.parent_task_id as string | null,
     deadline: row.deadline as string | null, headerImage: (row.header_image as string | null) ?? null,
@@ -226,6 +232,20 @@ export async function checkForDuplicateTask(db: Db, teamId: string, title: strin
     }
   }
   return null
+}
+
+/** Create a clarification task assigned to a human, linked to a parent task that will be blocked. */
+export async function createClarificationTask(db: Db, teamId: string, question: string, parentTaskId: string, assignedUserId: string, urgency: TaskPriority = 'medium'): Promise<Task> {
+  const task = await createTask(db, teamId, question, {
+    type: 'clarification',
+    status: 'todo',
+    priority: urgency,
+    assignedUserId,
+    parentTaskId,
+  })
+  // Block the parent task
+  await blockTask(db, parentTaskId, 'needs_input', undefined, question)
+  return task
 }
 
 /** Block a task with a specific reason, optional linked approval, and optional explanation text. */

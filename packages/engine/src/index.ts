@@ -1026,6 +1026,7 @@ async function main() {
     if (req.query.parentId === 'null') filters.parentId = null
     else if (req.query.parentId) filters.parentId = req.query.parentId
     if (req.query.tags) filters.tags = req.query.tags
+    if (req.query.type) filters.type = req.query.type
     res.json(await listTasks(db, filters as Parameters<typeof listTasks>[1]))
   })
 
@@ -1108,6 +1109,20 @@ async function main() {
     // Workflow step chaining: if task is done, advance linked workflow
     if (task.status === 'done') {
       void onTaskCompleted(db, task.id).catch((err) => console.error('[workflows] onTaskCompleted error:', err))
+      // Auto-unblock parent task when a clarification task is completed
+      if (task.type === 'clarification' && task.parentTaskId) {
+        try {
+          const parentTask = await getTask(db, task.parentTaskId)
+          if (parentTask && parentTask.status === 'blocked' && parentTask.blockedReason === 'needs_input') {
+            await unblockTask(db, task.parentTaskId, 'todo')
+            // Trigger immediate sprint on the parent task's agent
+            if (parentTask.assignedAgentId) {
+              void triggerAgentNow(db, parentTask.assignedAgentId, teamId)
+            }
+            console.log(`[tasks] Clarification completed — unblocked parent task "${parentTask.title}" and triggered agent`)
+          }
+        } catch (err) { console.error('[tasks] Failed to auto-unblock parent:', err) }
+      }
     }
     res.json(task)
   })
@@ -1116,8 +1131,13 @@ async function main() {
     if (!requireRole(req, res, 'member')) return
     const teamId = req.user!.activeTeamId!
     if (!await verifyOwnership('tasks', req.params.id, teamId)) return res.status(404).json({ error: 'Task not found' })
+    const existing = await getTask(db, req.params.id)
     await unblockTask(db, req.params.id, 'todo')
     const task = await getTask(db, req.params.id)
+    // Trigger immediate sprint instead of waiting for next heartbeat
+    if (existing?.assignedAgentId) {
+      void triggerAgentNow(db, existing.assignedAgentId, teamId)
+    }
     res.json(task)
   })
 
@@ -1134,6 +1154,10 @@ async function main() {
       await unblockTask(db, req.params.id, 'todo')
     }
     const task = await getTask(db, req.params.id)
+    // Trigger immediate sprint instead of waiting for next heartbeat
+    if (existing?.assignedAgentId) {
+      void triggerAgentNow(db, existing.assignedAgentId, teamId)
+    }
     res.json(task)
   })
 
@@ -4183,9 +4207,10 @@ ${truncated}`,
   })
 
   app.post('/api/notifications/read-all', async (req, res) => {
-    const teamId = (req.query.teamId as string) || req.user!.activeTeamId!
+    const teamId = req.query.teamId as string | undefined
     await markAllRead(db, req.user!.id, teamId)
-    broadcastToUser(req.user!.id, 'notification_count', { count: 0 })
+    const unread = await countUnread(db, req.user!.id)
+    broadcastToUser(req.user!.id, 'notification_count', { count: unread })
     res.json({ success: true })
   })
 

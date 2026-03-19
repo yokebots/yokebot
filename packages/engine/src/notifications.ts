@@ -17,7 +17,7 @@ export function setNotificationBroadcast(fn: (userId: string, unreadCount: numbe
   _onNotification = fn
 }
 
-export type NotificationType = 'approval_needed' | 'task_assigned' | 'agent_message' | 'mention' | 'system'
+export type NotificationType = 'approval_needed' | 'task_assigned' | 'clarification_needed' | 'agent_message' | 'mention' | 'system'
 
 export interface Notification {
   id: string
@@ -187,8 +187,12 @@ export async function markRead(db: Db, id: string, userId: string): Promise<void
   await db.run('UPDATE notifications SET read = 1 WHERE id = $1 AND user_id = $2', [id, userId])
 }
 
-export async function markAllRead(db: Db, userId: string, teamId: string): Promise<void> {
-  await db.run('UPDATE notifications SET read = 1 WHERE user_id = $1 AND team_id = $2 AND read = 0', [userId, teamId])
+export async function markAllRead(db: Db, userId: string, teamId?: string): Promise<void> {
+  if (teamId) {
+    await db.run('UPDATE notifications SET read = 1 WHERE user_id = $1 AND team_id = $2 AND read = 0', [userId, teamId])
+  } else {
+    await db.run('UPDATE notifications SET read = 1 WHERE user_id = $1 AND read = 0', [userId])
+  }
 }
 
 // ---- Preferences ----
@@ -338,6 +342,7 @@ function rowToAlertPref(row: Record<string, unknown>): AlertPreference {
 const TYPE_TO_CATEGORY: Record<NotificationType, string> = {
   approval_needed: 'approval_queue',
   task_assigned: 'task_completions',
+  clarification_needed: 'approval_queue',
   agent_message: 'agent_feedback',
   mention: 'agent_feedback',
   system: 'critical_errors',

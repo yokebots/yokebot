@@ -36,6 +36,7 @@ export interface RoutingProfile {
 export interface PhasePlan {
   phases: string[]
   reasoning: string
+  skillOverrides?: Record<string, string[]> // orchestrator-assigned skills per phase (overrides phase.skillFilter)
 }
 
 export interface PhaseResult {
@@ -138,15 +139,25 @@ export async function runOrchestrator(
   taskTitle: string,
   taskDescription: string | null,
   teamId: string,
+  installedSkills?: string[],
 ): Promise<PhasePlan> {
   const allPhaseNames = profile.phases.map(p => p.name)
-  const fallbackPlan: PhasePlan = { phases: allPhaseNames, reasoning: 'fallback — running all phases' }
+  const fallbackPlan: PhasePlan = { phases: allPhaseNames, reasoning: 'fallback — running all phases', skillOverrides: {} }
 
   try {
     const modelConfig = await resolveModelConfig(db, profile.orchestratorModelId)
 
+    // Build prompt with skill awareness if agent has skills installed
+    let prompt = profile.orchestratorPrompt
+    if (installedSkills && installedSkills.length > 0) {
+      prompt += `\n\nThe agent has these skills installed: [${installedSkills.join(', ')}]
+If the task requires any of these skills, include a "skills" field mapping phase names to the skill names needed.
+Example: {"phases": ["build", "review"], "skills": {"review": ["slack-notify"]}, "reasoning": "..."}
+Only assign skills to phases where they are actually needed. Most phases need zero skills.`
+    }
+
     const messages: ChatMessage[] = [
-      { role: 'system', content: profile.orchestratorPrompt },
+      { role: 'system', content: prompt },
       { role: 'user', content: `Task: ${taskTitle}\n${taskDescription ? `Description: ${taskDescription}` : '(no description)'}` },
     ]
 
@@ -161,7 +172,7 @@ export async function runOrchestrator(
       return fallbackPlan
     }
 
-    const parsed = JSON.parse(jsonMatch[0]) as { phases?: string[]; reasoning?: string }
+    const parsed = JSON.parse(jsonMatch[0]) as { phases?: string[]; skills?: Record<string, string[]>; reasoning?: string }
     if (!Array.isArray(parsed.phases) || parsed.phases.length === 0) {
       console.log(`[routing] Orchestrator returned empty phases, using fallback plan`)
       return fallbackPlan
@@ -178,8 +189,25 @@ export async function runOrchestrator(
     // Preserve phase order from profile (not from LLM response)
     const orderedPhases = allPhaseNames.filter(p => validPhases.includes(p))
 
+    // Validate skill overrides — only allow skills the agent actually has installed
+    const skillOverrides: Record<string, string[]> = {}
+    if (parsed.skills && installedSkills) {
+      const installedSet = new Set(installedSkills)
+      for (const [phaseName, skills] of Object.entries(parsed.skills)) {
+        if (allPhaseNames.includes(phaseName) && Array.isArray(skills)) {
+          const validSkills = skills.filter(s => installedSet.has(s))
+          if (validSkills.length > 0) {
+            skillOverrides[phaseName] = validSkills
+          }
+        }
+      }
+      if (Object.keys(skillOverrides).length > 0) {
+        console.log(`[routing] Orchestrator skill assignments: ${JSON.stringify(skillOverrides)}`)
+      }
+    }
+
     console.log(`[routing] Orchestrator plan: [${orderedPhases.join(', ')}] — ${parsed.reasoning ?? 'no reasoning'}`)
-    return { phases: orderedPhases, reasoning: parsed.reasoning ?? '' }
+    return { phases: orderedPhases, reasoning: parsed.reasoning ?? '', skillOverrides }
   } catch (err) {
     console.error(`[routing] Orchestrator failed, using fallback plan:`, err)
     return fallbackPlan
@@ -196,11 +224,20 @@ export function buildPhasePrompt(
   taskTitle: string,
   taskDescription: string | null,
   priorResults: PhaseResult[],
+  extraContext?: { previewUrl?: string; sandboxProjectDir?: string },
 ): string {
   const parts: string[] = []
 
   // Phase instruction
   parts.push(`## Your Role\n${phase.systemInstruction}`)
+
+  // Inject concrete sandbox context so the model doesn't have to guess
+  if (extraContext?.previewUrl) {
+    parts.push(`## Preview URL\nThe app is running at: ${extraContext.previewUrl}\nUse browser_navigate to visit this URL to see the app.`)
+  }
+  if (extraContext?.sandboxProjectDir) {
+    parts.push(`## Sandbox Project\nAll code files are at: ${extraContext.sandboxProjectDir}`)
+  }
 
   // Task context
   parts.push(`## Task\n**${taskTitle}**${taskDescription ? `\n${taskDescription}` : ''}`)

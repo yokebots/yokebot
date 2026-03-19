@@ -22,6 +22,7 @@ import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, ge
 import { listTasks, getSubtasks, isBlocked as isTaskBlocked, blockTask, type Task } from './tasks.ts'
 import { notifyTeam } from './notifications.ts'
 import { getTaskThread, getChannelMessages, getMessage } from './chat.ts'
+import { getAgentSkills } from './skills.ts'
 
 const HOSTED_MODE = process.env.YOKEBOT_HOSTED_MODE === 'true'
 
@@ -674,12 +675,24 @@ async function getAgentAssignedTasks(db: Db, agentId: string, teamId: string): P
         if (agentMsg) reasonText = agentMsg.content.slice(0, 2000)
       } catch { /* no thread — skip */ }
 
-      await blockTask(db, task.id, 'max_retries', undefined, reasonText ?? undefined)
+      // Build structured error context for the task detail page
+      const errorContext = JSON.stringify({
+        error: reasonText?.slice(0, 500) ?? 'Agent could not complete the task after multiple attempts',
+        sprintCount: row?.sprint_count ?? MAX_SPRINT_ATTEMPTS,
+        suggestion: 'Click Retry to have the agent try again, or edit the task description to provide more specific instructions.',
+      })
+      await blockTask(db, task.id, 'system_error', undefined, errorContext)
       const snippet = reasonText ? `\n\n"${reasonText.slice(0, 200)}${reasonText.length > 200 ? '...' : ''}"` : ''
       void notifyTeam(db, teamId, 'system',
-        `Task blocked: ${task.title}`,
-        `Agent failed after ${MAX_SPRINT_ATTEMPTS} attempts.${snippet}`,
+        `Task failed: ${task.title}`,
+        `Agent could not complete this task after ${MAX_SPRINT_ATTEMPTS} attempts.${snippet}\n\nClick to view error details and retry.`,
         `/tasks/${task.id}`)
+      // Post failure context to team chat
+      try {
+        const teamChannel = await getTeamChannel(db, teamId)
+        const failureSummary = `@[${task.title}](task:${task.id}) — **System Error**: Agent failed after ${MAX_SPRINT_ATTEMPTS} attempts.${snippet}\n\nClick the task to view details and retry.`
+        await sendMessage(db, teamChannel.id, 'system', agentId, failureSummary, task.id, teamId)
+      } catch { /* best-effort */ }
       // Notify workflow executor that the task failed (marks step + run as failed)
       try {
         const { onTaskFailed } = await import('./workflow-executor.ts')
@@ -904,7 +917,9 @@ async function runRoutedSprint(
   const teamId = agent.teamId
 
   // Step 1: Orchestrator decides which phases to run (~1 LLM call)
-  const plan = await runOrchestrator(db, profile, task.title, task.description, teamId)
+  // Pass installed skills so orchestrator can assign skills to phases that need them
+  const installedSkills = (await getAgentSkills(db, agent.id)).map(s => s.skillName)
+  const plan = await runOrchestrator(db, profile, task.title, task.description, teamId, installedSkills.length > 0 ? installedSkills : undefined)
   console.log(`[routing] "${agent.name}" — orchestrator planned: [${plan.phases.join(', ')}]`)
 
   // Step 2: Execute each phase sequentially
@@ -925,7 +940,20 @@ async function runRoutedSprint(
     }
 
     const phaseMaxIters = Math.min(phase.maxIterations, remainingBudget)
-    const phasePrompt = buildPhasePrompt(phase, task.title, task.description, phaseResults)
+
+    // Look up preview URL for review/browser phases so the model knows where to look
+    let previewUrl: string | undefined
+    if (sandboxProjectId && phase.toolCategories.includes('browser')) {
+      try {
+        const { getSandboxProject } = await import('./sandbox.ts')
+        const project = await getSandboxProject(db, sandboxProjectId)
+        if (project?.previewUrl) previewUrl = project.previewUrl
+      } catch { /* best-effort */ }
+    }
+    const phasePrompt = buildPhasePrompt(phase, task.title, task.description, phaseResults, {
+      previewUrl,
+      sandboxProjectDir: sandboxProjectDir,
+    })
 
     // Resolve this phase's model
     let phaseModelConfig: import('./model.ts').ModelConfig
@@ -942,6 +970,9 @@ async function runRoutedSprint(
       }
     }
 
+    // Orchestrator can override phase skillFilter (e.g. assign slack-notify to review phase)
+    const phaseSkillFilter = plan.skillOverrides?.[phaseName] ?? phase.skillFilter
+
     const runtimeConfig = {
       maxIterations: phaseMaxIters,
       taskFocused: true,
@@ -949,6 +980,7 @@ async function runRoutedSprint(
       onFileWritten,
       skipCredits: true, // credits reserved upfront by caller
       restrictToolCategories: phase.toolCategories,
+      skillFilter: phaseSkillFilter,
       sandboxProjectDir,
       sandboxProjectId,
     }
@@ -1110,6 +1142,12 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
             return
           }
           console.log(`[scheduler] "${agent.name}" — reserved ${reservedAmount} credits for ${reservedIterations} iterations`)
+        }
+
+        // Broadcast 'working' status so the dashboard shows the progress panel
+        const sprintTeamChannel = await getTeamChannel(db, agent.teamId)
+        if (sprintTeamChannel) {
+          broadcastAgentStatus(agent.teamId, sprintTeamChannel.id, agent.id, agent.name, 'working')
         }
 
         for (const task of assignedTasks) {
@@ -1390,6 +1428,11 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           }
         }
 
+        // Broadcast 'idle' to clear the progress panel
+        if (sprintTeamChannel) {
+          broadcastAgentStatus(agent.teamId, sprintTeamChannel.id, agent.id, agent.name, 'idle')
+        }
+
         // Release unused reserved credits
         if (HOSTED_MODE && reservedAmount > 0) {
           const unusedIterations = reservedIterations - iterationsUsed
@@ -1403,6 +1446,11 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
         return // task sprint handled this heartbeat
       }
     } catch (err) {
+      // Clear progress panel on error
+      const errTeamChannel = await getTeamChannel(db, agent.teamId).catch(() => null)
+      if (errTeamChannel) {
+        broadcastAgentStatus(agent.teamId, errTeamChannel.id, agent.id, agent.name, 'idle')
+      }
       // Release reserved credits on error
       if (HOSTED_MODE && reservedAmount > 0) {
         const unusedIterations = reservedIterations - iterationsUsed
