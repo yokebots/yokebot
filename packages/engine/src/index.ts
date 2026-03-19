@@ -20,7 +20,7 @@ import { startScheduler, stopScheduler, drainScheduler, scheduleAgent, unschedul
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask, unblockTask } from './tasks.ts'
 import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
-import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getChannelMessages, getThreadReplies, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getChannelMessages, getThreadReplies, getMessagesByTaskId, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
 import { initWorkspace, listFiles, readFile, readBinaryFile, writeFile, writeBinaryFile, renameFile, deleteFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
 // Note: WorkspaceConfig kept for backward compat — workspace is now DB-backed
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
@@ -1037,26 +1037,25 @@ async function main() {
     res.json(task)
   })
 
-  // Combined task detail — returns task + thread messages + linked files in one request
+  // Combined task detail — returns task + team chat messages tagged with this task + linked files
   // Skips verifyOwnership (team middleware already verified membership, getTask checks team via query)
   app.get('/api/tasks/:id/detail', async (req, res) => {
     const t0 = Date.now()
     const teamId = req.user!.activeTeamId!
     const userId = req.user!.id
     const taskId = req.params.id
-    const [task, channel, files] = await Promise.all([
+    const [task, files, taskMessages] = await Promise.all([
       getTask(db, taskId),
-      getTaskThread(db, taskId, teamId),
       getFilesByTask(db, teamId, taskId),
+      getMessagesByTaskId(db, teamId, taskId, 100),
     ])
     const t1 = Date.now()
     if (!task || task.teamId !== teamId) return res.status(404).json({ error: 'Task not found' })
-    const messages = await getChannelMessages(db, channel.id, 50)
-    const t2 = Date.now()
     // Fire-and-forget: mark task as read
     markTaskRead(db, userId, taskId).catch(() => {})
-    console.log(`[perf:detail] parallel=${t1-t0}ms messages=${t2-t1}ms total=${t2-t0}ms`)
-    res.json({ task, channelId: channel.id, messages, files })
+    console.log(`[perf:detail] total=${t1-t0}ms`)
+    // taskMessages: team chat messages tagged with this task (chronological, latest first)
+    res.json({ task, channelId: '', messages: taskMessages, files })
   })
 
   app.post('/api/tasks', async (req, res) => {

@@ -52,6 +52,22 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
     return () => window.removeEventListener('click', close)
   }, [contextMenu])
 
+  // Listen for scroll-to-message events (from task detail panel)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const messageId = (e as CustomEvent).detail?.messageId
+      if (!messageId) return
+      const el = document.getElementById(`chat-msg-${messageId}`)
+      if (!el) return
+      // Scroll into view and flash highlight
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('bg-amber-100/70', 'transition-colors', 'duration-500')
+      setTimeout(() => el.classList.remove('bg-amber-100/70'), 2000)
+    }
+    window.addEventListener('yokebot:scroll-to-message', handler)
+    return () => window.removeEventListener('yokebot:scroll-to-message', handler)
+  }, [])
+
   const handleMessageContextMenu = (e: React.MouseEvent, msg: engine.ChatMessage) => {
     e.preventDefault()
     setContextMenu({ x: e.clientX, y: e.clientY, message: msg })
@@ -90,10 +106,23 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
     // Fetch the new message and append
     engine.getMessages(teamChannelId!, 1).then((msgs) => {
       if (msgs.length > 0) {
+        const newMsg = msgs[0]
         setMessages(prev => {
           // Deduplicate
-          if (prev.some(m => m.id === msgs[0].id)) return prev
-          return [...prev, msgs[0]]
+          if (prev.some(m => m.id === newMsg.id)) return prev
+
+          // If this is a thread reply, update the parent message's replyCount + latestReplyAt
+          if (newMsg.parentMessageId) {
+            const updated = prev.map(m =>
+              m.id === newMsg.parentMessageId
+                ? { ...m, replyCount: (m.replyCount || 0) + 1, latestReplyAt: newMsg.createdAt }
+                : m
+            )
+            // Thread replies don't appear in the main feed — just update the parent
+            return updated
+          }
+
+          return [...prev, newMsg]
         })
       }
     }).catch(() => {})
@@ -297,20 +326,21 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
           </div>
         )}
         {messages.map(msg => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            agentColorMap={agentColorMap}
-            humanName={userName}
-            onThreadClick={handleOpenThread}
-            onFileClick={onFileClick}
-            onTaskClick={onTaskClick}
-            onAgentClick={onAgentClick ? (id) => {
-              const info = agentColorMap.get(id)
-              onAgentClick(id, info?.name ?? 'Agent')
-            } : undefined}
-            onContextMenu={handleMessageContextMenu}
-          />
+          <div key={msg.id} id={`chat-msg-${msg.id}`}>
+            <MessageBubble
+              message={msg}
+              agentColorMap={agentColorMap}
+              humanName={userName}
+              onThreadClick={handleOpenThread}
+              onFileClick={onFileClick}
+              onTaskClick={onTaskClick}
+              onAgentClick={onAgentClick ? (id) => {
+                const info = agentColorMap.get(id)
+                onAgentClick(id, info?.name ?? 'Agent')
+              } : undefined}
+              onContextMenu={handleMessageContextMenu}
+            />
+          </div>
         ))}
       </div>
 

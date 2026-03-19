@@ -1,13 +1,26 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { PanelHeader } from './PanelHeader'
 import { AgentProgressPanel } from '@/components/AgentProgressPanel'
 import { useAgentProgress } from '@/hooks/useAgentProgress'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 import TagManager from '@/components/TagManager'
 import type { WorkspaceState, ViewerTab } from '@/pages/WorkspacePage'
 import * as engine from '@/lib/engine'
 
 const STATUS_OPTIONS = ['backlog', 'todo', 'in_progress', 'blocked', 'review', 'done', 'archived']
 const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent']
+
+function formatMessageTime(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffDays = Math.floor(diffMs / 86400000)
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (diffDays === 0) return time
+  if (diffDays === 1) return `Yesterday ${time}`
+  if (diffDays < 7) return `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
+}
 
 interface TaskDetailProps {
   taskId: string
@@ -19,9 +32,23 @@ interface TaskDetailProps {
 export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProps) {
   const [task, setTask] = useState<engine.EngineTask | null>(null)
   const [linkedFiles, setLinkedFiles] = useState<Array<{ path: string; name: string; size: number }>>([])
+  const [taskMessages, setTaskMessages] = useState<engine.ChatMessage[]>([])
   const [actionLoading, setActionLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const [teamUsers, setTeamUsers] = useState<Array<{ userId: string; email: string; displayName: string | null }>>([])
+  const [agentColorMap, setAgentColorMap] = useState<Map<string, { color: string; icon: string; name: string }>>(new Map())
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Build agent color map for message rendering
+  useEffect(() => {
+    const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6']
+    const icons = ['smart_toy', 'psychology', 'engineering', 'support_agent', 'memory', 'neurology', 'hub']
+    const map = new Map<string, { color: string; icon: string; name: string }>()
+    agents.forEach((a, i) => {
+      map.set(a.id, { color: colors[i % colors.length], icon: icons[i % icons.length], name: a.name })
+    })
+    setAgentColorMap(map)
+  }, [agents])
 
   // Fetch team users for assignee dropdown
   useEffect(() => {
@@ -38,12 +65,26 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
       const detail = await engine.getTaskDetail(taskId)
       setTask(detail.task)
       setLinkedFiles(detail.files)
+      setTaskMessages(detail.messages)
     } catch {
       setLoadError(true)
     }
   }, [taskId])
 
   useEffect(() => { loadAll() }, [loadAll])
+
+  // Refresh task messages when new messages arrive via SSE
+  useRealtimeEvent<{ channelId: string; messageId: number }>('new_message', () => {
+    // Refresh — the message might be tagged with this task
+    engine.getTaskDetail(taskId).then(detail => {
+      setTaskMessages(detail.messages)
+    }).catch(() => {})
+  })
+
+  // Scroll to bottom of task messages when they update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [taskMessages.length])
 
   const updateField = async (field: string, value: string | null) => {
     // Optimistic update so the UI feels instant
@@ -346,6 +387,69 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
             ))}
           </div>
         )}
+
+        {/* Related chat messages — mirrored from main chat, tagged with this task */}
+        <div className="px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2">
+            Related Messages {taskMessages.length > 0 && <span className="text-text-muted/60">({taskMessages.length})</span>}
+          </p>
+          {taskMessages.length === 0 ? (
+            <p className="text-xs text-text-muted/60 italic">No messages tagged with this task yet</p>
+          ) : (
+            <div className="space-y-1.5">
+              {taskMessages.map(msg => (
+                <button
+                  key={msg.id}
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('yokebot:scroll-to-message', { detail: { messageId: msg.id } }))
+                  }}
+                  className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-gray-100 transition-colors group"
+                >
+                  {/* Sender avatar/icon */}
+                  <div className="shrink-0 mt-0.5">
+                    {msg.senderType === 'agent' ? (
+                      <div
+                        className="h-5 w-5 rounded-full flex items-center justify-center"
+                        style={{ backgroundColor: agentColorMap.get(msg.senderId)?.color ?? '#6b7280' }}
+                      >
+                        <span className="material-symbols-outlined text-[12px] text-white">
+                          {agentColorMap.get(msg.senderId)?.icon ?? 'smart_toy'}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="h-5 w-5 rounded-full bg-forest-green flex items-center justify-center">
+                        <span className="text-[10px] font-bold text-white">
+                          {(msg.senderId === 'system' ? 'S' : 'H')}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {/* Content preview */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[11px] font-medium text-text-main truncate">
+                        {msg.senderType === 'agent'
+                          ? (agentColorMap.get(msg.senderId)?.name ?? 'Agent')
+                          : (msg.senderId === 'system' ? 'System' : 'You')}
+                      </span>
+                      <span className="text-[10px] text-text-muted/60 shrink-0">
+                        {formatMessageTime(msg.createdAt)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-text-muted line-clamp-2 leading-relaxed">
+                      {msg.content.replace(/[#*_~`>\[\]()]/g, '').slice(0, 200)}
+                    </p>
+                  </div>
+                  {/* Jump indicator */}
+                  <span className="material-symbols-outlined text-[14px] text-text-muted/40 group-hover:text-forest-green shrink-0 mt-1">
+                    open_in_new
+                  </span>
+                </button>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
 
       </div>
     </div>

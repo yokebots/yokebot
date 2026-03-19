@@ -189,8 +189,8 @@ export function WorkspacePage() {
   const markFileReadLocally = useCallback((path: string) => {
     // Track as recently-read so SSE re-fetches don't re-add it
     recentlyReadRef.current.add(path)
-    // Clear from recently-read after 10s (server should be consistent by then)
-    setTimeout(() => recentlyReadRef.current.delete(path), 10000)
+    // Keep in recently-read for 60s — agent may keep writing files during a sprint
+    setTimeout(() => recentlyReadRef.current.delete(path), 60000)
     setUnreadFileIds(prev => {
       if (!prev.has(path)) return prev
       const next = new Set(prev)
@@ -200,7 +200,9 @@ export function WorkspacePage() {
   }, [])
 
   const handleMarkFileRead = useCallback((path: string) => {
-    engine.markFileRead(path).catch(() => {})
+    engine.markFileRead(path).catch(err => {
+      console.warn('[workspace] markFileRead failed for path:', path, err)
+    })
     markFileReadLocally(path)
   }, [markFileReadLocally])
 
@@ -216,9 +218,11 @@ export function WorkspacePage() {
 
   const handleMarkAllFilesRead = useCallback(() => {
     unreadFileIds.forEach(path => {
-      engine.markFileRead(path).catch(() => {})
+      engine.markFileRead(path).catch(err => {
+        console.warn('[workspace] markFileRead failed for path:', path, err)
+      })
       recentlyReadRef.current.add(path)
-      setTimeout(() => recentlyReadRef.current.delete(path), 10000)
+      setTimeout(() => recentlyReadRef.current.delete(path), 60000)
     })
     setUnreadFileIds(new Set())
   }, [unreadFileIds])

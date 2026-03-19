@@ -97,6 +97,44 @@ function deduplicateSteps(steps: AgentProgressEvent[]): AgentProgressEvent[] {
   return result
 }
 
+/** Extract a human-readable summary of recent progress from steps */
+function getProgressSummary(steps: AgentProgressEvent[]): { recentActions: string[]; stats: string } {
+  const toolResults = steps.filter(s => s.type === 'tool_result')
+  const toolStarts = steps.filter(s => s.type === 'tool_start')
+
+  // Count meaningful actions
+  let filesWritten = 0
+  let commandsRun = 0
+  let browsed = 0
+  for (const s of toolStarts) {
+    const label = s.label.toLowerCase()
+    if (label.includes('write_file') || label.includes('sandbox_setup') || label.includes('write_files')) filesWritten++
+    else if (label.includes('exec') || label.includes('install')) commandsRun++
+    else if (label.includes('browser') || label.includes('navigate')) browsed++
+  }
+
+  // Build recent actions list — last 3 completed tool results
+  const recentActions: string[] = []
+  const recentResults = toolResults.slice(-3)
+  for (const r of recentResults) {
+    let action = r.label
+    if (r.detail) {
+      const firstLine = r.detail.split('\n')[0].slice(0, 60)
+      if (firstLine && firstLine !== action) action += ` — ${firstLine}`
+    }
+    recentActions.push(action)
+  }
+
+  // Build stats string
+  const parts: string[] = []
+  if (filesWritten > 0) parts.push(`${filesWritten} file${filesWritten > 1 ? 's' : ''} written`)
+  if (commandsRun > 0) parts.push(`${commandsRun} cmd${commandsRun > 1 ? 's' : ''}`)
+  if (browsed > 0) parts.push(`${browsed} page${browsed > 1 ? 's' : ''} browsed`)
+  const stats = parts.length > 0 ? parts.join(', ') : ''
+
+  return { recentActions, stats }
+}
+
 export function AgentProgressPanel({ steps, defaultExpanded = false, inline = false }: AgentProgressPanelProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -127,38 +165,61 @@ export function AgentProgressPanel({ steps, defaultExpanded = false, inline = fa
 
   const meaningfulSteps = deduplicateSteps(steps)
   const toolCalls = steps.filter(s => s.type === 'tool_start').length
+  const { recentActions, stats } = getProgressSummary(steps)
 
   return (
     <div className="overflow-hidden rounded-lg border border-border-subtle bg-gray-50/50 transition-all duration-300">
-      {/* Collapsed bar — click to expand */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs hover:bg-gray-100/50 transition-colors"
-      >
-        <span className="relative flex h-3.5 w-3.5 items-center justify-center shrink-0">
-          <span className="absolute h-3 w-3 rounded-full bg-accent-green/30" style={{ animation: 'pulse 2s ease-in-out infinite' }} />
-          <span className="relative h-2 w-2 rounded-full bg-accent-green" />
-        </span>
-        <span className="flex-1 truncate font-medium text-text-main">
-          {latest.label}
-          {latest.detail && <span className="font-normal text-text-muted ml-1.5">— {latest.detail.split('\n')[0].slice(0, 80)}</span>}
-        </span>
-        <span className="shrink-0 font-mono text-[10px] text-text-muted">
-          Step {latest.iteration}/{latest.maxIterations} · {toolCalls} tool{toolCalls !== 1 ? 's' : ''}
-        </span>
-        <span className={`material-symbols-outlined text-[14px] text-text-muted transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
-          expand_more
-        </span>
-      </button>
+      {/* Collapsed view — shows current action + recent progress trail */}
+      <div className="px-3 py-2">
+        {/* Top row: current action + step counter + expand toggle */}
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex w-full items-center gap-2 text-left text-xs"
+        >
+          <span className="relative flex h-3.5 w-3.5 items-center justify-center shrink-0">
+            <span className="absolute h-3 w-3 rounded-full bg-accent-green/30" style={{ animation: 'pulse 2s ease-in-out infinite' }} />
+            <span className="relative h-2 w-2 rounded-full bg-accent-green" />
+          </span>
+          <span className="flex-1 truncate font-medium text-text-main">
+            {latest.label}
+          </span>
+          <span className="shrink-0 font-mono text-[10px] text-text-muted">
+            {latest.iteration}/{latest.maxIterations}
+          </span>
+          <span className={`material-symbols-outlined text-[14px] text-text-muted transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
+            expand_more
+          </span>
+        </button>
 
-      {/* Expanded reasoning trace — clean single-thread view */}
+        {/* Mini progress trail — always visible when collapsed, shows last 3 completed actions */}
+        {!expanded && recentActions.length > 0 && (
+          <div className="mt-1.5 ml-6 space-y-0.5">
+            {recentActions.map((action, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-[11px] text-text-muted">
+                <span className="text-accent-green text-[10px]">✓</span>
+                <span className="truncate">{action}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Stats bar — always visible */}
+        {!expanded && (stats || toolCalls > 0) && (
+          <div className="mt-1 ml-6 text-[10px] text-text-muted/70">
+            {stats}{stats && toolCalls > 0 ? ' · ' : ''}{toolCalls > 0 ? `${toolCalls} tool call${toolCalls !== 1 ? 's' : ''}` : ''}
+          </div>
+        )}
+      </div>
+
+      {/* Expanded reasoning trace — capped height, doesn't take over screen */}
       {expanded && (
         <div
           ref={scrollRef}
-          className="max-h-96 overflow-y-auto border-t border-border-subtle px-3 py-2 space-y-0"
+          className="max-h-48 overflow-y-auto border-t border-border-subtle px-3 py-2 space-y-0"
         >
-          {meaningfulSteps.map((step, idx) => (
-            <StepRow key={idx} step={step} isLatest={idx === meaningfulSteps.length - 1} />
+          {/* Skip the last step — it's already shown in the header */}
+          {meaningfulSteps.slice(0, -1).map((step, idx) => (
+            <StepRow key={idx} step={step} isLatest={false} />
           ))}
         </div>
       )}
