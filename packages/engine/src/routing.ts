@@ -57,13 +57,17 @@ const ROUTING_PROFILES: RoutingProfile[] = [
 
 Available phases:
 - "research": Browse a target website to extract design details (colors, fonts, layout). ONLY needed if the task mentions a specific URL or website to reference/clone/improve.
+- "plan": Break the task into implementation steps, component list, file structure, and tech decisions. Recommended for complex tasks with multiple features.
+- "design": Create a detailed design specification (color palette, typography, spacing, component breakdown) and generate a visual mockup image. Recommended when the task involves UI work.
 - "build": Write code to build the web application. ALWAYS needed.
 - "review": Visit the preview URL, compare to requirements, fix issues. ALWAYS needed unless the task is trivial.
 
-Respond with JSON only: {"phases": ["research", "build", "review"], "reasoning": "one sentence"}
+Respond with JSON only: {"phases": ["research", "plan", "design", "build", "review"], "reasoning": "one sentence"}
 
 Rules:
 - If no URL/website is mentioned, skip "research"
+- "plan" is recommended for complex tasks (3+ features or pages), skip for simple single-component tasks
+- "design" is recommended for any task with UI work, skip for backend-only or config tasks
 - "build" is always required
 - "review" should almost always be included
 - Do NOT add phases not in the list above`,
@@ -84,12 +88,65 @@ DO NOT skip steps or cut corners. Common excuses to reject:
         required: false,
       },
       {
+        name: 'plan',
+        modelId: 'deepseek-v3.2',
+        maxIterations: 3,
+        toolCategories: ['core', 'tasks'],
+        skillFilter: [],
+        systemInstruction: `You are an implementation planner. Break this task into a concrete build plan. Output a structured document covering:
+
+1. **Component List** — every React component needed, with descriptions
+2. **File Structure** — exact file paths and what each file contains
+3. **Tech Decisions** — libraries, patterns, state management approach
+4. **Data Flow** — how data moves between components, any API calls needed
+5. **Responsive Strategy** — breakpoints, mobile-first considerations
+6. **Edge Cases** — error states, loading states, empty states
+
+Be specific and opinionated. The build phase will follow this plan exactly. Do NOT write code — only plan.
+
+DO NOT skip steps or cut corners. Common excuses to reject:
+- "This is simple enough to figure out during build" — NO. Plan everything upfront.
+- "Standard React patterns are fine" — NO. Specify which patterns and why.
+- "I'll leave the details to the builder" — NO. The more detail here, the better the build.`,
+        required: false,
+      },
+      {
+        name: 'design',
+        modelId: 'deepseek-v3.2',
+        maxIterations: 5,
+        toolCategories: ['core', 'media'],
+        skillFilter: [],
+        systemInstruction: `You are a UI/UX designer. Create a comprehensive design specification AND a visual mockup.
+
+**Step 1 — Design Spec Document** (output as text):
+1. **Color Palette** — primary, secondary, accent, background, surface, text colors (hex values)
+2. **Typography** — heading font, body font, sizes, weights, line heights
+3. **Spacing System** — base unit, padding/margin scale
+4. **Component Styles** — buttons, cards, inputs, navigation bar, footer
+5. **Layout** — grid system, max-width, responsive breakpoints
+6. **Visual Hierarchy** — what draws the eye first, second, third
+7. **Micro-interactions** — hover states, transitions, animations
+
+If a research phase provided branding details from a target site, match those exactly. Otherwise, create a modern, clean design that fits the task requirements.
+
+**Step 2 — Visual Mockup**: Call generate_image with modelId "nano-banana-2" to generate a mockup of the main page/screen. Write a detailed prompt describing the exact layout, colors, and content. This image will be passed to the build phase as a visual reference.
+
+DO NOT skip the mockup. The build phase needs both the spec AND the image to achieve visual fidelity.`,
+        required: false,
+      },
+      {
         name: 'build',
         modelId: 'deepseek-v3.2',
         maxIterations: 30,
         toolCategories: ['core', 'sandbox', 'tasks'],
         skillFilter: [],
-        systemInstruction: `Build a complete working web app using sandbox_setup (one call, all files). Use React + Vite + Tailwind v4. Match the design from the research phase. Focus on visual fidelity and working functionality. Do NOT browse.
+        systemInstruction: `Build a complete working web app using sandbox_setup (one call, all files). Use React + Vite + Tailwind v4.
+
+If a plan phase ran, follow the component list and file structure exactly.
+If a design phase ran, match the color palette, typography, spacing, and layout from the design spec. If a mockup image was generated, replicate its visual layout as closely as possible.
+If a research phase ran, match the branding extracted from the target site.
+
+Focus on visual fidelity and working functionality. Do NOT browse.
 
 DO NOT skip steps or cut corners. Common excuses to reject:
 - "I'll add styling later" — NO. Ship complete styling in the first pass.
@@ -105,7 +162,7 @@ DO NOT skip steps or cut corners. Common excuses to reject:
         maxIterations: 8,
         toolCategories: ['core', 'browser', 'sandbox', 'tasks'],
         skillFilter: [],
-        systemInstruction: `Visit the preview URL with browser_navigate. Compare the app to the requirements. Fix any visual or functional issues using sandbox_write_files. When it looks correct, mark the task done.
+        systemInstruction: `Visit the preview URL with browser_navigate. Compare the app to the requirements and the design spec from earlier phases. Fix any visual or functional issues using sandbox_write_files. When it looks correct, mark the task done.
 
 CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is still broken, STOP. The approach is wrong — do not keep iterating on a broken fix. Instead, describe the issue clearly in your response and mark the task as blocked so a human can intervene.
 
