@@ -2154,6 +2154,36 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 51,
+    name: 'add_mimo_v2_flash_model',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run(
+          `INSERT INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT (model_id) DO NOTHING`,
+          ['mimo-v2-flash', 5, 'chat', 5, 4, 5,
+            '#1 open-source on SWE-bench — 309B MoE (15B active), hybrid reasoning, 262K context, 3.5% the cost of Sonnet',
+            'Open-source SWE-bench champion',
+            '["#1 open-source on SWE-bench Verified","309B MoE with only 15B active params","Hybrid reasoning toggle","262K context","3.5% cost of Claude Sonnet"]',
+            '["Chinese lab (Xiaomi)","Newer model, less battle-tested"]',
+            '2025-07-01', 75],
+        )
+      } else {
+        await db.run(
+          `INSERT OR IGNORE INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          ['mimo-v2-flash', 5, 'chat', 5, 4, 5,
+            '#1 open-source on SWE-bench — 309B MoE (15B active), hybrid reasoning, 262K context, 3.5% the cost of Sonnet',
+            'Open-source SWE-bench champion',
+            '["#1 open-source on SWE-bench Verified","309B MoE with only 15B active params","Hybrid reasoning toggle","262K context","3.5% cost of Claude Sonnet"]',
+            '["Chinese lab (Xiaomi)","Newer model, less battle-tested"]',
+            '2025-07-01', 75],
+        )
+      }
+    },
+  },
 ]
 
 /**

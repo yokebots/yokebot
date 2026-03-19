@@ -162,6 +162,17 @@ export const MODEL_CATALOG: LogicalModel[] = [
     ],
   },
   {
+    id: 'mimo-v2-flash',
+    name: 'MiMo-V2-Flash',
+    description: '#1 open-source on SWE-bench — 309B MoE (15B active), hybrid reasoning, 262K context, 3.5% the cost of Sonnet',
+    type: 'chat',
+    category: 'reasoning',
+    contextWindow: 262000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'xiaomi/mimo-v2-flash', priority: 1 },
+    ],
+  },
+  {
     id: 'mercury-2',
     name: 'Mercury 2',
     description: 'Speed king — 1000 tokens/sec, diffusion-based architecture, great for real-time interactions',
