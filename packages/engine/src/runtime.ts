@@ -2429,13 +2429,24 @@ export async function runReactLoop(
     trimmedMessages = trimMessagesToFit(maskedMessages, maxInputTokens, toolsTokens)
 
     if (!wasNudged) emitProgress('thinking', `Reasoning...`, i + 1)
-    let completion: CompletionResponse
-    try {
-      completion = await chatCompletionWithFallback(modelConfig, trimmedMessages, tools)
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Unknown LLM error'
-      console.error(`[runtime] LLM call failed on iteration ${i + 1}: ${errMsg}`)
-      // Graceful exit — return whatever progress we've made so far
+    let completion!: CompletionResponse
+    // FP-1 fix: retry LLM call up to 2 times before giving up
+    let llmSuccess = false
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        completion = await chatCompletionWithFallback(modelConfig, trimmedMessages, tools)
+        llmSuccess = true
+        break
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : 'Unknown LLM error'
+        console.error(`[runtime] LLM call failed on iteration ${i + 1}, attempt ${attempt + 1}/3: ${errMsg}`)
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, (attempt + 1) * 1500))
+        }
+      }
+    }
+    if (!llmSuccess) {
+      console.error(`[runtime] LLM call failed after 3 attempts on iteration ${i + 1} — exiting`)
       if (!response) response = "I ran into a temporary issue communicating with my AI model. I'll pick this back up on my next check-in."
       break
     }

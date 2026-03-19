@@ -408,6 +408,11 @@ export async function respondToMention(
     modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
   } catch (err) {
     console.error(`[scheduler] Cannot resolve model for "${agent.name}":`, (err as Error).message)
+    // FP-9 fix: notify user instead of silent return
+    await sendMessage(db, channelId, 'agent', agent.id,
+      `Sorry, I'm having trouble connecting to my AI model right now. I'll try again on my next check-in.`,
+      undefined, teamId)
+    broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
     return
   }
 
@@ -483,6 +488,10 @@ export async function respondToMention(
   } catch (err) {
     broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
     console.error(`[scheduler] Mention ack error for "${agent.name}":`, err)
+    // FP-10 fix: notify user instead of silent return
+    await sendMessage(db, channelId, 'agent', agent.id,
+      `I ran into an issue processing your message. I'll try again on my next check-in.`,
+      undefined, teamId)
     return
   }
 
@@ -599,8 +608,14 @@ export async function respondToMention(
         await logActivity(db, 'mention_followup', agent.id, `Follow-up: ${cleanResponse.slice(0, 150)}`, undefined, teamId)
         console.log(`[scheduler] "${agent.name}" posted mention follow-up`)
       }
-    }).catch((err) => {
+    }).catch(async (err) => {
       console.error(`[scheduler] Mention work error for "${agent.name}":`, err)
+      // FP-11 fix: notify user that follow-up work failed
+      try {
+        await sendMessage(db, channelId, 'agent', agent.id,
+          `I ran into an issue while working on that. I'll try again on my next check-in.`,
+          undefined, teamId)
+      } catch { /* best-effort */ }
     }).finally(() => {
       markSprintEnd(db, agentId).catch(() => {})
       inFlightSprints.delete(mentionKey)
@@ -919,7 +934,14 @@ async function runRoutedSprint(
   // Step 1: Orchestrator decides which phases to run (~1 LLM call)
   // Pass installed skills so orchestrator can assign skills to phases that need them
   const installedSkills = (await getAgentSkills(db, agent.id)).map(s => s.skillName)
-  const plan = await runOrchestrator(db, profile, task.title, task.description, teamId, installedSkills.length > 0 ? installedSkills : undefined)
+  let plan: { phases: string[]; skillOverrides?: Record<string, string[]> }
+  try {
+    plan = await runOrchestrator(db, profile, task.title, task.description, teamId, installedSkills.length > 0 ? installedSkills : undefined)
+  } catch (err) {
+    // FP-15 fix: fall back to running all phases from the profile instead of killing the sprint
+    console.warn(`[routing] Orchestrator failed for "${agent.name}": ${(err as Error).message} — falling back to all phases`)
+    plan = { phases: profile.phases.map(p => p.name) }
+  }
   console.log(`[routing] "${agent.name}" — orchestrator planned: [${plan.phases.join(', ')}]`)
 
   // Step 2: Execute each phase sequentially
@@ -963,10 +985,20 @@ async function runRoutedSprint(
     } catch {
       if (phase.fallbackModelId) {
         console.log(`[routing] Phase "${phaseName}" — model "${phase.modelId}" unavailable, trying fallback "${phase.fallbackModelId}"`)
-        phaseModelConfig = await resolveModelConfig(db, phase.fallbackModelId)
-        phaseModelId = phase.fallbackModelId
+        try {
+          phaseModelConfig = await resolveModelConfig(db, phase.fallbackModelId)
+          phaseModelId = phase.fallbackModelId
+        } catch {
+          // FP-14 fix: skip phase instead of killing entire sprint
+          console.warn(`[routing] Phase "${phaseName}" — fallback "${phase.fallbackModelId}" also unavailable, skipping phase`)
+          phaseResults.push({ phase: phaseName, summary: `Skipped: model unavailable`, iterations: 0, model: phase.modelId, success: false })
+          continue
+        }
       } else {
-        throw new Error(`[routing] Phase "${phaseName}" — model "${phase.modelId}" unavailable, no fallback`)
+        // FP-14 fix: skip phase instead of killing entire sprint
+        console.warn(`[routing] Phase "${phaseName}" — model "${phase.modelId}" unavailable, no fallback — skipping phase`)
+        phaseResults.push({ phase: phaseName, summary: `Skipped: model unavailable`, iterations: 0, model: phase.modelId, success: false })
+        continue
       }
     }
 
@@ -1053,7 +1085,14 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     return
   }
 
-  const modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
+  let modelConfig
+  try {
+    modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
+  } catch (err) {
+    // FP-8 fix: handle model resolution failure instead of crashing heartbeat
+    console.error(`[scheduler] Heartbeat model resolution failed for "${agent.name}":`, (err as Error).message)
+    return
+  }
   const teamTz = await getTeamTimezoneCached(db, agent.teamId)
   const heartbeatBalance = HOSTED_MODE ? await getCreditBalance(db, agent.teamId) : null
   const heartbeatBrandKitRow = await db.queryOne<Record<string, unknown>>(
@@ -1458,7 +1497,8 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
         if (refund > 0) await releaseCredits(db, agent.teamId, refund, `Sprint error refund`).catch(() => {})
       }
       console.error(`[scheduler] Task sprint error for "${agent.name}":`, err)
-      // Fall through to generic check-in
+      // FP-12 fix: return instead of falling through to generic check-in (wastes credits)
+      return
     }
   }
 
