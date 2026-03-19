@@ -143,6 +143,7 @@ export interface TaskTag {
 
 export interface EngineTask {
   id: string
+  type: 'task' | 'approval' | 'clarification' | 'action_item'
   title: string
   description: string | null
   status: 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'blocked' | 'archived'
@@ -154,7 +155,7 @@ export interface EngineTask {
   headerImage: string | null
   attachments: TaskAttachment[]
   tags: TaskTag[]
-  blockedReason: 'max_retries' | 'approval_pending' | 'dependency' | 'manual' | null
+  blockedReason: 'system_error' | 'max_retries' | 'approval_pending' | 'needs_input' | 'dependency' | 'manual' | null
   blockedApprovalId: string | null
   blockedReasonText: string | null
   scratchpad: string | null
@@ -308,13 +309,14 @@ export interface TaskDetailResponse {
 export const getTaskDetail = (id: string) =>
   cached(`taskDetail:${id}`, () => request<TaskDetailResponse>(`/api/tasks/${id}/detail`), 10_000)
 
-export const listTasks = (filters?: { status?: string; agentId?: string; assignedUserId?: string; parentId?: string; tags?: string }) => {
+export const listTasks = (filters?: { status?: string; agentId?: string; assignedUserId?: string; parentId?: string; tags?: string; type?: string }) => {
   const params = new URLSearchParams()
   if (filters?.status) params.set('status', filters.status)
   if (filters?.agentId) params.set('agentId', filters.agentId)
   if (filters?.assignedUserId) params.set('assignedUserId', filters.assignedUserId)
   if (filters?.parentId !== undefined) params.set('parentId', filters.parentId)
   if (filters?.tags) params.set('tags', filters.tags)
+  if (filters?.type) params.set('type', filters.type)
   const qs = params.toString()
   return cached(`tasks:${qs}`, () => request<EngineTask[]>(`/api/tasks${qs ? `?${qs}` : ''}`))
 }
@@ -662,7 +664,7 @@ export interface EngineNotification {
   id: string
   teamId: string
   userId: string
-  type: 'approval_needed' | 'task_assigned' | 'agent_message' | 'mention' | 'system'
+  type: 'approval_needed' | 'task_assigned' | 'clarification_needed' | 'agent_message' | 'mention' | 'system'
   title: string
   body: string
   link: string | null

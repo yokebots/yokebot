@@ -77,6 +77,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
   })
   const [filterAgent, setFilterAgent] = useState<string>('')
   const [filterMyTasks, setFilterMyTasks] = useState(false)
+  const [filterTypeTab, setFilterTypeTab] = useState<'all' | 'work' | 'requests'>('all')
   const [filterTags, setFilterTags] = useState<string[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -119,10 +120,12 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
       if (filterAgent) filters.agentId = filterAgent
       if (filterMyTasks && user?.id) filters.assignedUserId = user.id
       if (filterTags.length > 0) filters.tags = filterTags.join(',')
+      if (filterTypeTab === 'work') filters.type = 'task,action_item'
+      else if (filterTypeTab === 'requests') filters.type = 'approval,clarification'
       const result = await engine.listTasks(Object.keys(filters).length > 0 ? filters : undefined)
       setTasks(result)
     } catch { /* offline */ }
-  }, [filterAgent, filterMyTasks, filterTags, user?.id])
+  }, [filterAgent, filterMyTasks, filterTags, filterTypeTab, user?.id])
 
   useEffect(() => { loadTasks() }, [loadTasks])
 
@@ -230,6 +233,18 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
               <span className="material-symbols-outlined text-[13px]">person</span>
               My Tasks
             </button>
+            {/* Type filter tabs */}
+            <div className="flex items-center rounded-lg bg-light-surface-alt/50 p-0.5">
+              {([['all', 'All'], ['work', 'Work'], ['requests', 'Requests']] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setFilterTypeTab(key)}
+                  className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${filterTypeTab === key ? 'bg-white text-text-main shadow-sm' : 'text-text-muted hover:text-text-secondary'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             {doneCount > 0 && (
               <button
                 onClick={handleArchiveCompleted}
@@ -441,6 +456,10 @@ function ListView({
             )}
             {/* Unread indicator */}
             {isUnread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500 self-start mt-1.5" />}
+            {/* Type icon for non-default task types */}
+            {task.type === 'clarification' && <span className="material-symbols-outlined text-[14px] text-purple-500 shrink-0 self-start mt-0.5" title="Agent needs input">help</span>}
+            {task.type === 'approval' && <span className="material-symbols-outlined text-[14px] text-orange-500 shrink-0 self-start mt-0.5" title="Approval needed">gpp_maybe</span>}
+            {task.type === 'action_item' && <span className="material-symbols-outlined text-[14px] text-blue-500 shrink-0 self-start mt-0.5" title="Action item">assignment_ind</span>}
             {/* Title + Tags stacked */}
             <div className="flex-1 min-w-0">
               <span className={`block truncate ${isDone ? 'line-through text-text-muted' : isUnread ? 'font-semibold text-text-main' : 'text-text-main'}`}>

@@ -346,18 +346,27 @@ export function MessageBubble({
         {/* Thread badge */}
         {!compact && !isThreadParent && message.replyCount > 0 && onThreadClick && (() => {
           const isRecent = message.latestReplyAt && (Date.now() - new Date(message.latestReplyAt).getTime()) < 300000
+          // Check if thread has unread replies (compare against last-read timestamp in localStorage)
+          const threadReadKey = `thread-read-${message.id}`
+          const lastReadAt = localStorage.getItem(threadReadKey)
+          const hasUnread = message.latestReplyAt && (!lastReadAt || new Date(message.latestReplyAt).getTime() > Number(lastReadAt))
+          const showIndicator = isRecent || hasUnread
           return (
             <button
-              onClick={() => onThreadClick(message)}
+              onClick={() => {
+                // Mark thread as read when user opens it
+                localStorage.setItem(threadReadKey, String(Date.now()))
+                onThreadClick(message)
+              }}
               className={`mt-1.5 flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors border ${
-                isRecent
+                showIndicator
                   ? 'text-forest-green bg-forest-green/10 border-forest-green/30 shadow-sm'
                   : 'text-forest-green bg-forest-green/5 hover:bg-forest-green/10 border-forest-green/15'
               }`}
             >
-              {isRecent && (
+              {showIndicator && (
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-forest-green opacity-75" />
+                  {isRecent && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-forest-green opacity-75" />}
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-forest-green" />
                 </span>
               )}

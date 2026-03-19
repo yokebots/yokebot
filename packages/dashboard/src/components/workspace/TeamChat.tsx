@@ -59,10 +59,15 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
       if (!messageId) return
       const el = document.getElementById(`chat-msg-${messageId}`)
       if (!el) return
-      // Scroll into view and flash highlight
+      // Scroll into view and flash highlight using inline styles (Tailwind v4 won't see dynamic classList classes)
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('bg-amber-100/70', 'transition-colors', 'duration-500')
-      setTimeout(() => el.classList.remove('bg-amber-100/70'), 2000)
+      el.style.backgroundColor = 'rgba(251, 191, 36, 0.3)'
+      el.style.transition = 'background-color 0.5s'
+      el.style.borderRadius = '8px'
+      setTimeout(() => {
+        el.style.backgroundColor = ''
+        el.style.borderRadius = ''
+      }, 2000)
     }
     window.addEventListener('yokebot:scroll-to-message', handler)
     return () => window.removeEventListener('yokebot:scroll-to-message', handler)

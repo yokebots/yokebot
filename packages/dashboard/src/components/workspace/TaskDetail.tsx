@@ -194,85 +194,132 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
         </button>
       </div>
 
-      {/* Blocked banner */}
-      {task.status === 'blocked' && (
-        <div className={`px-3 py-2.5 border-b shrink-0 ${
-          task.blockedReason === 'max_retries' ? 'bg-amber-50 border-amber-200' :
-          task.blockedReason === 'approval_pending' ? 'bg-blue-50 border-blue-200' :
+      {/* Blocked banner — distinct per reason */}
+      {task.status === 'blocked' && (() => {
+        const reason = task.blockedReason
+        // Parse structured error context (system_error stores JSON in blockedReasonText)
+        let errorCtx: { error?: string; phase?: string; model?: string; sprintCount?: number; suggestion?: string } | null = null
+        if ((reason === 'system_error' || reason === 'max_retries') && task.blockedReasonText) {
+          try { errorCtx = JSON.parse(task.blockedReasonText) } catch { /* plain text fallback */ }
+        }
+
+        const bannerStyle =
+          reason === 'system_error' || reason === 'max_retries' ? 'bg-red-50 border-red-200' :
+          reason === 'approval_pending' ? 'bg-orange-50 border-orange-200' :
+          reason === 'needs_input' ? 'bg-purple-50 border-purple-200' :
           'bg-gray-50 border-gray-200'
-        }`}>
-          <div className="flex items-center gap-2">
-            <span className={`material-symbols-outlined text-[18px] ${
-              task.blockedReason === 'max_retries' ? 'text-amber-600' :
-              task.blockedReason === 'approval_pending' ? 'text-blue-600' :
-              'text-gray-500'
-            }`}>
-              {task.blockedReason === 'approval_pending' ? 'hourglass_top' : 'error'}
-            </span>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-text-main">
-                {task.blockedReason === 'max_retries' && `Agent failed after ${task.sprintCount} attempts`}
-                {task.blockedReason === 'approval_pending' && 'Waiting for approval'}
-                {task.blockedReason === 'dependency' && 'Blocked by another task'}
-                {task.blockedReason === 'manual' && 'Manually blocked'}
-                {!task.blockedReason && 'Task is blocked'}
-              </p>
-              {task.blockedReasonText && (
-                <p className="text-[11px] text-text-secondary mt-1 whitespace-pre-wrap line-clamp-4">
-                  {task.blockedReasonText}
+
+        const iconColor =
+          reason === 'system_error' || reason === 'max_retries' ? 'text-red-600' :
+          reason === 'approval_pending' ? 'text-orange-600' :
+          reason === 'needs_input' ? 'text-purple-600' :
+          'text-gray-500'
+
+        const icon =
+          reason === 'system_error' || reason === 'max_retries' ? 'error' :
+          reason === 'approval_pending' ? 'gpp_maybe' :
+          reason === 'needs_input' ? 'help' :
+          'block'
+
+        return (
+          <div className={`px-3 py-2.5 border-b shrink-0 ${bannerStyle}`}>
+            <div className="flex items-start gap-2">
+              <span className={`material-symbols-outlined text-[18px] mt-0.5 ${iconColor}`}>{icon}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-text-main">
+                  {(reason === 'system_error' || reason === 'max_retries') && 'System Error'}
+                  {reason === 'approval_pending' && 'Approval Required'}
+                  {reason === 'needs_input' && 'Agent Needs Your Input'}
+                  {reason === 'dependency' && 'Blocked by Another Task'}
+                  {reason === 'manual' && 'Manually Blocked'}
+                  {!reason && 'Task is Blocked'}
                 </p>
-              )}
-            </div>
-            <div className="flex gap-1.5 shrink-0">
-              {task.blockedReason === 'max_retries' && (
-                <button
-                  onClick={handleRetry}
-                  disabled={actionLoading}
-                  className="rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-                >
-                  Retry
-                </button>
-              )}
-              {task.blockedReason === 'approval_pending' && (
-                <>
+                {/* System error: show structured details */}
+                {(reason === 'system_error' || reason === 'max_retries') && errorCtx && (
+                  <div className="mt-1.5 space-y-1">
+                    <p className="text-[11px] text-red-700 bg-red-100/60 rounded px-2 py-1 font-mono whitespace-pre-wrap line-clamp-6">
+                      {errorCtx.error}
+                    </p>
+                    {errorCtx.phase && (
+                      <p className="text-[10px] text-text-secondary">
+                        Phase: <span className="font-medium">{errorCtx.phase}</span>
+                        {errorCtx.model && <> &middot; Model: <span className="font-medium">{errorCtx.model}</span></>}
+                        {errorCtx.sprintCount && <> &middot; Attempts: <span className="font-medium">{errorCtx.sprintCount}</span></>}
+                      </p>
+                    )}
+                    {errorCtx.suggestion && (
+                      <p className="text-[11px] text-text-secondary italic">{errorCtx.suggestion}</p>
+                    )}
+                  </div>
+                )}
+                {/* System error without JSON: show raw text */}
+                {(reason === 'system_error' || reason === 'max_retries') && !errorCtx && task.blockedReasonText && (
+                  <p className="text-[11px] text-text-secondary mt-1 whitespace-pre-wrap line-clamp-6">{task.blockedReasonText}</p>
+                )}
+                {/* Approval: show action detail */}
+                {reason === 'approval_pending' && task.blockedReasonText && (
+                  <p className="text-[11px] text-text-secondary mt-1 whitespace-pre-wrap line-clamp-4">{task.blockedReasonText}</p>
+                )}
+                {/* Needs input: show the question */}
+                {reason === 'needs_input' && task.blockedReasonText && (
+                  <p className="text-[11px] text-purple-700 mt-1 whitespace-pre-wrap line-clamp-4">{task.blockedReasonText}</p>
+                )}
+                {/* Fallback for other reasons */}
+                {reason !== 'system_error' && reason !== 'max_retries' && reason !== 'approval_pending' && reason !== 'needs_input' && task.blockedReasonText && (
+                  <p className="text-[11px] text-text-secondary mt-1 whitespace-pre-wrap line-clamp-4">{task.blockedReasonText}</p>
+                )}
+              </div>
+              <div className="flex gap-1.5 shrink-0">
+                {(reason === 'system_error' || reason === 'max_retries') && (
                   <button
-                    onClick={() => handleApprovalAction('rejected')}
+                    onClick={handleRetry}
                     disabled={actionLoading}
-                    className="rounded-lg border border-red-200 px-2.5 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    className="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                   >
-                    Reject
+                    Retry Now
                   </button>
+                )}
+                {reason === 'approval_pending' && (
+                  <>
+                    <button
+                      onClick={() => handleApprovalAction('rejected')}
+                      disabled={actionLoading}
+                      className="rounded-lg border border-red-200 px-2.5 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      onClick={() => handleApprovalAction('approved')}
+                      disabled={actionLoading}
+                      className="rounded-lg bg-forest-green px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-forest-green/90 disabled:opacity-50"
+                    >
+                      Approve
+                    </button>
+                  </>
+                )}
+                {reason === 'needs_input' && (
                   <button
-                    onClick={() => handleApprovalAction('approved')}
+                    onClick={handleUnblock}
+                    disabled={actionLoading}
+                    className="rounded-lg bg-purple-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
+                  >
+                    Answered
+                  </button>
+                )}
+                {(reason === 'manual' || reason === 'dependency' || !reason) && (
+                  <button
+                    onClick={handleUnblock}
                     disabled={actionLoading}
                     className="rounded-lg bg-forest-green px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-forest-green/90 disabled:opacity-50"
                   >
-                    Approve
+                    Unblock
                   </button>
-                </>
-              )}
-              {(task.blockedReason === 'manual' || task.blockedReason === 'dependency') && (
-                <button
-                  onClick={handleUnblock}
-                  disabled={actionLoading}
-                  className="rounded-lg bg-forest-green px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-forest-green/90 disabled:opacity-50"
-                >
-                  Unblock
-                </button>
-              )}
-              {!task.blockedReason && (
-                <button
-                  onClick={handleRetry}
-                  disabled={actionLoading}
-                  className="rounded-lg bg-forest-green px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-forest-green/90 disabled:opacity-50"
-                >
-                  Unblock
-                </button>
-              )}
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Live agent progress (tool streaming) */}
       {agentSteps.length > 0 && (

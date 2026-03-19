@@ -5,6 +5,7 @@ import * as engine from '@/lib/engine'
 const severityDot: Record<string, string> = {
   approval_needed: 'bg-amber-500',
   task_assigned: 'bg-blue-500',
+  clarification_needed: 'bg-purple-500',
   agent_message: 'bg-forest-green',
   mention: 'bg-purple-500',
   system: 'bg-gray-400',
@@ -13,6 +14,7 @@ const severityDot: Record<string, string> = {
 const typeIcons: Record<string, string> = {
   approval_needed: 'approval',
   task_assigned: 'assignment',
+  clarification_needed: 'help',
   agent_message: 'smart_toy',
   mention: 'alternate_email',
   system: 'info',
@@ -32,7 +34,7 @@ export function NotificationCenter({ onClose }: { onClose: () => void }) {
   const unreadCount = notifications.filter((n) => !n.read).length
 
   const filtered = notifications.filter((n) => {
-    if (filter === 'urgent') return n.type === 'approval_needed'
+    if (filter === 'urgent') return n.type === 'approval_needed' || n.type === 'clarification_needed'
     if (filter === 'unread') return !n.read
     return true
   })
