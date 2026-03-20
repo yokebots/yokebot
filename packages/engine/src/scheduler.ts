@@ -192,6 +192,13 @@ export async function startScheduler(db: Db, workspaceConfig?: WorkspaceConfig, 
     for (const agent of orphaned) {
       await markSprintEnd(db, agent.id)
       orphanedIds.add(agent.id)
+      // Broadcast 'idle' so any connected dashboard clears stale "is working..." indicators
+      try {
+        const teamChannel = await getTeamChannel(db, agent.teamId)
+        if (teamChannel) {
+          broadcastAgentStatus(agent.teamId, teamChannel.id, agent.id, agent.name, 'idle')
+        }
+      } catch { /* best-effort — API server may not be ready yet */ }
       console.log(`[scheduler] Recovered "${agent.name}" (sprint started ${agent.sprintStartedAt})`)
     }
   }
@@ -893,6 +900,12 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     return
   }
 
+  // Prevent duplicate sprints for the same agent
+  if (inFlightSprints.has(agent.id)) {
+    console.log(`[scheduler] Skipping heartbeat for "${agent.name}" — sprint already in flight`)
+    return
+  }
+
   // Per-team concurrency limiter
   const teamCount = activeHeartbeatsPerTeam.get(agent.teamId) ?? 0
   if (teamCount >= MAX_CONCURRENT_PER_TEAM) {
@@ -1335,10 +1348,27 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           const status = result.taskCompleted ? 'DONE' : result.taskBlocked ? 'BLOCKED' : 'continuing'
 
           // Post sprint result to team channel (all discussion lives here now)
-          if (!isNoOpResponse && !looksLikeJsonDump) {
+          // Always post for completed/blocked tasks so users see results; skip only for no-op continuing sprints
+          const shouldPost = result.taskCompleted || result.taskBlocked || (!isNoOpResponse && !looksLikeJsonDump)
+          if (shouldPost) {
             try {
               const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'
-              const teamSummary = `@[${task.title}](task:${task.id}) — ${statusLabel} (${result.iterations} iterations)${cleanResponse ? `\n${cleanResponse}` : ''}`
+              // Include preview URL for builder tasks so users can see what was built
+              let previewSuffix = ''
+              if (sandboxProjectId && result.taskCompleted) {
+                try {
+                  const { getSandboxProject } = await import('./sandbox.ts')
+                  const project = await getSandboxProject(db, sandboxProjectId)
+                  if (project?.previewUrl) {
+                    previewSuffix = `\n\n**Preview:** [Open app](${project.previewUrl})`
+                  }
+                } catch { /* best-effort */ }
+              }
+              // Use a meaningful fallback when the model's response is empty/useless
+              const responseText = (!isNoOpResponse && !looksLikeJsonDump && cleanResponse)
+                ? `\n${cleanResponse}`
+                : result.taskCompleted ? '\nTask completed successfully.' : result.taskBlocked ? '\nTask is blocked and needs attention.' : ''
+              const teamSummary = `@[${task.title}](task:${task.id}) — ${statusLabel} (${result.iterations} iterations)${responseText}${previewSuffix}`
               const teamChannel = await getTeamChannel(db, agent.teamId)
               const existingMsg = await findLatestTaskMessage(db, teamChannel.id, task.id)
               const parentId = existingMsg?.id ? Number(existingMsg.id) : undefined
@@ -1458,10 +1488,14 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               const looksLikeJsonDump = cleanResponse && (cleanResponse.trim().startsWith('{') || cleanResponse.trim().startsWith('```')) && cleanResponse.includes('"assessment"')
 
               // Post sprint result to team channel (all discussion lives here now)
-              if (!isNoOpResponse && !looksLikeJsonDump) {
+              const subShouldPost = result.taskCompleted || result.taskBlocked || (!isNoOpResponse && !looksLikeJsonDump)
+              if (subShouldPost) {
                 try {
                   const statusLabel = result.taskCompleted ? 'Completed' : result.taskBlocked ? 'Blocked' : 'In progress'
-                  const teamSummary = `@[${task.title}](task:${task.id}) — ${statusLabel} (${result.iterations} iterations)${cleanResponse ? `\n${cleanResponse}` : ''}`
+                  const subResponseText = (!isNoOpResponse && !looksLikeJsonDump && cleanResponse)
+                    ? `\n${cleanResponse}`
+                    : result.taskCompleted ? '\nTask completed successfully.' : result.taskBlocked ? '\nTask is blocked and needs attention.' : ''
+                  const teamSummary = `@[${task.title}](task:${task.id}) — ${statusLabel} (${result.iterations} iterations)${subResponseText}`
                   const teamChannel = await getTeamChannel(db, agent.teamId)
                   const existingMsg = await findLatestTaskMessage(db, teamChannel.id, task.id)
                   const parentId = existingMsg?.id ? Number(existingMsg.id) : undefined

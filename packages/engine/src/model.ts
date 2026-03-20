@@ -795,6 +795,27 @@ interface ToolFormatAdapter {
 // especially for complex nested arguments (file arrays, code content, etc.).
 // Format: <tool_call>{"name": "tool_name", "arguments": {"key": "value"}}</tool_call>
 
+/** Parse <parameter name="key">value</parameter> or <parameter=key>value</parameter> from an XML body */
+function parseXmlParams(body: string): Record<string, unknown> {
+  const params: Record<string, unknown> = {}
+  // Match both <parameter name="key"> and <parameter=key> formats
+  const paramRegex = /<parameter(?:\s+name="([^"]+)"|=([^>]+))>([\s\S]*?)<\/parameter>/g
+  let paramMatch
+  while ((paramMatch = paramRegex.exec(body)) !== null) {
+    const paramName = (paramMatch[1] || paramMatch[2]).trim()
+    let paramValue: unknown = paramMatch[3].trim()
+    if (typeof paramValue === 'string') {
+      if (paramValue.startsWith('{') || paramValue.startsWith('[')) {
+        try { paramValue = JSON.parse(paramValue) } catch { /* keep as string */ }
+      } else if (paramValue === 'true') { paramValue = true }
+      else if (paramValue === 'false') { paramValue = false }
+      else if (/^-?\d+(\.\d+)?$/.test(paramValue)) { paramValue = Number(paramValue) }
+    }
+    params[paramName] = paramValue
+  }
+  return params
+}
+
 const yokebotAdapter: ToolFormatAdapter = {
   id: 'yokebot',
 
@@ -920,27 +941,29 @@ Step 3 — Respond when done:
       }
     }
 
-    // Fallback: also catch qwen3-coder XML format in case model falls back to training format
+    // Fallback: catch qwen3-coder XML format — <function=NAME><parameter=NAME>value</parameter></function>
     if (calls.length === 0) {
       const funcRegex = /<function=([^>]+)>([\s\S]*?)(?:<\/function>|<\/tool_call>)/g
       while ((match = funcRegex.exec(text)) !== null) {
         const toolName = match[1].trim()
         const body = match[2]
-        const params: Record<string, unknown> = {}
-        const paramRegex = /<parameter=([^>]+)>([\s\S]*?)<\/parameter>/g
-        let paramMatch
-        while ((paramMatch = paramRegex.exec(body)) !== null) {
-          const paramName = paramMatch[1].trim()
-          let paramValue: unknown = paramMatch[2].trim()
-          if (typeof paramValue === 'string') {
-            if (paramValue.startsWith('{') || paramValue.startsWith('[')) {
-              try { paramValue = JSON.parse(paramValue) } catch { /* keep as string */ }
-            } else if (paramValue === 'true') { paramValue = true }
-            else if (paramValue === 'false') { paramValue = false }
-            else if (/^-?\d+(\.\d+)?$/.test(paramValue)) { paramValue = Number(paramValue) }
-          }
-          params[paramName] = paramValue
-        }
+        const params = parseXmlParams(body)
+        calls.push({
+          id: `yokebot-fallback-${Date.now()}-${calls.length}`,
+          type: 'function',
+          function: { name: toolName, arguments: JSON.stringify(params) },
+        })
+      }
+    }
+
+    // Fallback: catch Claude/invoke XML format — <invoke name="NAME"><parameter name="NAME">value</parameter></invoke>
+    // Also catches <function name="NAME"><parameter name="NAME">value</parameter></function>
+    if (calls.length === 0) {
+      const invokeRegex = /<(?:invoke|function)\s+name="([^"]+)">([\s\S]*?)<\/(?:invoke|function)>/g
+      while ((match = invokeRegex.exec(text)) !== null) {
+        const toolName = match[1].trim()
+        const body = match[2]
+        const params = parseXmlParams(body)
         calls.push({
           id: `yokebot-fallback-${Date.now()}-${calls.length}`,
           type: 'function',
@@ -958,9 +981,17 @@ Step 3 — Respond when done:
       .replace(/<tool_call>[\s\S]*$/g, '')                // unclosed trailing block
       .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '') // qwen3-coder fallback blocks
       .replace(/<function=[^>]*>[\s\S]*$/g, '')           // unclosed fallback
+      .replace(/<invoke\s+name="[^"]*">[\s\S]*?<\/invoke>/g, '') // claude/invoke blocks
+      .replace(/<invoke\s+name="[^"]*">[\s\S]*$/g, '')    // unclosed invoke
+      .replace(/<function\s+name="[^"]*">[\s\S]*?<\/function>/g, '') // named function blocks
+      .replace(/<function\s+name="[^"]*">[\s\S]*$/g, '')  // unclosed named function
+      .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '') // function_calls wrapper
+      .replace(/<function_calls>[\s\S]*$/g, '')            // unclosed wrapper
       .replace(/<\/function>/g, '')
       .replace(/<\/tool_call>/g, '')
-      .replace(/<parameter=[^>]*>[\s\S]*?<\/parameter>/g, '')
+      .replace(/<\/invoke>/g, '')
+      .replace(/<\/function_calls>/g, '')
+      .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
       .replace(/<\/parameter>/g, '')
       .trim()
   },

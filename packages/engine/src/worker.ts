@@ -50,6 +50,29 @@ async function main() {
     })
   }
 
+  // Wire broadcast callbacks to relay SSE events through the API server
+  // The worker has no SSE connections — it POSTs events to the API server's internal endpoint
+  {
+    const API_PORT = process.env.YOKEBOT_PORT || '3001'
+    const API_BASE = `http://127.0.0.1:${API_PORT}`
+    const INTERNAL_SECRET = process.env.INTERNAL_BROADCAST_SECRET || 'yokebot-internal-broadcast'
+
+    const relay = (event: string, teamId: string, data: unknown) => {
+      fetch(`${API_BASE}/internal/broadcast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': INTERNAL_SECRET },
+        body: JSON.stringify({ event, teamId, data }),
+      }).catch(() => { /* API server may not be ready yet — best-effort */ })
+    }
+
+    const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast, setFileWrittenBroadcast } = await import('./chat.ts')
+    setAgentTypingBroadcast((teamId, data) => relay('agent_typing', teamId, data))
+    setAgentProgressBroadcast((teamId, data) => relay('agent_progress', teamId, data))
+    setNewMessageBroadcast((teamId, channelId, messageId) => relay('new_message', teamId, { channelId, messageId }))
+    setFileWrittenBroadcast((teamId, path) => relay('file_written', teamId, { path }))
+    console.log('[worker] Broadcast relay configured → API server')
+  }
+
   // Start the scheduler
   await startScheduler(db, workspaceConfig, SKILLS_DIR)
 

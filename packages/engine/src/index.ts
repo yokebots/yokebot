@@ -615,6 +615,24 @@ async function main() {
     })
   })
 
+  // ===== Internal broadcast endpoint for worker process =====
+  // The worker process (worker.ts) runs heartbeat sprints in a separate Node process.
+  // It doesn't have SSE connections, so it POSTs events here for relay to clients.
+  const INTERNAL_SECRET = process.env.INTERNAL_BROADCAST_SECRET || 'yokebot-internal-broadcast'
+  app.post('/internal/broadcast', (req, res) => {
+    if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    const { event, teamId, data } = req.body as { event: string; teamId: string; data: unknown }
+    if (!event || !teamId) {
+      res.status(400).json({ error: 'missing event or teamId' })
+      return
+    }
+    broadcastToTeam(teamId, event, data)
+    res.status(204).end()
+  })
+
   // ===== Wire broadcast hooks into modules =====
   // This lets sendMessage() and createNotification() push real-time SSE events
   // without needing direct access to the SSE client map.
