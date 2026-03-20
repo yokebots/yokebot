@@ -27,9 +27,10 @@ interface TaskDetailProps {
   workspace: WorkspaceState
   agents: engine.EngineAgent[]
   onBack: () => void
+  onDeleted?: () => void
 }
 
-export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProps) {
+export function TaskDetail({ taskId, workspace, agents, onBack, onDeleted }: TaskDetailProps) {
   const [task, setTask] = useState<engine.EngineTask | null>(null)
   const [linkedFiles, setLinkedFiles] = useState<Array<{ path: string; name: string; size: number }>>([])
   const [taskMessages, setTaskMessages] = useState<engine.ChatMessage[]>([])
@@ -140,6 +141,7 @@ export function TaskDetail({ taskId, workspace, agents, onBack }: TaskDetailProp
     setActionLoading(true)
     try {
       await engine.deleteTask(taskId)
+      onDeleted?.()
       onBack()
     } catch { /* ignore */ }
     setActionLoading(false)

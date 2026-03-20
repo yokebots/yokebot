@@ -214,6 +214,7 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
         workspace={workspace}
         agents={agents}
         onBack={() => workspace.setSelectedTaskId(null)}
+        onDeleted={loadTasks}
       />
     )
   }
