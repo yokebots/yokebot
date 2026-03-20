@@ -52,7 +52,7 @@ export interface PhaseResult {
 const ROUTING_PROFILES: RoutingProfile[] = [
   {
     templateId: 'builder-bot',
-    orchestratorModelId: 'deepseek-v3.2',
+    orchestratorModelId: 'mimo-v2-flash',
     orchestratorPrompt: `You are a task planner for a web app builder. Given a task, decide which phases are needed.
 
 Available phases:
@@ -89,7 +89,8 @@ DO NOT skip steps or cut corners. Common excuses to reject:
       },
       {
         name: 'plan',
-        modelId: 'deepseek-v3.2',
+        modelId: 'mimo-v2-flash',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 3,
         toolCategories: ['core', 'tasks'],
         skillFilter: [],
@@ -112,7 +113,8 @@ DO NOT skip steps or cut corners. Common excuses to reject:
       },
       {
         name: 'design',
-        modelId: 'deepseek-v3.2',
+        modelId: 'mimo-v2-flash',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 5,
         toolCategories: ['core', 'media'],
         skillFilter: [],
@@ -136,7 +138,8 @@ DO NOT skip the mockup. The build phase needs both the spec AND the image to ach
       },
       {
         name: 'build',
-        modelId: 'deepseek-v3.2',
+        modelId: 'mimo-v2-pro',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 30,
         toolCategories: ['core', 'sandbox', 'tasks'],
         skillFilter: [],
@@ -157,14 +160,16 @@ DO NOT skip steps or cut corners. Common excuses to reject:
       },
       {
         name: 'review',
-        modelId: 'qwen-3.5-9b',
+        modelId: 'nemotron-3-super',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 8,
         toolCategories: ['core', 'browser', 'sandbox', 'tasks'],
         skillFilter: [],
-        systemInstruction: `Visit the preview URL with browser_navigate. Compare the app to the requirements and the design spec from earlier phases. Fix any visual or functional issues using sandbox_write_files. When it looks correct, mark the task done.
+        systemInstruction: `Visit the preview URL with browser_navigate. Compare the app to the requirements and the design spec from earlier phases. Fix any visual or functional issues using sandbox_write_files.
 
-CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is still broken, STOP. The approach is wrong — do not keep iterating on a broken fix. Instead, describe the issue clearly in your response and mark the task as blocked so a human can intervene.
+WHEN DONE: You MUST call update_task with status "done" to mark the task complete. Do NOT just describe what you see — always end by calling update_task.
+
+CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is still broken, STOP. Describe the issue clearly and call update_task with status "blocked".
 
 DO NOT skip steps or cut corners. Common excuses to reject:
 - "It looks close enough" — NO. Compare every detail to the requirements.

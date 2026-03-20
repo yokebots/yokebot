@@ -1064,6 +1064,16 @@ async function runRoutedSprint(
   const summary = phaseResults.map(r => `${r.phase}:${r.model}(${r.iterations})`).join(' → ')
   console.log(`[routing] "${agent.name}" — routed sprint complete: ${summary} (${totalIterations} total iters)`)
 
+  // Auto-mark task completed if all phases ran and the last phase was "review" or "build"
+  // (safety net — the review model should call update_task but often exits with plain text)
+  if (!taskCompleted && !taskBlocked && phaseResults.length > 0) {
+    const lastPhase = phaseResults[phaseResults.length - 1]
+    if ((lastPhase.phase === 'review' || lastPhase.phase === 'build') && lastPhase.success) {
+      console.log(`[routing] Auto-marking task completed — all phases ran, last phase "${lastPhase.phase}" succeeded`)
+      taskCompleted = true
+    }
+  }
+
   return { totalIterations, response: lastResponse, taskCompleted, taskBlocked, phaseResults }
 }
 
@@ -1119,7 +1129,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
   const isAdvisor = agent.templateId === 'advisor-bot'
 
   // ---- Task-focused sprint mode ----
-  // AdvisorBot is always generic (free check-in), all other agents try task sprints first
+  // All agents with assigned tasks do task sprints; agents with no tasks fall through to generic check-in
   // Credit reservation variables — scoped here so catch block can access them
   let reservedIterations = 0
   let reservedAmount = 0
@@ -1137,7 +1147,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
     effectivePlanMode = teamProfile?.plan_mode_default == null ? true : teamProfile.plan_mode_default === true || teamProfile.plan_mode_default === 1
   }
 
-  if (!isAdvisor) {
+  {
     try {
       const assignedTasks = await getAgentAssignedTasks(db, agent.id, agent.teamId)
       if (assignedTasks.length === 0) {
@@ -1289,7 +1299,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
           // Track sprint attempts — reset on completion, increment otherwise
           if (result.taskCompleted) {
-            await db.run(`UPDATE tasks SET sprint_count = 0, scratchpad = NULL WHERE id = $1`, [task.id])
+            await db.run(`UPDATE tasks SET status = 'done', sprint_count = 0, scratchpad = NULL WHERE id = $1`, [task.id])
           } else {
             const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
             await db.run(`UPDATE tasks SET sprint_count = sprint_count + 1, last_sprint_at = ${now} WHERE id = $1`, [task.id])
@@ -1426,7 +1436,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               iterationsUsed += result.iterations
 
               if (result.taskCompleted) {
-                await db.run(`UPDATE tasks SET sprint_count = 0, scratchpad = NULL WHERE id = $1`, [task.id])
+                await db.run(`UPDATE tasks SET status = 'done', sprint_count = 0, scratchpad = NULL WHERE id = $1`, [task.id])
               } else {
                 const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
                 await db.run(`UPDATE tasks SET sprint_count = sprint_count + 1, last_sprint_at = ${now} WHERE id = $1`, [task.id])

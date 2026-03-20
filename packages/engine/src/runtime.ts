@@ -2380,6 +2380,7 @@ export async function runReactLoop(
   const toolCallLog: Array<{ name: string; result: string }> = []
   let response: string | null = null
   let consecutiveNoToolIterations = 0 // Track iterations without real tool calls (only think/text)
+  let plainTextNudges = 0 // Track plain-text exits separately from think-only spins
 
   // Context window management: trim messages to fit model's context window
   const contextWindow = logicalModel?.contextWindow ?? 128_000
@@ -2709,36 +2710,34 @@ export async function runReactLoop(
       }
 
       // No text-based tool syntax detected — model returned plain text without calling respond.
-      // Small models often return text mid-task instead of continuing with tool calls.
-      // If we're still early in the iteration budget AND the model has been actively working,
-      // treat this as intermediate output and prompt the model to keep going.
+      // Models often return text mid-task instead of continuing with tool calls.
+      // Track consecutive plain-text exits separately from think-only iterations.
       const hasMadeRealProgress = toolCallLog.some(tc => !['think', 'respond', 'update_scratchpad'].includes(tc.name))
-      const isEarlyInBudget = i < Math.floor(config.maxIterations * 0.5)
+      const isEarlyInBudget = i < Math.floor(config.maxIterations * 0.7)
+      plainTextNudges++
 
-      if (hasMadeRealProgress && isEarlyInBudget && i < config.maxIterations - 1) {
-        consecutiveNoToolIterations++
-        console.log(`[runtime] Model returned text without respond tool (iteration ${i + 1}) — prompting to continue (${consecutiveNoToolIterations} consecutive no-tool iters)`)
+      if (isEarlyInBudget && i < config.maxIterations - 1 && plainTextNudges <= 3) {
+        console.log(`[runtime] Model returned text without respond tool (iteration ${i + 1}) — nudging to use tools (nudge ${plainTextNudges}/3, progress=${hasMadeRealProgress})`)
 
-        // Bail if we've nudged too many times — the model genuinely can't continue
-        if (consecutiveNoToolIterations >= 3) {
-          response = extractHumanMessage(text)
-          await addMessage(db, agentId, 'assistant', response, teamId)
-          emitProgress('idle', 'Done', i + 1)
-          return { response, iterations: i + 1, toolCalls: toolCallLog }
-        }
+        // Build a specific nudge based on available tools
+        const availableToolNames = tools.map(t => t.function.name)
+        const hasBrowser = availableToolNames.includes('browser_navigate')
+        const hasSandbox = availableToolNames.includes('sandbox_setup') || availableToolNames.includes('sandbox_write_file')
+        const hasMedia = availableToolNames.includes('generate_image')
+        let nudge = 'You MUST use your tools to take action — do NOT just describe what you would do. '
+        if (hasBrowser) nudge += 'Use browser_navigate to visit URLs. '
+        if (hasSandbox) nudge += 'Use sandbox_setup or sandbox_write_file to write code. '
+        if (hasMedia) nudge += 'Use generate_image to create mockups. '
+        nudge += 'Use the "respond" tool ONLY when you have FULLY completed the task.'
 
-        // Inject the text as assistant message and nudge the model to keep using tools
         messages.push({ role: 'assistant', content: text })
-        messages.push({
-          role: 'user',
-          content: 'Continue working on the task using your tools. Do not stop until you have completed the task or exhausted all approaches. Use the "respond" tool when you are truly finished.',
-        })
+        messages.push({ role: 'user', content: nudge })
         wasNudged = true
         continue
       }
 
       // Genuinely done or late in the budget — extract and return
-      console.log(`[runtime] EXIT via plain text (iteration ${i + 1}, hasMadeRealProgress=${hasMadeRealProgress}, isEarlyInBudget=${isEarlyInBudget})`)
+      console.log(`[runtime] EXIT via plain text (iteration ${i + 1}, hasMadeRealProgress=${hasMadeRealProgress}, isEarlyInBudget=${isEarlyInBudget}, nudges=${plainTextNudges})`)
       response = extractHumanMessage(completion.content)
       await addMessage(db, agentId, 'assistant', response, teamId)
       emitProgress('idle', 'Done', i + 1)
