@@ -2184,6 +2184,36 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 52,
+    name: 'add_mimo_v2_pro_model',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run(
+          `INSERT INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT (model_id) DO NOTHING`,
+          ['mimo-v2-pro', 25, 'chat', 5, 5, 4,
+            'Xiaomi flagship — 1T+ MoE (42B active), 78% SWE-bench, #3 ClawEval, fine-tuned for agentic tool calling, 1M context',
+            'Flagship agentic reasoning model',
+            '["78% SWE-bench (near Sonnet)","#3 ClawEval approaching Opus 4.6","Fine-tuned for tool-call stability","1M context window","$1/$3 per M tokens"]',
+            '["Higher cost than Flash variant","Very new (Mar 2026)"]',
+            '2026-03-18', 80],
+        )
+      } else {
+        await db.run(
+          `INSERT OR IGNORE INTO model_credit_costs (model_id, credits_per_use, model_type, star_intelligence, star_power, star_speed, description, tagline, pros, cons, release_date, popularity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          ['mimo-v2-pro', 25, 'chat', 5, 5, 4,
+            'Xiaomi flagship — 1T+ MoE (42B active), 78% SWE-bench, #3 ClawEval, fine-tuned for agentic tool calling, 1M context',
+            'Flagship agentic reasoning model',
+            '["78% SWE-bench (near Sonnet)","#3 ClawEval approaching Opus 4.6","Fine-tuned for tool-call stability","1M context window","$1/$3 per M tokens"]',
+            '["Higher cost than Flash variant","Very new (Mar 2026)"]',
+            '2026-03-18', 80],
+        )
+      }
+    },
+  },
 ]
 
 /**

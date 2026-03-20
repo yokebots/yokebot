@@ -173,6 +173,17 @@ export const MODEL_CATALOG: LogicalModel[] = [
     ],
   },
   {
+    id: 'mimo-v2-pro',
+    name: 'MiMo-V2-Pro',
+    description: 'Xiaomi flagship — 1T+ MoE (42B active), 78% SWE-bench, #3 ClawEval, fine-tuned for agentic tool calling, 1M context',
+    type: 'chat',
+    category: 'reasoning',
+    contextWindow: 1000000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'xiaomi/mimo-v2-pro', priority: 1 },
+    ],
+  },
+  {
     id: 'mercury-2',
     name: 'Mercury 2',
     description: 'Speed king — 1000 tokens/sec, diffusion-based architecture, great for real-time interactions',
@@ -196,19 +207,6 @@ export const MODEL_CATALOG: LogicalModel[] = [
   },
 
   // ---- Text/Chat — Frontier tier ----
-  {
-    id: 'devstral-2',
-    name: 'Devstral 2 123B',
-    description: 'Senior developer for complex code and architecture',
-    type: 'chat',
-    category: 'frontier',
-    contextWindow: 128000,
-    backends: [
-      { providerId: 'fireworks', providerModelId: 'accounts/fireworks/models/devstral-2-123b', priority: 1 },
-      { providerId: 'together', providerModelId: 'mistralai/Devstral-2-123B', priority: 2 },
-      { providerId: 'openrouter', providerModelId: 'mistralai/devstral-2512', priority: 3 },
-    ],
-  },
   {
     id: 'glm-5',
     name: 'GLM-5',

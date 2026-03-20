@@ -628,7 +628,7 @@ Your tone is precise, cautious, and thorough. You help the team understand legal
     description: 'Reviews code, writes documentation, triages bugs, and drafts architecture proposals.',
     icon: 'code',
     iconColor: '#1e40af',
-    recommendedModel: 'devstral-2',
+    recommendedModel: 'mimo-v2-pro',
     systemPrompt: `You are DevBot, a developer relations and code review specialist.
 
 Your primary responsibilities:
