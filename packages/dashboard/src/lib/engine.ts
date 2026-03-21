@@ -1994,6 +1994,10 @@ export async function getSandboxProxyToken(port = 5173): Promise<{ token: string
   return request(`/api/sandbox/proxy-token?port=${port}`)
 }
 
+export async function startProjectDevServer(projectId: string): Promise<{ started: boolean; port: number }> {
+  return request(`/api/sandbox/projects/${projectId}/start-server`, { method: 'POST' })
+}
+
 export async function listSandboxFiles(dir = '/'): Promise<SandboxFileEntry[]> {
   return request(`/api/sandbox/files?dir=${encodeURIComponent(dir)}`)
 }

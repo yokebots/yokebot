@@ -3,10 +3,7 @@ import { AuthProvider, useAuth } from '@/lib/auth'
 import { TeamProvider, useTeam } from '@/lib/team-context'
 import { DashboardLayout } from '@/layouts/DashboardLayout'
 import { HomePage } from '@/pages/HomePage'
-import { DashboardPage } from '@/pages/DashboardPage'
-import { MissionControlPage } from '@/pages/MissionControlPage'
 import { TaskDetailPage } from '@/pages/TaskDetailPage'
-import { AgentsPage } from '@/pages/AgentsPage'
 import { AgentDetailPage } from '@/pages/AgentDetailPage'
 import { ApprovalsPage } from '@/pages/ApprovalsPage'
 import { DataTablesPage } from '@/pages/DataTablesPage'
@@ -27,7 +24,6 @@ import { GoalsPage } from '@/pages/GoalsPage'
 import { WorkflowsPage } from '@/pages/WorkflowsPage'
 import { WorkflowBuilderPage } from '@/pages/WorkflowBuilderPage'
 import { WorkflowRunPage } from '@/pages/WorkflowRunPage'
-import { WorkspacePage } from '@/pages/WorkspacePage'
 import { SessionVaultPage } from '@/pages/SessionVaultPage'
 import { BrowserPopoutPage } from '@/pages/BrowserPopoutPage'
 import { BrandKitPage } from '@/pages/BrandKitPage'
@@ -153,9 +149,10 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="workspace" element={<WorkspacePage />} />
-        <Route path="tasks" element={<MissionControlPage />} />
+        {/* These 4 pages are kept alive in DashboardLayout — Route entries exist for path matching only */}
+        <Route path="dashboard" element={null} />
+        <Route path="workspace" element={null} />
+        <Route path="tasks" element={null} />
         <Route path="tasks/:taskId" element={<TaskDetailPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="goals" element={<GoalsPage />} />
@@ -167,7 +164,7 @@ function AppRoutes() {
         <Route path="chat/*" element={<Navigate to="/workspace" replace />} />
         <Route path="meetings" element={<MeetingsPage />} />
         <Route path="meetings/:meetingId" element={<MeetingReplayPage />} />
-        <Route path="agents" element={<AgentsPage />} />
+        <Route path="agents" element={null} />
         <Route path="agents/:agentId" element={<AgentDetailPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
         <Route path="data-tables" element={<DataTablesPage />} />

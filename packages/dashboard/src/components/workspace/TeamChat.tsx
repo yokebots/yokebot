@@ -133,9 +133,15 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
     }).catch(() => {})
   })
 
-  // Real-time agent typing/working indicators
+  // Real-time agent typing/working indicators (with auto-clear safety net)
+  const statusTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   useRealtimeEvent<{ channelId: string; agentId: string; agentName: string; status: 'typing' | 'working' | 'idle' }>('agent_typing', (data) => {
     if (data.channelId !== teamChannelId) return
+
+    // Clear any existing timeout for this agent
+    const existing = statusTimeoutsRef.current.get(data.agentId)
+    if (existing) clearTimeout(existing)
+
     setAgentStatuses(prev => {
       const next = new Map(prev)
       if (data.status === 'idle') {
@@ -145,6 +151,20 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
       }
       return next
     })
+
+    // Auto-clear after 30s in case idle event is missed (safety net only)
+    if (data.status !== 'idle') {
+      statusTimeoutsRef.current.set(data.agentId, setTimeout(() => {
+        setAgentStatuses(prev => {
+          const next = new Map(prev)
+          next.delete(data.agentId)
+          return next
+        })
+        statusTimeoutsRef.current.delete(data.agentId)
+      }, 30_000))
+    } else {
+      statusTimeoutsRef.current.delete(data.agentId)
+    }
   })
 
   // Auto-scroll to bottom when new messages arrive

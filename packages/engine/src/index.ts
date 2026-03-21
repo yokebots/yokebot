@@ -2643,6 +2643,18 @@ async function main() {
     }
   })
 
+  // Start a specific project's dev server (called when human opens preview)
+  app.post('/api/sandbox/projects/:id/start-server', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { startProjectDevServer } = await import('./sandbox.ts')
+      const result = await startProjectDevServer(db, teamId, req.params.id)
+      res.json(result)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
   // ===== Visual Editor: apply-style + import =====
 
   const sandboxEditLimiter = rateLimit({ windowMs: 60_000, max: 60, keyGenerator: (req) => req.user?.activeTeamId ?? ipKeyGenerator(req.ip ?? '0.0.0.0') })

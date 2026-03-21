@@ -175,14 +175,15 @@ export function WorkspacePage() {
   })
 
   // Auto-open sandbox preview tab when a preview URL is generated
-  useRealtimeEvent('sandbox_preview', () => {
-    // Don't pass the raw Daytona URL — PreviewPanel fetches its own proxy token
+  useRealtimeEvent<{ projectId?: string; projectName?: string }>('sandbox_preview', (data) => {
+    const projectId = data?.projectId ?? 'default'
+    const projectName = data?.projectName ?? 'Preview'
     addViewerTab({
-      id: 'sandbox-preview',
+      id: `sandbox-preview:${projectId}`,
       type: 'sandbox-preview',
-      label: 'Preview',
+      label: projectName,
       icon: 'preview',
-      resourceId: '',
+      resourceId: projectId,
     })
   })
 

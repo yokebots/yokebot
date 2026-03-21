@@ -8,6 +8,8 @@ interface PreviewPanelProps {
   previewUrl?: string
   /** Channel ID for sending annotation messages to the bot */
   channelId?: string
+  /** Sandbox project ID — if provided, fetches this project's preview URL */
+  projectId?: string
 }
 
 type ViewportMode = 'desktop' | 'tablet' | 'mobile'
@@ -25,7 +27,7 @@ const VIEWPORT_PREFIX: Record<ViewportMode, string> = {
   mobile: '',  // mobile-first = no prefix
 }
 
-export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanelProps) {
+export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: PreviewPanelProps) {
   const { user } = useAuth()
   const userId = user?.id
   const [url, setUrl] = useState<string | null>(initialUrl || null)
@@ -57,12 +59,46 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
   const [publishError, setPublishError] = useState<string | null>(null)
 
   // Fetch preview via proxy — auto-retry with wake-up if sandbox is stopped
+  // Re-run when projectId changes (switching between project tabs)
+  const prevProjectRef = useRef(projectId)
+  useEffect(() => {
+    // Reset URL when switching to a different project
+    if (prevProjectRef.current !== projectId) {
+      prevProjectRef.current = projectId
+      setUrl(null)
+      setLoading(true)
+      setError(null)
+      setIframeLoaded(false)
+    }
+  }, [projectId])
+
   useEffect(() => {
     if (url) return
     let cancelled = false
     setLoading(true)
 
     async function fetchWithRetry() {
+      // If we have a specific project ID, fetch its preview URL or use its port
+      if (projectId && projectId !== 'default') {
+        try {
+          const project = await engine.getSandboxProject(projectId)
+          if (!cancelled) {
+            if (project.previewUrl) {
+              setUrl(project.previewUrl)
+              setLoading(false)
+              return
+            }
+            // No previewUrl but has a port — use proxy with project-specific port
+            if (project.devPort) {
+              const res = await engine.getSandboxProxyToken(project.devPort)
+              setUrl(`${engine.getBaseUrl()}${res.proxyUrl}`)
+              setLoading(false)
+              return
+            }
+          }
+        } catch { /* fall through to default proxy */ }
+      }
+
       for (let attempt = 0; attempt < 10; attempt++) {
         try {
           const res = await engine.getSandboxProxyToken()
@@ -96,7 +132,7 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
 
     fetchWithRetry()
     return () => { cancelled = true }
-  }, [url])
+  }, [url, projectId])
 
   // Listen for sandbox_preview events via SSE
   useEffect(() => {
@@ -368,14 +404,41 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId }: PreviewPanel
   if (error) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
-        <div className="flex flex-col items-center gap-3">
-          <span className="material-symbols-outlined text-3xl text-red-400">error</span>
-          <span>{error}</span>
+        <div className="flex flex-col items-center gap-4 max-w-xs text-center">
+          <span className="material-symbols-outlined text-4xl text-amber-400">power_settings_new</span>
+          <p className="font-medium text-text-main">Dev server is not running</p>
+          <p className="text-xs text-text-muted">The app needs its dev server started to show the preview.</p>
+          <button
+            onClick={async () => {
+              setError(null)
+              setLoading(true)
+              setWakingUp(true)
+              setWakeProgress(20)
+              try {
+                if (projectId && projectId !== 'default') {
+                  await engine.startProjectDevServer(projectId)
+                } else {
+                  await engine.startSandbox()
+                }
+                setWakeProgress(80)
+                // Re-fetch URL after server starts
+                setUrl(null)
+              } catch {
+                setError('Failed to start dev server. Try again.')
+                setLoading(false)
+                setWakingUp(false)
+              }
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-forest-green text-white text-sm font-medium hover:bg-forest-green/90 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+            Start Dev Server
+          </button>
           <button
             onClick={() => { setError(null); setUrl(null); setLoading(true) }}
-            className="px-3 py-1 rounded bg-forest-green/10 text-forest-green text-xs hover:bg-forest-green/20"
+            className="text-xs text-text-muted hover:text-text-main transition-colors"
           >
-            Retry
+            Refresh
           </button>
         </div>
       </div>

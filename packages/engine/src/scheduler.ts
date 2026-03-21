@@ -475,7 +475,7 @@ export async function respondToMention(
         const parentMsg = await getMessage(db, replyParentId)
         if (!parentMsg || parentMsg.channelId !== channelId) replyParentId = undefined
       }
-      await sendMessage(db, channelId, 'agent', agent.id, reply, undefined, teamId, undefined, undefined, undefined, replyParentId)
+      await sendMessage(db, channelId, 'agent', agent.id, reply, undefined, teamId, undefined, undefined, undefined, replyParentId, agent.modelId || undefined)
       await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${reply.slice(0, 150)}`, undefined, teamId)
 
       if (HOSTED_MODE && agent.modelId) {
@@ -612,11 +612,14 @@ export async function respondToMention(
         const refund = (mentionIterations - result.iterations) * mentionCost
         if (refund > 0) await releaseCredits(db, agent.teamId, refund, `Mention refund: ${mentionIterations - result.iterations} unused iterations`)
       }
-      // Mark task done if sprint completed it
-      if (mentionTaskId && result.taskCompleted) {
-        await db.run(`UPDATE tasks SET status = 'done' WHERE id = $1`, [mentionTaskId]).catch(() => {})
-      } else if (mentionTaskId) {
-        // Sprint didn't mark done — still in progress for next heartbeat
+      // Update task status based on sprint result
+      if (mentionTaskId) {
+        if (result.taskCompleted) {
+          await db.run(`UPDATE tasks SET status = 'done', sprint_count = sprint_count + 1 WHERE id = $1`, [mentionTaskId]).catch(() => {})
+        } else {
+          const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
+          await db.run(`UPDATE tasks SET sprint_count = sprint_count + 1, last_sprint_at = ${now} WHERE id = $1`, [mentionTaskId]).catch(() => {})
+        }
       }
 
       const cleanResponse = result.response ? stripToolSyntax(result.response) : null

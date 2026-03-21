@@ -351,8 +351,16 @@ export async function executeBrowserTool(
   } catch (err) {
     const message = (err as Error).message
     console.error(`[browser] Agent ${agentId} ${toolName} error: ${message}`)
-    if (message.includes('Target closed') || message.includes('Browser has been closed')) {
+    if (message.includes('Target closed') || message.includes('Browser has been closed')
+      || message.includes('Page crashed') || message.includes('Target crashed')) {
+      // Session is unrecoverable — clean up so next browser call creates a fresh one
+      const deadSessionId = agentSessions.get(agentId)
+      if (deadSessionId) {
+        const { closeBrowserSession } = await import('./browser-sessions.ts')
+        await closeBrowserSession(deadSessionId).catch(() => {})
+      }
       agentSessions.delete(agentId)
+      return `Browser crashed and has been reset. Try again with browser_navigate to open a fresh session.`
     }
     return `Browser error: ${message}`
   }

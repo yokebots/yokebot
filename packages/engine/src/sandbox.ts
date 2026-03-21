@@ -668,6 +668,63 @@ export async function updateSandboxProject(db: Db, id: string, updates: Partial<
   await db.run(`UPDATE sandbox_projects SET ${fields.join(', ')} WHERE id = $${paramIdx}`, values)
 }
 
+/**
+ * Start (or restart) a specific project's dev server.
+ * Called when a human opens the preview or when an agent sprints on the project.
+ */
+export async function startProjectDevServer(db: Db, teamId: string, projectId: string): Promise<{ started: boolean; port: number }> {
+  const project = await getSandboxProject(db, projectId)
+  if (!project) throw new Error(`Project ${projectId} not found`)
+
+  // Ensure sandbox is running
+  await getOrCreateSandbox(db, teamId)
+
+  const port = project.devPort ?? 5173
+
+  // Check if dev server is already running on this port by fetching the preview URL.
+  // getPreviewUrl always returns a signed Daytona URL even if nothing is listening,
+  // so we must actually probe the URL to confirm the server is alive.
+  try {
+    const url = await getPreviewUrl(db, teamId, port)
+    if (url) {
+      const probe = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(4000) }).catch(() => null)
+      if (probe && probe.ok) return { started: true, port } // actually running
+    }
+  } catch { /* not running — start it */ }
+
+  // Use stored startup command, or generate one from project directory + port
+  const startCmd = project.startupCommand
+    ?? `cd ${project.directory} && npm run dev -- --host 0.0.0.0 --port ${port} &`
+
+  // Ensure dependencies are installed before starting
+  console.log(`[sandbox] Ensuring deps for "${project.name}" in ${project.directory}`)
+  const installResult = await execCommand(db, teamId, `cd ${project.directory} && [ -d node_modules ] || npm install`)
+  if (installResult.exitCode !== 0) {
+    // node_modules missing or corrupted — force reinstall
+    console.log(`[sandbox] Installing deps for "${project.name}"...`)
+    await execCommand(db, teamId, `cd ${project.directory} && rm -rf node_modules package-lock.json && npm install`)
+  }
+
+  console.log(`[sandbox] Starting dev server for "${project.name}" on port ${port}: ${startCmd}`)
+  await execCommand(db, teamId, startCmd)
+
+  // Save the startup command for future use if it wasn't stored
+  if (!project.startupCommand) {
+    await updateSandboxProject(db, projectId, { startupCommand: startCmd })
+  }
+
+  // Wait for server to boot
+  await new Promise(resolve => setTimeout(resolve, 5000))
+
+  // Update preview URL
+  try {
+    const previewUrl = await getPreviewUrl(db, teamId, port)
+    await updateSandboxProject(db, projectId, { previewUrl })
+  } catch { /* best-effort */ }
+
+  return { started: true, port }
+}
+
 /** Validate that a path is within the given project directory. Throws on escape. */
 export function validateProjectPath(path: string, projectDir: string): string {
   const resolved = normalizeSandboxPathToProject(path, projectDir)

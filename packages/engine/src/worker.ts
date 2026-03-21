@@ -62,7 +62,11 @@ async function main() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': INTERNAL_SECRET },
         body: JSON.stringify({ event, teamId, data }),
-      }).catch(() => { /* API server may not be ready yet — best-effort */ })
+      }).then(res => {
+        if (!res.ok) console.error(`[worker] Relay failed: ${event} → ${res.status}`)
+      }).catch((err) => {
+        console.error(`[worker] Relay error: ${event} →`, (err as Error).message)
+      })
     }
 
     const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast, setFileWrittenBroadcast } = await import('./chat.ts')

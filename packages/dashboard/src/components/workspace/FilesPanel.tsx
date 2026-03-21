@@ -1244,12 +1244,13 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
   }, [expanded, status?.status, currentDir, activeProjectId])
 
   const openPreview = useCallback(() => {
+    const projId = activeProject?.id ?? 'default'
     workspace.addViewerTab({
-      id: 'sandbox-preview',
+      id: `sandbox-preview:${projId}`,
       type: 'sandbox-preview' as import('@/pages/WorkspacePage').ViewerTabType,
       label: activeProject ? activeProject.name : 'Preview',
       icon: 'preview',
-      resourceId: '',
+      resourceId: projId,
     })
   }, [workspace, status, activeProject])
 

@@ -35,7 +35,7 @@ const JWT_SECRET = process.env.SUPABASE_JWT_SECRET ?? ''
 const SUPABASE_URL = process.env.SUPABASE_URL ?? ''
 
 // Paths that don't require authentication
-const PUBLIC_PATHS = ['/health', '/api/ollama', '/api/config', '/api/contact', '/api/unsubscribe']
+const PUBLIC_PATHS = ['/health', '/api/ollama', '/api/config', '/api/contact', '/api/unsubscribe', '/internal/broadcast']
 
 // Module-level DB reference for API key validation (set at startup)
 let _apiKeyDb: Db | null = null
