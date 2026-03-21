@@ -102,7 +102,6 @@ export async function executeSkillHandler(
     if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
       const NATIVE_SKILL_KEYS: Record<string, string> = {
         resend: 'RESEND_API_KEY',
-        tavily: 'TAVILY_API_KEY',
       }
       for (const svcId of requiredCredentials) {
         if (!credentials[svcId]) {
@@ -165,23 +164,6 @@ export async function executeSkillHandler(
 // ============================================================
 
 // ---- Web Search (Tavily) ----
-registerHandler('web_search', async (args, creds) => {
-  const apiKey = creds.tavily
-  const query = args.query as string
-  const count = Math.min((args.count as number) ?? 5, 10)
-  const res = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ api_key: apiKey, query, max_results: count, include_answer: true }),
-  })
-  if (!res.ok) return `Search failed: ${res.status} ${res.statusText}`
-  const data = await res.json() as { answer?: string; results?: Array<{ title: string; url: string; content: string }> }
-  const results = data.results ?? []
-  if (results.length === 0) return 'No results found.'
-  const summary = data.answer ? `**Summary:** ${data.answer}\n\n---\n\n` : ''
-  return summary + results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.content}`).join('\n\n')
-}, ['tavily'])
-
 // ---- Slack Send Message ----
 registerHandler('slack_send_message', async (args, creds) => {
   const webhookUrl = creds.slack
@@ -267,24 +249,6 @@ registerHandler('discord_post', async (args, creds) => {
   if (!res.ok) return `Discord error: ${res.status}`
   return 'Message posted to Discord.'
 }, ['discord'])
-
-// ---- Scrape Webpage (Tavily — native default) ----
-registerHandler('scrape_webpage', async (args, creds) => {
-  const apiKey = creds.tavily
-  const urlCheck = validateUrl(args.url as string)
-  if (!urlCheck.ok) return `Invalid URL: ${urlCheck.error}`
-  const res = await fetch('https://api.tavily.com/extract', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ api_key: apiKey, urls: [urlCheck.url] }),
-  })
-  if (!res.ok) return `Tavily extract error: ${res.status}`
-  const data = await res.json() as { results?: Array<{ raw_content?: string }> }
-  const content = data.results?.[0]?.raw_content
-  if (!content) return 'Scrape returned no content.'
-  // Truncate very long pages
-  return content.length > 8000 ? content.slice(0, 8000) + '\n\n[...truncated]' : content
-}, ['tavily'])
 
 // ---- Scrape Webpage via Firecrawl (BYOK) ----
 registerHandler('scrape_webpage_firecrawl', async (args, creds) => {

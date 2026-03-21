@@ -390,11 +390,25 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
           {Array.from(agentStatuses.entries()).map(([agentId, { agentName, status }]) => {
             const steps = progressMap.get(agentId)
             if (steps && steps.length > 0) {
+              // Derive dynamic activity label from recent tool calls
+              const recentTools = steps.filter(s => s.type === 'tool_start').slice(-3)
+              const latestTool = recentTools[recentTools.length - 1]?.label?.toLowerCase() ?? ''
+              const latestStep = steps[steps.length - 1]
+              let activity = 'Working'
+              if (latestStep?.type === 'responding') activity = 'Responding'
+              else if (latestTool.includes('browser') || latestTool.includes('navigate')) activity = 'Browsing'
+              else if (latestTool.includes('search') || latestTool.includes('web_search')) activity = 'Searching'
+              else if (latestTool.includes('write_file') || latestTool.includes('sandbox')) activity = 'Building'
+              else if (latestTool.includes('read') || latestTool.includes('workspace')) activity = 'Researching'
+              else if (latestTool.includes('send_message') || latestTool.includes('update_task')) activity = 'Updating'
+              else if (latestTool.includes('exec') || latestTool.includes('install')) activity = 'Running'
+              else if (latestStep?.type === 'thinking') activity = 'Analyzing'
               return (
                 <div key={agentId}>
                   <div className="flex items-center gap-1.5 mb-1">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === 'typing' ? 'bg-accent-green' : 'bg-accent-gold'}`} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
                     <span className="text-xs font-medium text-text-main">{agentName}</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">{activity}</span>
                   </div>
                   <AgentProgressPanel steps={steps} />
                 </div>

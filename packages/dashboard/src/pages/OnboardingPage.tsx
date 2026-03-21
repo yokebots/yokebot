@@ -40,7 +40,7 @@ const TUTORIAL_SLIDES = [
   },
   {
     icon: 'dashboard',
-    title: 'Mission Control',
+    title: 'Shared Workspace',
     bullets: [
       'Create and assign tasks to your agent workforce',
       'Review and approve high-risk actions before they execute',
@@ -89,17 +89,6 @@ const SCAN_FIELD_ORDER: (keyof ScanFields)[] = [
   'uniqueDifferentiators', 'buyingMotivations',
 ]
 
-const THINKING_PHRASES = [
-  'Analyzing your business context...',
-  'Reviewing your goals and priorities...',
-  'Matching agent capabilities to your needs...',
-  'Evaluating the best team composition...',
-  'Cross-referencing 40+ pre-built agents...',
-  'Ranking recommendations by impact...',
-  'Considering your industry specifics...',
-  'Almost there, finalizing suggestions...',
-]
-
 const EMPTY_SCAN: ScanFields = {
   companyName: '', industry: '', problemSolved: '', solution: '',
   targetMarket: '', geographicFocus: '', productsServices: '',
@@ -129,54 +118,16 @@ export function OnboardingPage() {
   const [noWebsiteCategory, setNoWebsiteCategory] = useState('')
   const [noWebsiteName, setNoWebsiteName] = useState('')
   const [primaryGoal, setPrimaryGoal] = useState('')
-  const [secondaryGoals, setSecondaryGoals] = useState('')
+  const [autoDeployedAgents, setAutoDeployedAgents] = useState<Array<{ id: string; name: string; templateId: string; icon: string; iconColor: string; department: string }>>([])
+  const [agentsDeploying, setAgentsDeploying] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // Step 3 chat state
-  const [advisorAgentId, setAdvisorAgentId] = useState<string | null>(null)
+  const [, setAdvisorAgentId] = useState<string | null>(null)
   const [advisorReady, setAdvisorReady] = useState(false)
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'agent'; content: string; upgradeLink?: boolean }>>([])
-  const [chatInput, setChatInput] = useState('')
-  const [chatLoading, setChatLoading] = useState(false)
-  const [thinkingPhrase, setThinkingPhrase] = useState(THINKING_PHRASES[0])
-  const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const chatEndRef = useRef<HTMLDivElement>(null)
-  const [agentsDeployed, setAgentsDeployed] = useState(false)
-  const [deploying, setDeploying] = useState(false)
-  const [advisorFailed, setAdvisorFailed] = useState(false)
-
-  // Meet-and-greet state
-  const [meetingId] = useState<string | null>(null)
-  const [meetingMessages, setMeetingMessages] = useState<Array<{
-    id: string
-    type: 'agent' | 'human'
-    agentName?: string
-    agentIcon?: string
-    agentIconColor?: string
-    content: string
-  }>>([])
-  const [meetingActive, setMeetingActive] = useState(false)
-  const [meetingEnded, setMeetingEnded] = useState(false)
-  const [speakingAgent, setSpeakingAgent] = useState<{ name: string; icon: string; iconColor: string } | null>(null)
-  const [meetingInput, setMeetingInput] = useState('')
   const [audioEnabled, setAudioEnabled] = useState(true)
   const audioEnabledRef = useRef(true)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const meetingAudioUrlRef = useRef<string | null>(null)
-  const meetingEndRef = useRef<HTMLDivElement>(null)
-  const [recording, setRecording] = useState(false)
-  const [transcribing, setTranscribing] = useState(false)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-
-  // Meeting speaker banner captions (word-highlighted like narration)
-  const [mtgCaptionScreens, setMtgCaptionScreens] = useState<string[][]>([])
-  const [mtgCaptionScreen, setMtgCaptionScreen] = useState(0)
-  const [mtgCaptionWord, setMtgCaptionWord] = useState(0)
-  const [mtgCaptionPlaying, setMtgCaptionPlaying] = useState(false)
-  const mtgCaptionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const mtgCaptionWordsRef = useRef<string[]>([])
-  const mtgCaptionDurationRef = useRef(0)
-  const audioChunksRef = useRef<Blob[]>([])
 
   // Audio unlock: browsers block autoplay without a user gesture.
   // We show a quick splash screen; clicking it unlocks audio permanently.
@@ -198,7 +149,6 @@ export function OnboardingPage() {
   const step1PlayedRef = useRef(false)
 
   // Step 4 state
-  const [deployedAgents, setDeployedAgents] = useState<engine.EngineAgent[]>([])
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0] ?? 'there'
 
@@ -234,93 +184,6 @@ export function OnboardingPage() {
     if (narrationTimerRef.current) { clearInterval(narrationTimerRef.current); narrationTimerRef.current = null }
   }
 
-  // Clean up meeting audio/caption resources
-  const cleanupMeetingCaption = () => {
-    if (mtgCaptionTimerRef.current) { clearInterval(mtgCaptionTimerRef.current); mtgCaptionTimerRef.current = null }
-    setMtgCaptionPlaying(false)
-  }
-
-  // Get the global word index where a meeting caption screen starts
-  const mtgScreenStartWord = (screenIdx: number): number => {
-    let count = 0
-    for (let i = 0; i < screenIdx; i++) count += (mtgCaptionScreens[i]?.length ?? 0)
-    return count
-  }
-
-  // Play meeting agent message with captions + audio
-  const playMeetingAgentMessage = useCallback((text: string, audioBase64: string | undefined, audioDurationMs: number | undefined) => {
-    cleanupMeetingCaption()
-    const screens = buildScreens(text)
-    const allWords = screens.flat()
-    mtgCaptionWordsRef.current = allWords
-    const durationMs = audioDurationMs ?? (allWords.length * 250) // fallback: ~250ms per word
-    mtgCaptionDurationRef.current = durationMs
-    setMtgCaptionScreens(screens)
-    setMtgCaptionScreen(0)
-    setMtgCaptionWord(0)
-    setMtgCaptionPlaying(true)
-
-    // Helper to start/restart the word highlight timer with a given duration
-    const startMtgWordTimer = (totalDurationMs: number) => {
-      if (mtgCaptionTimerRef.current) clearInterval(mtgCaptionTimerRef.current)
-      const msPerWord = totalDurationMs / allWords.length
-      let wordIdx = 0
-      setMtgCaptionWord(0)
-      setMtgCaptionScreen(0)
-      mtgCaptionTimerRef.current = setInterval(() => {
-        wordIdx++
-        if (wordIdx < allWords.length) {
-          setMtgCaptionWord(wordIdx)
-          // Auto-advance caption screen
-          setMtgCaptionScreen(() => {
-            let count = 0
-            for (let s = 0; s < screens.length; s++) {
-              count += screens[s].length
-              if (wordIdx < count) return s
-            }
-            return screens.length - 1
-          })
-        } else {
-          clearInterval(mtgCaptionTimerRef.current!)
-          mtgCaptionTimerRef.current = null
-          setMtgCaptionPlaying(false)
-        }
-      }, msPerWord)
-    }
-
-    // Play audio as blob URL (not base64 data URI)
-    if (audioEnabledRef.current && audioBase64) {
-      try {
-        if (audioRef.current) audioRef.current.pause()
-        if (meetingAudioUrlRef.current) URL.revokeObjectURL(meetingAudioUrlRef.current)
-        const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))
-        const blob = new Blob([bytes], { type: 'audio/mpeg' })
-        const url = URL.createObjectURL(blob)
-        meetingAudioUrlRef.current = url
-        const audio = new Audio(url)
-        audioRef.current = audio
-        // When we know the real audio duration, restart the word timer to sync perfectly
-        audio.onloadedmetadata = () => {
-          if (audio.duration && isFinite(audio.duration)) {
-            const realDurationMs = audio.duration * 1000
-            startMtgWordTimer(realDurationMs)
-          }
-        }
-        audio.onended = () => {
-          if (mtgCaptionTimerRef.current) clearInterval(mtgCaptionTimerRef.current)
-          mtgCaptionTimerRef.current = null
-          setMtgCaptionPlaying(false)
-          setMtgCaptionWord(allWords.length - 1)
-          setMtgCaptionScreen(screens.length - 1)
-        }
-        audio.play().catch(() => {})
-      } catch { /* ignore audio errors */ }
-    }
-
-    // Start word timer with estimated duration (will be recalibrated when audio loads)
-    startMtgWordTimer(durationMs)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // Start word-level highlight timer from a given word index
   // `screens` parameter avoids stale closure over narrationScreens React state
@@ -538,28 +401,6 @@ export function OnboardingPage() {
     }
   }, [audioEnabled])
 
-  // Scroll chat to bottom
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  // Rotate thinking phrases while loading
-  useEffect(() => {
-    if (chatLoading) {
-      let idx = 0
-      setThinkingPhrase(THINKING_PHRASES[0])
-      thinkingTimerRef.current = setInterval(() => {
-        idx = (idx + 1) % THINKING_PHRASES.length
-        setThinkingPhrase(THINKING_PHRASES[idx])
-      }, 2500)
-    } else if (thinkingTimerRef.current) {
-      clearInterval(thinkingTimerRef.current)
-      thinkingTimerRef.current = null
-    }
-    return () => {
-      if (thinkingTimerRef.current) clearInterval(thinkingTimerRef.current)
-    }
-  }, [chatLoading])
 
   const skipOnboarding = useCallback(async () => {
     if (!activeTeam) return
@@ -631,7 +472,6 @@ export function OnboardingPage() {
         buyingMotivations: result.buyingMotivations ?? '',
       })
       if (result.primaryGoal) setPrimaryGoal(result.primaryGoal)
-      if (result.secondaryGoals) setSecondaryGoals(result.secondaryGoals)
       setScanned(true)
     } catch {
       stopScanProgress(false)
@@ -674,7 +514,7 @@ export function OnboardingPage() {
         industry,
         businessSummary,
         targetMarket,
-        primaryGoal: [primaryGoal, secondaryGoals].filter(Boolean).join(' | Secondary: ') || null,
+        primaryGoal: primaryGoal || null,
       } as Partial<engine.TeamProfile>)
 
       // Deploy AdvisorBot in background
@@ -685,6 +525,15 @@ export function OnboardingPage() {
         setAdvisorReady(true)
       })
 
+      // Auto-deploy 3 agents based on industry + goal (runs during tutorial)
+      setAgentsDeploying(true)
+      engine.autoDeployAgents(activeTeam.id, industry ?? undefined, primaryGoal || undefined).then((result) => {
+        setAutoDeployedAgents(result.agents)
+        setAgentsDeploying(false)
+      }).catch(() => {
+        setAgentsDeploying(false)
+      })
+
       setStep(2)
     } catch {
       setStep(2)
@@ -693,225 +542,12 @@ export function OnboardingPage() {
     }
   }
 
-  // Step 3: Send chat to AdvisorBot
-  const sendAdvisorMessage = async (message: string) => {
-    if (!advisorAgentId || chatLoading) return
-    setChatLoading(true)
-    setMessages((prev) => [...prev, { role: 'user', content: message }])
-    setChatInput('')
-
-    try {
-      const result = await engine.chatWithAgent(advisorAgentId, message)
-      if (result.response) {
-        setMessages((prev) => [...prev, { role: 'agent', content: result.response }])
-        setAdvisorFailed(false)
-      }
-    } catch {
-      setAdvisorFailed(true)
-      setMessages((prev) => [...prev, { role: 'agent', content: "Sorry, I had trouble processing that. You can retry or skip to the dashboard." }])
-    } finally {
-      setChatLoading(false)
-    }
-  }
-
-  // Step 3: Auto-send context on mount
-  useEffect(() => {
-    if (step === 3 && advisorReady && advisorAgentId && messages.length === 0) {
-      const contextLines = (noWebsite ? [
-        `New user just joined! Here's their context:`,
-        noWebsiteName ? `Name / Project: ${noWebsiteName}` : '',
-        noWebsiteCategory ? `Category: ${noWebsiteCategory}` : '',
-        noWebsiteContext ? `About: ${noWebsiteContext}` : '',
-        primaryGoal ? `Primary goal: ${primaryGoal}` : '',
-        secondaryGoals ? `Secondary goals: ${secondaryGoals}` : '',
-        ``,
-        `Based on this context, recommend 2-3 agents that would help them most. Use the recommend_agents tool.`,
-      ] : [
-        `New user just joined! Here's their business context:`,
-        scanFields.companyName ? `Company: ${scanFields.companyName}` : '',
-        scanFields.industry ? `Industry: ${scanFields.industry}` : '',
-        scanFields.problemSolved ? `Problem solved: ${scanFields.problemSolved}` : '',
-        scanFields.solution ? `Solution: ${scanFields.solution}` : '',
-        scanFields.targetMarket ? `Target market: ${scanFields.targetMarket}` : '',
-        scanFields.geographicFocus ? `Geographic focus: ${scanFields.geographicFocus}` : '',
-        scanFields.productsServices ? `Products/services: ${scanFields.productsServices}` : '',
-        scanFields.uniqueDifferentiators ? `Differentiators: ${scanFields.uniqueDifferentiators}` : '',
-        scanFields.buyingMotivations ? `Buying motivations: ${scanFields.buyingMotivations}` : '',
-        primaryGoal ? `Primary goal: ${primaryGoal}` : '',
-        secondaryGoals ? `Secondary goals: ${secondaryGoals}` : '',
-        ``,
-        `Based on this business context, recommend 2-3 agents that would help them most. Use the recommend_agents tool.`,
-      ]).filter(Boolean).join('\n')
-
-      sendAdvisorMessage(contextLines)
-    }
-  }, [step, advisorReady, advisorAgentId])
-
-  // Scroll meeting chat to bottom
-  useEffect(() => {
-    meetingEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [meetingMessages, speakingAgent])
-
-  // SSE connection for meet-and-greet
-  useEffect(() => {
-    if (!meetingId || !meetingActive || !activeTeam) return
-
-    const cleanup = engine.connectMeetingStream(
-      activeTeam.id,
-      meetingId,
-      (event) => {
-        switch (event.type) {
-          case 'agent_speaking':
-            setSpeakingAgent({
-              name: event.data.agentName ?? 'Agent',
-              icon: event.data.agentIcon ?? 'smart_toy',
-              iconColor: event.data.agentIconColor ?? '#0F4D26',
-            })
-            break
-
-          case 'agent_message':
-            // Add to chat thread
-            setMeetingMessages((prev) => [...prev, {
-              id: `agent-${event.data.messageId ?? Date.now()}`,
-              type: 'agent',
-              agentName: event.data.agentName,
-              agentIcon: event.data.agentIcon ?? 'smart_toy',
-              agentIconColor: event.data.agentIconColor ?? '#0F4D26',
-              content: event.data.content ?? '',
-            }])
-            // Play audio + word-highlighted captions in speaker banner
-            playMeetingAgentMessage(
-              event.data.content ?? '',
-              event.data.audioBase64,
-              event.data.audioDurationMs,
-            )
-            break
-
-          case 'human_message':
-            setMeetingMessages((prev) => [...prev, {
-              id: `human-${event.data.messageId ?? Date.now()}`,
-              type: 'human',
-              content: event.data.content ?? '',
-            }])
-            break
-
-          case 'human_raised_hand':
-            // Pause agent audio when hand is raised
-            if (audioRef.current) audioRef.current.pause()
-            break
-
-          case 'meeting_ended':
-            // Show the dashboard CTA immediately, but let current audio/captions
-            // finish naturally — don't cut off the wrap-up message
-            setMeetingEnded(true)
-            setMeetingActive(false)
-            break
-
-          case 'error':
-            console.error('[meeting] Error:', event.data.content)
-            break
-        }
-      },
-      (err) => {
-        console.error('[meeting] SSE connection error:', err)
-      },
-    )
-
-    return cleanup
-  }, [meetingId, meetingActive, activeTeam, audioEnabled])
-
-  // Send message during meeting
-  const sendMeetingMsg = useCallback(async (content: string) => {
-    if (!meetingId || !activeTeam || !content.trim()) return
-    setMeetingInput('')
-    try {
-      await engine.sendMeetingMessage(activeTeam.id, meetingId, content.trim())
-    } catch (err) {
-      console.error('[meeting] Failed to send message:', err)
-    }
-  }, [meetingId, activeTeam])
-
-  // Start push-to-talk recording
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm',
-      })
-      audioChunksRef.current = []
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data)
-      }
-      mediaRecorder.onstop = async () => {
-        // Stop all tracks to release mic
-        stream.getTracks().forEach((t) => t.stop())
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        if (blob.size === 0 || !meetingId || !activeTeam) return
-        setTranscribing(true)
-        try {
-          const result = await engine.sendMeetingVoice(activeTeam.id, meetingId, blob)
-          if (!result.text) {
-            console.warn('[meeting] STT returned empty text')
-          }
-        } catch (err) {
-          console.error('[meeting] Voice send failed:', err)
-        } finally {
-          setTranscribing(false)
-        }
-      }
-      mediaRecorderRef.current = mediaRecorder
-      mediaRecorder.start()
-      setRecording(true)
-    } catch (err) {
-      console.error('[meeting] Mic access denied:', err)
-    }
-  }, [meetingId, activeTeam])
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop()
-      mediaRecorderRef.current = null
-    }
-    setRecording(false)
-  }, [])
-
-  // Raise hand — pause audio + tell orchestrator
-  const handleRaiseHand = useCallback(async () => {
-    if (!meetingId || !activeTeam) return
-    if (audioRef.current) audioRef.current.pause()
-    try {
-      await engine.raiseMeetingHand(activeTeam.id, meetingId)
-    } catch (err) {
-      console.error('[meeting] Raise hand failed:', err)
-    }
-  }, [meetingId, activeTeam])
-
-  // Step 4: Load deployed agents
-  useEffect(() => {
-    if (step === 4) {
-      engine.listAgents().then(setDeployedAgents).catch(() => {})
-      if (activeTeam) {
-        engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
-      }
-    }
-  }, [step, activeTeam])
-
-  // If no advisor ready and we hit step 3, wait
+  // Step 3: ensure AdvisorBot is set up (background — needed for workspace, not onboarding chat)
   useEffect(() => {
     if (step === 3 && !advisorReady && activeTeam) {
-      engine.listAgents().then((agents) => {
-        const advisor = agents.find((a) => a.templateId === 'advisor-bot')
-        if (advisor) {
-          setAdvisorAgentId(advisor.id)
-          setAdvisorReady(true)
-        } else {
-          engine.setupAdvisor(activeTeam.id).then((r) => {
-            setAdvisorAgentId(r.agentId)
-            setAdvisorReady(true)
-          }).catch(() => setAdvisorReady(true))
-        }
+      engine.setupAdvisor(activeTeam.id).then((r) => {
+        setAdvisorAgentId(r.agentId)
+        setAdvisorReady(true)
       }).catch(() => setAdvisorReady(true))
     }
   }, [step, advisorReady, activeTeam])
@@ -965,7 +601,7 @@ export function OnboardingPage() {
         <div className="flex items-center gap-4">
           {/* Step indicator */}
           <div className="flex items-center gap-2">
-            {[1, 2, 3, 4].map((s) => (
+            {[1, 2, 3].map((s) => (
               <div
                 key={s}
                 className={`h-2 rounded-full transition-all ${
@@ -1302,38 +938,22 @@ export function OnboardingPage() {
                 </div>
               )}
 
-              {/* Goals — shown for both paths */}
+              {/* Goal — shown for both paths */}
               {(scanned || noWebsite) && (
                 <>
                   {/* Primary Goal */}
                   <div>
                     <label className="mb-2 block text-base font-medium text-text-main">
                       <span className="material-symbols-outlined text-[20px] align-middle mr-1">flag</span>
-                      Primary Goal
+                      What's your #1 goal?
                     </label>
                     <input
                       type="text"
                       value={primaryGoal}
                       onChange={(e) => setPrimaryGoal(e.target.value)}
-                      placeholder="e.g., Drive global brand awareness through automated content distribution"
+                      placeholder="e.g., Generate more leads, Create content, Build an app..."
                       className="w-full rounded-lg border border-border-subtle px-3 py-2.5 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
                     />
-                  </div>
-
-                  {/* Secondary Goals */}
-                  <div>
-                    <label className="mb-2 block text-base font-medium text-text-main">
-                      <span className="material-symbols-outlined text-[20px] align-middle mr-1">checklist</span>
-                      Secondary Goals
-                    </label>
-                    <input
-                      type="text"
-                      value={secondaryGoals}
-                      onChange={(e) => setSecondaryGoals(e.target.value)}
-                      placeholder="e.g., Build community on Discord, Increase user acquisition, Automate support"
-                      className="w-full rounded-lg border border-border-subtle px-3 py-2.5 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:outline-none focus:ring-1 focus:ring-forest-green"
-                    />
-                    <p className="mt-1.5 text-sm text-text-muted">Comma-separated — what else should your AI workforce tackle?</p>
                   </div>
 
                   <button
@@ -1411,552 +1031,78 @@ export function OnboardingPage() {
                   }}
                   className="flex-1 rounded-lg bg-forest-green px-4 py-3 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
                 >
-                  {slideIndex < TUTORIAL_SLIDES.length - 1 ? 'Next' : 'Meet Your Advisor'}
+                  {slideIndex < TUTORIAL_SLIDES.length - 1 ? 'Next' : 'See My Team'}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Step 3: AdvisorBot Chat → Meet-and-Greet */}
-        {step === 3 && (meetingActive || meetingEnded) && (
-          /* ── MEETING: Split-view layout ── */
-          <div data-testid="meeting-container" className="flex w-full flex-col" style={{ height: 'calc(100vh - 140px)' }}>
-            {/* ── TOP: Speaker Banner with Word-Highlighted Captions ── */}
-            {(speakingAgent || mtgCaptionPlaying) && (
-              <div className="shrink-0 bg-gray-900 px-6 py-5">
-                {/* Agent identity row */}
-                <div className="mb-3 flex items-center gap-3">
-                  <div
-                    className="flex h-12 w-12 items-center justify-center rounded-full shadow-lg"
-                    style={{ backgroundColor: speakingAgent?.iconColor ?? '#0F4D26' }}
-                  >
-                    <span className="material-symbols-outlined text-[24px] text-white">
-                      {speakingAgent?.icon ?? 'smart_toy'}
-                    </span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-display text-lg font-bold text-white">{speakingAgent?.name ?? 'Agent'}</p>
-                    <p className="text-sm text-amber-400">Speaking</p>
-                  </div>
-                  {/* Audio equalizer animation */}
-                  <div className="flex items-end gap-0.5 h-6">
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <div
-                        key={i}
-                        className="w-1 rounded-full bg-amber-400"
-                        style={{
-                          animation: mtgCaptionPlaying ? `eq-bar 0.6s ease-in-out ${i * 0.1}s infinite alternate` : 'none',
-                          height: mtgCaptionPlaying ? undefined : '4px',
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setAudioEnabled(!audioEnabled)}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-                    title={audioEnabled ? 'Mute audio' : 'Unmute audio'}
-                  >
-                    <span className="material-symbols-outlined text-[18px] text-white">
-                      {audioEnabled ? 'volume_up' : 'volume_off'}
-                    </span>
-                  </button>
-                </div>
-                {/* Word-highlighted captions */}
-                {mtgCaptionScreens.length > 0 && (
-                  <div className="min-h-[60px]">
-                    <p className="text-lg leading-relaxed">
-                      {(mtgCaptionScreens[mtgCaptionScreen] ?? []).map((word, wi) => {
-                        const globalIdx = mtgScreenStartWord(mtgCaptionScreen) + wi
-                        const isActive = globalIdx === mtgCaptionWord
-                        const isSpoken = globalIdx < mtgCaptionWord
-                        return (
-                          <span
-                            key={wi}
-                            className={`transition-colors duration-150 ${
-                              isActive ? 'text-amber-400 font-semibold' : isSpoken ? 'text-white' : 'text-white/30'
-                            }`}
-                          >
-                            {word}{' '}
-                          </span>
-                        )
-                      })}
-                    </p>
-                    {mtgCaptionScreens.length > 1 && (
-                      <p className="mt-2 text-center text-xs text-gray-500">
-                        {mtgCaptionScreen + 1} / {mtgCaptionScreens.length}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Meeting header (when no one is speaking) ── */}
-            {!speakingAgent && !mtgCaptionPlaying && (
-              <div className="flex shrink-0 items-center gap-3 bg-gradient-to-r from-gray-800 to-gray-700 px-5 py-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 backdrop-blur-sm">
-                  <span className="material-symbols-outlined text-[22px] text-white">groups</span>
-                </div>
-                <div className="flex-1">
-                  <h2 className="font-display text-lg font-bold text-white">Team Meet & Greet</h2>
-                  <p className="text-sm text-gray-400">
-                    {meetingEnded ? 'Meeting complete' : 'Live'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setAudioEnabled(!audioEnabled)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-                  title={audioEnabled ? 'Mute audio' : 'Unmute audio'}
-                >
-                  <span className="material-symbols-outlined text-[18px] text-white">
-                    {audioEnabled ? 'volume_up' : 'volume_off'}
-                  </span>
-                </button>
-              </div>
-            )}
-
-            {/* ── BOTTOM: Scrolling Chat Thread ── */}
-            <div className="flex flex-1 flex-col overflow-hidden border-t border-gray-700">
-              <div className="flex-1 overflow-y-auto bg-gradient-to-b from-gray-50 to-white p-5">
-                <div className="mx-auto max-w-2xl space-y-5">
-                  {meetingMessages.map((msg) => (
-                    <div key={msg.id} className={`flex gap-3 ${msg.type === 'human' ? 'justify-end' : ''}`}>
-                      {msg.type === 'agent' && (
-                        <div
-                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-sm"
-                          style={{ backgroundColor: msg.agentIconColor ?? '#0F4D26' }}
-                        >
-                          <span className="material-symbols-outlined text-[18px] text-white">
-                            {msg.agentIcon ?? 'smart_toy'}
-                          </span>
-                        </div>
-                      )}
-                      <div className={`max-w-[78%] rounded-2xl px-4 py-3 text-base leading-relaxed whitespace-pre-wrap shadow-sm ${
-                        msg.type === 'human'
-                          ? 'bg-forest-green text-white rounded-br-md'
-                          : 'bg-white border border-gray-100 text-text-main rounded-bl-md'
-                      }`}>
-                        {msg.type === 'agent' && msg.agentName && (
-                          <p className="mb-1 text-sm font-semibold" style={{ color: msg.agentIconColor ?? '#0F4D26' }}>
-                            {msg.agentName}
-                          </p>
-                        )}
-                        {msg.content}
-                      </div>
-                      {msg.type === 'human' && (
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200">
-                          <span className="material-symbols-outlined text-[18px] text-gray-600">person</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {speakingAgent && !mtgCaptionPlaying && (
-                    <div className="flex gap-3">
-                      <div
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-sm"
-                        style={{ backgroundColor: speakingAgent.iconColor }}
-                      >
-                        <span className="material-symbols-outlined text-[18px] text-white animate-pulse">
-                          {speakingAgent.icon}
-                        </span>
-                      </div>
-                      <div className="rounded-2xl rounded-bl-md bg-white border border-gray-100 px-4 py-3 shadow-sm">
-                        <p className="text-sm font-semibold" style={{ color: speakingAgent.iconColor }}>
-                          {speakingAgent.name}
-                        </p>
-                        <div className="mt-1 flex gap-0.5">
-                          <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '0ms' }} />
-                          <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '150ms' }} />
-                          <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '300ms' }} />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div ref={meetingEndRef} />
-                </div>
-              </div>
-
-              {/* ── Controls Bar ── */}
-              <div className="shrink-0 border-t border-border-subtle bg-white px-4 py-3">
-                <div className="mx-auto max-w-2xl">
-                  {meetingEnded ? (
-                    /* Meeting ended → Go to Dashboard */
-                    <button
-                      onClick={async () => {
-                        if (activeTeam) {
-                          await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
-                        }
-                        navigate('/dashboard?welcome=1', { replace: true })
-                      }}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">dashboard</span>
-                      Go to My Dashboard
-                      <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
-                    </button>
-                  ) : (
-                    /* During meeting → mic (push-to-talk) + raise hand + text fallback */
-                    <div className="space-y-3">
-                      {/* Primary row: Raise Hand + Mic + Audio Toggle */}
-                      <div className="flex items-center justify-center gap-4">
-                        {/* Raise hand */}
-                        <button
-                          onClick={handleRaiseHand}
-                          title="Raise hand to speak"
-                          className="flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white text-text-secondary shadow-sm hover:bg-amber-50 hover:border-amber-300 hover:text-amber-600 transition-colors"
-                        >
-                          <span className="material-symbols-outlined text-[22px]">front_hand</span>
-                        </button>
-
-                        {/* Mic — push-to-talk */}
-                        <button
-                          onMouseDown={startRecording}
-                          onMouseUp={stopRecording}
-                          onMouseLeave={() => recording && stopRecording()}
-                          onTouchStart={(e) => { e.preventDefault(); startRecording() }}
-                          onTouchEnd={(e) => { e.preventDefault(); stopRecording() }}
-                          disabled={transcribing}
-                          className={`flex h-16 w-16 items-center justify-center rounded-full shadow-md transition-all ${
-                            recording
-                              ? 'bg-red-500 text-white scale-110 animate-pulse'
-                              : transcribing
-                                ? 'bg-amber-500 text-white'
-                                : 'bg-forest-green text-white hover:bg-forest-green-hover'
-                          }`}
-                          title={recording ? 'Release to send' : transcribing ? 'Transcribing...' : 'Hold to speak'}
-                        >
-                          <span className="material-symbols-outlined text-[28px]">
-                            {recording ? 'mic' : transcribing ? 'hourglass_top' : 'mic'}
-                          </span>
-                        </button>
-
-                        {/* Audio toggle */}
-                        <button
-                          onClick={() => {
-                            setAudioEnabled((prev) => !prev)
-                            if (audioEnabled && audioRef.current) audioRef.current.pause()
-                          }}
-                          title={audioEnabled ? 'Mute agent voices' : 'Unmute agent voices'}
-                          className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-sm transition-colors ${
-                            audioEnabled
-                              ? 'border-gray-200 bg-white text-text-secondary hover:bg-gray-50'
-                              : 'border-red-200 bg-red-50 text-red-500'
-                          }`}
-                        >
-                          <span className="material-symbols-outlined text-[22px]">
-                            {audioEnabled ? 'volume_up' : 'volume_off'}
-                          </span>
-                        </button>
-                      </div>
-
-                      {/* Status label */}
-                      <p className="text-center text-sm text-text-muted">
-                        {recording ? 'Listening... release to send' : transcribing ? 'Transcribing your message...' : 'Hold mic to speak'}
-                      </p>
-
-                      {/* Text fallback */}
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={meetingInput}
-                          onChange={(e) => setMeetingInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && meetingInput.trim()) {
-                              sendMeetingMsg(meetingInput.trim())
-                            }
-                          }}
-                          placeholder="Or type a message..."
-                          className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-text-main placeholder:text-text-muted focus:border-forest-green focus:bg-white focus:outline-none focus:ring-1 focus:ring-forest-green transition-colors"
-                        />
-                        <button
-                          onClick={() => meetingInput.trim() && sendMeetingMsg(meetingInput.trim())}
-                          disabled={!meetingInput.trim()}
-                          className="rounded-xl bg-forest-green px-4 py-2.5 text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-40"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">send</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: AdvisorBot Chat (pre-meeting) */}
-        {step === 3 && !meetingActive && !meetingEnded && (
-          <div className="flex w-full max-w-2xl flex-col" style={{ height: 'calc(100vh - 140px)' }}>
-            <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-border-subtle shadow-lg">
-              {/* Header */}
-              <div className="flex items-center gap-3 border-b border-border-subtle bg-gradient-to-r from-gray-800 to-gray-700 px-5 py-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 backdrop-blur-sm">
-                  <span className="material-symbols-outlined text-[22px] text-white">smart_toy</span>
-                </div>
-                <div className="flex-1">
-                  <h2 className="font-display text-lg font-bold text-white">AdvisorBot</h2>
-                  <p className="text-sm text-gray-400">
-                    {chatLoading ? 'Thinking...' : advisorReady ? 'Online — ready to help' : 'Connecting...'}
-                  </p>
-                </div>
-                {chatLoading && (
-                  <div className="flex gap-1">
-                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" style={{ animationDelay: '0ms' }} />
-                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" style={{ animationDelay: '300ms' }} />
-                    <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" style={{ animationDelay: '600ms' }} />
-                  </div>
-                )}
-              </div>
-
-              {/* Messages area */}
-              <div className="flex-1 overflow-y-auto bg-gradient-to-b from-gray-50 to-white p-5">
-                {!advisorReady ? (
-                  <div className="flex h-full items-center justify-center">
-                    <div className="text-center">
-                      <div className="mb-4 flex justify-center">
-                        <div className="relative flex h-14 w-14 items-center justify-center rounded-full bg-forest-green/10">
-                          <span className="material-symbols-outlined text-[28px] text-forest-green">smart_toy</span>
-                          <div className="absolute -inset-1 animate-ping rounded-full bg-forest-green/10" />
-                        </div>
-                      </div>
-                      <p className="text-base font-medium text-text-main">Waking up AdvisorBot...</p>
-                      <p className="mt-1 text-sm text-text-muted">This only takes a moment</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-5">
-                    {messages.map((msg, i) => (
-                      <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                        {msg.role === 'agent' && (
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest-green shadow-sm">
-                            <span className="material-symbols-outlined text-[18px] text-white">smart_toy</span>
-                          </div>
-                        )}
-                        <div className={`max-w-[78%] rounded-2xl px-4 py-3 text-base leading-relaxed whitespace-pre-wrap shadow-sm ${
-                          msg.role === 'user'
-                            ? 'bg-forest-green text-white rounded-br-md'
-                            : 'bg-white border border-gray-100 text-text-main rounded-bl-md'
-                        }`}>
-                          {msg.content}
-                          {msg.upgradeLink && (
-                            <a
-                              href="/settings/billing"
-                              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-forest-green px-3 py-1.5 text-sm font-medium text-white hover:bg-forest-green-hover transition-colors no-underline"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">upgrade</span>
-                              Upgrade Plan
-                            </a>
-                          )}
-                        </div>
-                        {msg.role === 'user' && (
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200">
-                            <span className="material-symbols-outlined text-[18px] text-gray-600">person</span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {chatLoading && (
-                      <div className="flex gap-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest-green shadow-sm">
-                          <span className="material-symbols-outlined text-[18px] text-white animate-pulse">psychology</span>
-                        </div>
-                        <div className="rounded-2xl rounded-bl-md bg-white border border-gray-100 px-4 py-3 shadow-sm min-w-[260px]">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="flex gap-0.5">
-                              <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '0ms' }} />
-                              <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '150ms' }} />
-                              <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest-green/50" style={{ animationDelay: '300ms' }} />
-                            </div>
-                            <span className="text-xs font-semibold text-forest-green">Thinking...</span>
-                          </div>
-                          {/* Progress bar */}
-                          <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden mb-2">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-forest-green to-green-400 transition-all duration-[2500ms] ease-linear"
-                              style={{ width: `${Math.min(95, (THINKING_PHRASES.indexOf(thinkingPhrase) + 1) / THINKING_PHRASES.length * 100)}%` }}
-                            />
-                          </div>
-                          <p className="text-sm text-text-muted italic transition-all duration-300">{thinkingPhrase}</p>
-                        </div>
-                      </div>
-                    )}
-                    <div ref={chatEndRef} />
-                  </div>
-                )}
-              </div>
-
-              {/* Input area */}
-              <div className="border-t border-border-subtle bg-white px-4 py-3">
-                {agentsDeployed && !meetingId ? (
-                  /* Agents deployed but meeting didn't start (error fallback) */
-                  <button
-                    onClick={async () => {
-                      if (activeTeam) {
-                        await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
-                      }
-                      navigate('/dashboard?welcome=1', { replace: true })
-                    }}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">dashboard</span>
-                    Go to My Dashboard
-                    <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
-                  </button>
-                ) : advisorFailed && !agentsDeployed ? (
-                  /* Error recovery: Retry + Skip */
-                  <div className="flex flex-col gap-2">
-                    <button
-                      onClick={() => {
-                        setAdvisorFailed(false)
-                        // Re-send the context message
-                        const contextLines = [
-                          `New user just joined! Here's their business context:`,
-                          scanFields.companyName ? `Company: ${scanFields.companyName}` : '',
-                          scanFields.industry ? `Industry: ${scanFields.industry}` : '',
-                          scanFields.problemSolved ? `Problem solved: ${scanFields.problemSolved}` : '',
-                          scanFields.solution ? `Solution: ${scanFields.solution}` : '',
-                          scanFields.targetMarket ? `Target market: ${scanFields.targetMarket}` : '',
-                          primaryGoal ? `Primary goal: ${primaryGoal}` : '',
-                          ``,
-                          `Based on this business context, recommend 2-3 agents that would help them most. Use the recommend_agents tool.`,
-                        ].filter(Boolean).join('\n')
-                        sendAdvisorMessage(contextLines)
-                      }}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">refresh</span>
-                      Retry
-                    </button>
-                    <button
-                      onClick={async () => {
-                        if (activeTeam) {
-                          await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
-                        }
-                        navigate('/dashboard?welcome=1', { replace: true })
-                      }}
-                      className="text-sm text-text-muted hover:text-text-secondary transition-colors"
-                    >
-                      Skip to Dashboard
-                    </button>
-                  </div>
-                ) : !chatLoading && !advisorFailed && messages.some((m) => m.role === 'agent') && !deploying ? (
-                  /* Deploy button */
-                  <button
-                    onClick={async () => {
-                      setDeploying(true)
-                      await sendAdvisorMessage('Yes, deploy all of the recommended agents for me now.')
-                      setDeploying(false)
-                      setAgentsDeployed(true)
-                      // Skip straight to completion — no meeting step
-                      setStep(4)
-                    }}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-forest-green px-4 py-3.5 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">rocket_launch</span>
-                    Deploy Agents Now
-                  </button>
-                ) : (
-                  /* AdvisorBot text input */
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && chatInput.trim() && !chatLoading) {
-                          sendAdvisorMessage(chatInput.trim())
-                        }
-                      }}
-                      placeholder="Ask AdvisorBot anything..."
-                      disabled={!advisorReady || chatLoading}
-                      className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-base text-text-main placeholder:text-text-muted focus:border-forest-green focus:bg-white focus:outline-none focus:ring-1 focus:ring-forest-green disabled:opacity-50 transition-colors"
-                    />
-                    <button
-                      onClick={() => chatInput.trim() && sendAdvisorMessage(chatInput.trim())}
-                      disabled={!advisorReady || chatLoading || !chatInput.trim()}
-                      className="rounded-xl bg-forest-green px-5 py-3 text-white shadow-sm hover:bg-forest-green-hover transition-colors disabled:opacity-40"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">send</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Skip link */}
-            {!agentsDeployed && (
-              <button
-                onClick={() => setStep(4)}
-                className="mt-3 text-sm text-text-muted hover:text-text-secondary transition-colors"
-              >
-                Skip — I'll set up agents later
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Step 4: Completion */}
-        {step === 4 && (
+        {/* Step 3: Your Team is Ready (final step) */}
+        {step === 3 && (
           <div className="w-full max-w-lg self-center text-center">
             <div className="mb-6 flex justify-center">
               <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-forest-green/10 text-forest-green">
-                <span className="material-symbols-outlined text-[40px]">celebration</span>
+                <span className="material-symbols-outlined text-[40px]">rocket_launch</span>
               </div>
             </div>
 
-            <h2 className="font-display text-3xl font-bold text-text-main">You're all set!</h2>
+            <h2 className="font-display text-3xl font-bold text-text-main">Your team is ready!</h2>
             <p className="mt-2 text-lg text-text-secondary">
-              Your AI workforce is ready to go. Here's what we set up for you:
+              {agentsDeploying
+                ? "Setting up your AI agents..."
+                : `We deployed ${autoDeployedAgents.length} agents tailored to your goals. They're online and ready to work.`
+              }
             </p>
 
+            {/* Deploying spinner */}
+            {agentsDeploying && (
+              <div className="mt-6 flex justify-center">
+                <div className="h-8 w-8 animate-spin rounded-full border-3 border-forest-green/20 border-t-forest-green" />
+              </div>
+            )}
+
             {/* Deployed agents list */}
-            {deployedAgents.length > 0 && (
+            {!agentsDeploying && autoDeployedAgents.length > 0 && (
               <div className="mt-6 space-y-2">
-                {deployedAgents.map((agent) => (
+                {autoDeployedAgents.map((agent) => (
                   <div
                     key={agent.id}
                     className="flex items-center gap-3 rounded-xl border border-border-subtle bg-white px-4 py-3.5 text-left shadow-sm"
                   >
                     <div
                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-                      style={{ backgroundColor: `${agent.iconColor}20`, color: agent.iconColor ?? '#0F4D26' }}
+                      style={{ backgroundColor: `${agent.iconColor}20`, color: agent.iconColor }}
                     >
-                      <span className="material-symbols-outlined text-[22px]">{agent.iconName ?? 'smart_toy'}</span>
+                      <span className="material-symbols-outlined text-[22px]">{agent.icon}</span>
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-base font-medium text-text-main truncate">{agent.name}</p>
-                      <p className="text-sm text-text-muted">{agent.department ?? 'General'}</p>
+                      <p className="text-sm text-text-muted">{agent.department}</p>
                     </div>
-                    <span className="text-sm text-accent-green font-medium">Ready</span>
+                    <span className="text-sm text-accent-green font-medium">Online</span>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Quick links */}
-            <div className="mt-8 flex flex-col gap-3">
-              <button
-                onClick={() => navigate('/dashboard?welcome=1', { replace: true })}
-                className="w-full rounded-lg bg-forest-green px-4 py-3 text-base font-medium text-white shadow-sm hover:bg-forest-green-hover transition-colors"
-              >
-                Go to Dashboard
-              </button>
-              <div className="flex gap-3">
+            {/* CTA */}
+            {!agentsDeploying && (
+              <div className="mt-8 flex flex-col gap-3">
                 <button
-                  onClick={() => navigate('/workspace', { replace: true })}
-                  className="flex-1 rounded-lg border border-border-subtle px-4 py-3 text-base font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
+                  onClick={async () => {
+                    if (activeTeam) {
+                      await engine.updateTeamProfile(activeTeam.id, { onboardedAt: new Date().toISOString() } as Partial<engine.TeamProfile>).catch(() => {})
+                    }
+                    navigate('/dashboard?welcome=1', { replace: true })
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-forest-green px-4 py-3.5 text-base font-semibold text-white shadow-sm hover:bg-forest-green-hover transition-colors"
                 >
-                  Chat with Agents
-                </button>
-                <button
-                  onClick={() => navigate('/templates', { replace: true })}
-                  className="flex-1 rounded-lg border border-border-subtle px-4 py-3 text-base font-medium text-text-secondary hover:bg-light-surface-alt transition-colors"
-                >
-                  Browse Pre-Built Agents
+                  <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
+                  Go to My Workspace
                 </button>
               </div>
-            </div>
+            )}
           </div>
         )}
       </main>

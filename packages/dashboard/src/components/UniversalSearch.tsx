@@ -47,7 +47,7 @@ const ICON_COLORS: Record<ResultCategory, string> = {
 
 const SECTION_LABELS: Record<ResultCategory, string> = {
   agent: 'Agents',
-  task: 'Mission Control',
+  task: 'Tasks',
   message: 'Chat Messages',
   document: 'Files',
   goal: 'Goals',

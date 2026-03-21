@@ -369,7 +369,6 @@ export interface ToolContext {
 const TOOL_LABELS: Record<string, string> = {
   think: 'Thinking',
   respond: 'Composing response',
-  web_search: 'Searching the web',
   install_skill: 'Installing skill',
   use_saved_login: 'Loading saved login',
   vault_report_session_expired: 'Reporting expired session',
@@ -935,12 +934,8 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       const dupWarning = await checkForDuplicateTask(ctx.db, ctx.teamId, args.title as string)
       if (dupWarning) return dupWarning
       // Validate assignedAgentId belongs to this team
-      // AdvisorBot (team manager) cannot assign tasks to himself — his job is to delegate
       let targetAgentId = (args.assignedAgentId as string) ?? ctx.agentId
       const callerAgent = await getAgent(ctx.db, ctx.agentId)
-      if (targetAgentId === ctx.agentId && callerAgent?.templateId === 'advisor-bot') {
-        return `Error: As the team manager, you must delegate tasks to other agents — not yourself. Use list_agents to find the right agent for this task.`
-      }
       if (targetAgentId && targetAgentId !== ctx.agentId) {
         const targetAgent = await getAgent(ctx.db, targetAgentId)
         if (!targetAgent || targetAgent.teamId !== ctx.teamId) {
@@ -1866,10 +1861,6 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
         if (dupWarning) { results.push(`Skipped "${t.title}": ${dupWarning}`); continue }
         // Validate assignedAgentId
         let targetAgentId = (t.assignedAgentId as string) ?? ctx.agentId
-        if (targetAgentId === ctx.agentId && callerAgent?.templateId === 'advisor-bot') {
-          results.push(`Skipped "${t.title}": as team manager, you must delegate to other agents`)
-          continue
-        }
         if (targetAgentId && targetAgentId !== ctx.agentId) {
           const targetAgent = await getAgent(ctx.db, targetAgentId)
           if (!targetAgent || targetAgent.teamId !== ctx.teamId) {
@@ -2259,6 +2250,7 @@ You have a built-in browser that lets you navigate ANY website on the internet, 
 - **Close the browser when done** with \`browser_close\` to free resources.
 - **The human can see everything you do** in the browser in real-time. Don't browse anything inappropriate or unnecessary.
 - **Do NOT stop browsing after just one or two pages.** When asked to research or analyze a website, explore multiple pages thoroughly — click through navigation, check subpages, read content. Do NOT return a response until you've done a thorough job.
+- **Google blocks automated browsers with CAPTCHAs.** When searching the web, use Bing (bing.com) instead — navigate to \`https://www.bing.com/search?q=your+search+terms\` directly.
 
 ## Guidelines
 

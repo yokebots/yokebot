@@ -3119,93 +3119,104 @@ async function main() {
       await db.run(`UPDATE ${table} SET team_id = $1 WHERE team_id = '' OR team_id IS NULL`, [team.id])
     }
 
-    // Auto-create #general channel so every team has a default group channel
+    // Essential setup — must complete before response
     try {
       await createChannel(db, team.id, 'general', 'group')
     } catch (err) {
       console.error('[engine] Failed to create #general channel:', (err as Error).message)
     }
 
-    // Auto-deploy AdvisorBot in hosted mode
-    if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
-      try {
-        const advisorTemplate = getTemplate('advisor-bot')
-        if (advisorTemplate) {
-          const modelConfig = await resolveModelConfig(db, advisorTemplate.recommendedModel)
-          if (modelConfig) {
-            const advisorAgent = await createAgent(db, team.id, {
-              name: advisorTemplate.name,
-              department: advisorTemplate.department,
-              iconName: advisorTemplate.icon,
-              iconColor: advisorTemplate.iconColor,
-              systemPrompt: advisorTemplate.systemPrompt,
-              modelId: advisorTemplate.recommendedModel,
-              modelConfig,
-              heartbeatSeconds: 3600,
-              templateId: 'advisor-bot',
-            })
-            await installSkill(db, advisorAgent.id, 'advisor-tools')
-            await setAgentStatus(db, advisorAgent.id, 'running')
-            scheduleAgent(db, { ...advisorAgent, status: 'running' })
-            await logActivity(db, 'agent_created', advisorAgent.id, `AdvisorBot auto-deployed for new team`, undefined, team.id)
-          }
-        }
-      } catch (err) {
-        console.error('[engine] Failed to auto-deploy AdvisorBot:', (err as Error).message)
+    // Grant starter credits synchronously (needed for onboarding)
+    if (process.env.YOKEBOT_HOSTED_MODE === 'true' && req.user?.id) {
+      const userTeams = await getUserTeams(db, req.user.id)
+      if (userTeams.length === 1) {
+        await addCredits(db, team.id, 1250, 'starter_credits', 'Welcome bonus: 1,250 starter credits')
+        console.log(`[engine] Granted 1,250 starter credits to team ${team.id}`)
       }
-
-      // Grant 1,250 starter credits for the user's first team only
-      if (req.user?.id) {
-        const userTeams = await getUserTeams(db, req.user.id)
-        if (userTeams.length === 1) {
-          await addCredits(db, team.id, 1250, 'starter_credits', 'Welcome bonus: 1,250 starter credits')
-          console.log(`[engine] Granted 1,250 starter credits to team ${team.id}`)
-        }
-      }
-
-      // Send welcome email (non-blocking)
-      if (req.user?.email) {
-        try {
-          const { sendWelcomeEmail, generateUnsubscribeUrl } = await import('./email.ts')
-          const unsubUrl = generateUnsubscribeUrl(req.user.id, team.id)
-          await sendWelcomeEmail(req.user.email, unsubUrl)
-          console.log(`[engine] Welcome email sent to ${req.user.email}`)
-        } catch (err) {
-          console.error('[engine] Failed to send welcome email:', (err as Error).message)
-        }
-
-        // Enroll in onboarding drip series (independent of welcome email)
-        try {
-          const { enrollUser } = await import('./onboarding-drip.ts')
-          await enrollUser(db, req.user.id, team.id, req.user.email)
-        } catch (dripErr) {
-          console.error('[engine] Failed to enroll in drip series:', (dripErr as Error).message)
-        }
-      }
-    }
-
-    // Seed default workflow templates
-    try {
-      const { seedVideoProductionWorkflow } = await import('./video-workflow-seed.ts')
-      await seedVideoProductionWorkflow(db, team.id)
-    } catch (err) {
-      console.error('[engine] Failed to seed Video Production workflow:', (err as Error).message)
-    }
-    try {
-      const { seedRapidImageAdsWorkflow } = await import('./ad-workflow-seed.ts')
-      await seedRapidImageAdsWorkflow(db, team.id)
-    } catch (err) {
-      console.error('[engine] Failed to seed Rapid Image Ads workflow:', (err as Error).message)
-    }
-    try {
-      const { seedSalesCrmWorkflow } = await import('./crm-workflow-seed.ts')
-      await seedSalesCrmWorkflow(db, team.id)
-    } catch (err) {
-      console.error('[engine] Failed to seed Sales CRM workflow:', (err as Error).message)
     }
 
     await logActivity(db, 'team_created', null, `Team "${name}" created`, undefined, team.id)
+
+    // Return immediately — heavy setup runs in background
     res.status(201).json(team)
+
+    // ---- Background setup (non-blocking) ----
+    const teamId = team.id
+    const userId = req.user?.id
+    const userEmail = req.user?.email
+
+    // AdvisorBot deploy
+    if (process.env.YOKEBOT_HOSTED_MODE === 'true') {
+      ;(async () => {
+        try {
+          const advisorTemplate = getTemplate('advisor-bot')
+          if (advisorTemplate) {
+            const modelConfig = await resolveModelConfig(db, advisorTemplate.recommendedModel)
+            if (modelConfig) {
+              const advisorAgent = await createAgent(db, teamId, {
+                name: advisorTemplate.name,
+                department: advisorTemplate.department,
+                iconName: advisorTemplate.icon,
+                iconColor: advisorTemplate.iconColor,
+                systemPrompt: advisorTemplate.systemPrompt,
+                modelId: advisorTemplate.recommendedModel,
+                modelConfig,
+                heartbeatSeconds: 3600,
+                templateId: 'advisor-bot',
+              })
+              await installSkill(db, advisorAgent.id, 'advisor-tools')
+              await setAgentStatus(db, advisorAgent.id, 'running')
+              scheduleAgent(db, { ...advisorAgent, status: 'running' })
+              await logActivity(db, 'agent_created', advisorAgent.id, `AdvisorBot auto-deployed for new team`, undefined, teamId)
+            }
+          }
+        } catch (err) {
+          console.error('[engine] Background: Failed to auto-deploy AdvisorBot:', (err as Error).message)
+        }
+      })()
+
+      // Welcome email + drip series
+      if (userEmail && userId) {
+        ;(async () => {
+          try {
+            const { sendWelcomeEmail, generateUnsubscribeUrl } = await import('./email.ts')
+            const unsubUrl = generateUnsubscribeUrl(userId, teamId)
+            await sendWelcomeEmail(userEmail, unsubUrl)
+            console.log(`[engine] Welcome email sent to ${userEmail}`)
+          } catch (err) {
+            console.error('[engine] Background: Failed to send welcome email:', (err as Error).message)
+          }
+          try {
+            const { enrollUser } = await import('./onboarding-drip.ts')
+            await enrollUser(db, userId, teamId, userEmail)
+          } catch (err) {
+            console.error('[engine] Background: Failed to enroll in drip series:', (err as Error).message)
+          }
+        })()
+      }
+    }
+
+    // Seed workflow templates
+    ;(async () => {
+      try {
+        const { seedVideoProductionWorkflow } = await import('./video-workflow-seed.ts')
+        await seedVideoProductionWorkflow(db, teamId)
+      } catch (err) {
+        console.error('[engine] Background: Failed to seed Video Production workflow:', (err as Error).message)
+      }
+      try {
+        const { seedRapidImageAdsWorkflow } = await import('./ad-workflow-seed.ts')
+        await seedRapidImageAdsWorkflow(db, teamId)
+      } catch (err) {
+        console.error('[engine] Background: Failed to seed Rapid Image Ads workflow:', (err as Error).message)
+      }
+      try {
+        const { seedSalesCrmWorkflow } = await import('./crm-workflow-seed.ts')
+        await seedSalesCrmWorkflow(db, teamId)
+      } catch (err) {
+        console.error('[engine] Background: Failed to seed Sales CRM workflow:', (err as Error).message)
+      }
+    })()
   })
 
   app.delete('/api/teams/:id', async (req, res) => {
@@ -3587,10 +3598,9 @@ ${truncated}`,
   // ===== AdvisorBot Narration (onboarding voice guidance) =====
 
   const ADVISOR_NARRATION_SCRIPTS: Record<number, string> = {
-    1: `Hey {firstName}! Welcome to YokeBot. I'm AdvisorBot, your strategic advisor and personal guide to building your AI workforce. Here's how this works. First, tell me a bit about your business so I can understand your goals. Then I'll recommend the perfect team of AI agents, tailored just for you. Go ahead and fill in your details below, and I'll take it from here.`,
-    2: `Nice work, {firstName}! Now let me give you a quick tour of what you're working with. YokeBot gives you a full team of AI agents, each one specialized for a different job. You'll manage them from Mission Control, where you can assign tasks, review their work, and approve important actions. And the best part? You can chat with any agent, just like messaging a coworker. They collaborate with each other too. Click through these slides and I'll meet you on the other side.`,
-    3: `Alright {firstName}, this is where it gets exciting. Based on your business profile, I've got some agent recommendations that I think will be perfect for you. Take a look at what I'm suggesting, and when you're ready, just hit Deploy and I'll set everything up. Your agents will be online and ready to work in seconds. Let's build your dream team!`,
-    4: `And just like that, you're all set, {firstName}! Your AI workforce is deployed and ready to go. You can find them in the Agents tab, chat with them anytime, or assign them tasks from the dashboard. If you ever need help, I'm always here. Just open a chat with me and I'll guide you through anything. Welcome to the future of work. Let's make some magic happen!`,
+    1: `Hey {firstName}! Welcome to YokeBot. I'm AdvisorBot, your strategic advisor and personal guide to building your AI workforce. Tell me a bit about your business and your top goal, and I'll set up the perfect team for you. Fill in your details below and hit Continue.`,
+    2: `Nice work, {firstName}! While you check out what YokeBot can do, I'm setting up your team of AI agents in the background. Each one is specialized for a different job. You'll manage them from the Shared Workspace, where you can assign tasks, review their work, and chat with any agent just like messaging a coworker. Click through these slides and your team will be ready when you're done.`,
+    3: `And just like that, your team is live, {firstName}! Your AI agents are deployed and ready to work. You can find them in the Agents tab, chat with them anytime, or assign them tasks from the workspace. If you ever need help, I'm always here. Welcome to the future of work. Let's make some magic happen!`,
   }
 
   const ADVISOR_VOICE_ID = 'a167e0f3-df7e-4d52-a9c3-f949145efdab' // Blake - Helpful Agent
@@ -3606,8 +3616,8 @@ ${truncated}`,
     if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
 
     const { step, firstName } = req.body as { step: number; firstName: string }
-    if (!step || step < 1 || step > 4 || !firstName) {
-      return res.status(400).json({ error: 'step (1-4) and firstName are required' })
+    if (!step || step < 1 || step > 3 || !firstName) {
+      return res.status(400).json({ error: 'step (1-3) and firstName are required' })
     }
 
     const template = ADVISOR_NARRATION_SCRIPTS[step]
@@ -3689,6 +3699,114 @@ ${truncated}`,
     await logActivity(db, 'agent_created', agent.id, `AdvisorBot deployed via setup`, undefined, req.params.id)
 
     res.status(201).json({ agentId: agent.id, alreadyExists: false })
+  })
+
+  // ===== Auto-deploy agents based on industry + goal (onboarding) =====
+
+  app.post('/api/teams/:id/auto-deploy-agents', async (req, res) => {
+    if (process.env.YOKEBOT_HOSTED_MODE !== 'true') {
+      return res.status(403).json({ error: 'Only available in hosted mode' })
+    }
+    const team = await getTeam(db, req.params.id)
+    if (!team) return res.status(404).json({ error: 'Team not found' })
+    const members = await getTeamMembers(db, req.params.id)
+    const caller = members.find((m) => m.userId === req.user!.id)
+    if (!caller) return res.status(403).json({ error: 'Not a member of this team' })
+
+    const { industry, goal } = req.body as { industry?: string; goal?: string }
+
+    // Score templates against industry + goal keywords (no LLM call)
+    const allTemplates = listTemplates({ includeHostedOnly: true })
+    const candidates = allTemplates.filter(t => t.id !== 'advisor-bot' && t.id !== 'team-lead' && !t.isFree)
+    const query = [industry ?? '', goal ?? ''].join(' ').toLowerCase()
+    const words = query.split(/\s+/).filter(w => w.length > 2)
+
+    const scored = candidates.map(t => {
+      const haystack = [t.name, t.title, t.department, t.description, ...(t.commonTasks ?? [])].join(' ').toLowerCase()
+      let score = 0
+      for (const w of words) {
+        if (haystack.includes(w)) score += 1
+      }
+      // Boost by department relevance
+      const dept = (t.department ?? '').toLowerCase()
+      if (query.includes('sales') && dept === 'sales') score += 3
+      if (query.includes('marketing') && dept === 'marketing') score += 3
+      if (query.includes('content') && (dept === 'marketing' || dept === 'content')) score += 3
+      if (query.includes('support') && dept === 'support') score += 3
+      if (query.includes('finance') && dept === 'finance') score += 3
+      if (query.includes('hr') && dept === 'hr') score += 3
+      if (query.includes('legal') && dept === 'legal') score += 3
+      if (query.includes('engineering') && dept === 'engineering') score += 3
+      if (query.includes('seo') && t.id === 'seo-bot') score += 5
+      if (query.includes('social') && t.id === 'social-bot') score += 5
+      if (query.includes('email') && t.id === 'email-bot') score += 5
+      if (query.includes('lead') && t.id === 'prospector-bot') score += 5
+      if (query.includes('prospect') && t.id === 'prospector-bot') score += 5
+      if (query.includes('reputation') && t.id === 'reputation-bot') score += 5
+      if (query.includes('build') && t.id === 'builder-bot') score += 5
+      if (query.includes('app') && t.id === 'builder-bot') score += 5
+      return { template: t, score }
+    })
+
+    scored.sort((a, b) => b.score - a.score)
+
+    // Pick top 3 (ensure variety — max 1 per department)
+    const picked: typeof candidates = []
+    const usedDepts = new Set<string>()
+    for (const { template } of scored) {
+      if (picked.length >= 3) break
+      const dept = template.department ?? 'other'
+      if (usedDepts.has(dept)) continue
+      usedDepts.add(dept)
+      picked.push(template)
+    }
+    // If we don't have 3 yet (e.g. generic query), fill with popular defaults
+    const fallbacks = ['content-bot', 'prospector-bot', 'reputation-bot', 'social-bot']
+    for (const fbId of fallbacks) {
+      if (picked.length >= 3) break
+      if (picked.some(p => p.id === fbId)) continue
+      const fb = allTemplates.find(t => t.id === fbId)
+      if (fb) picked.push(fb)
+    }
+
+    // Deploy each agent (skip if already exists)
+    const existing = await listAgents(db, req.params.id)
+    const deployed: Array<{ id: string; name: string; templateId: string; icon: string; iconColor: string; department: string }> = []
+
+    for (const tmpl of picked) {
+      if (existing.some(a => a.templateId === tmpl.id)) {
+        const ex = existing.find(a => a.templateId === tmpl.id)!
+        deployed.push({ id: ex.id, name: ex.name, templateId: tmpl.id, icon: tmpl.icon, iconColor: tmpl.iconColor, department: tmpl.department })
+        continue
+      }
+      try {
+        const mc = await resolveModelConfig(db, tmpl.recommendedModel)
+        if (!mc) continue
+        const agent = await createAgent(db, req.params.id, {
+          name: tmpl.name,
+          department: tmpl.department,
+          iconName: tmpl.icon,
+          iconColor: tmpl.iconColor,
+          systemPrompt: tmpl.systemPrompt,
+          modelId: tmpl.recommendedModel,
+          modelConfig: mc,
+          heartbeatSeconds: 3600,
+          templateId: tmpl.id,
+        })
+        // Install default skills
+        for (const skillName of tmpl.defaultSkills) {
+          await installSkill(db, agent.id, skillName).catch(() => {})
+        }
+        await setAgentStatus(db, agent.id, 'running')
+        scheduleAgent(db, { ...agent, status: 'running' })
+        await logActivity(db, 'agent_created', agent.id, `${tmpl.name} auto-deployed during onboarding`, undefined, req.params.id)
+        deployed.push({ id: agent.id, name: tmpl.name, templateId: tmpl.id, icon: tmpl.icon, iconColor: tmpl.iconColor, department: tmpl.department })
+      } catch (err) {
+        console.error(`[onboarding] Failed to deploy ${tmpl.name}:`, (err as Error).message)
+      }
+    }
+
+    res.json({ agents: deployed })
   })
 
   // ===== Meetings (hosted-only — real-time meet-and-greet) =====

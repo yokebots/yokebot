@@ -1023,6 +1023,12 @@ export const setupAdvisor = (teamId: string) =>
     method: 'POST',
   })
 
+export const autoDeployAgents = (teamId: string, industry?: string, goal?: string) =>
+  request<{ agents: Array<{ id: string; name: string; templateId: string; icon: string; iconColor: string; department: string }> }>(
+    `/api/teams/${teamId}/auto-deploy-agents`,
+    { method: 'POST', body: JSON.stringify({ industry, goal }) },
+  )
+
 // ===== Team Logo =====
 
 export async function uploadTeamLogo(teamId: string, file: File): Promise<{ success: boolean }> {

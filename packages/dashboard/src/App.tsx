@@ -51,7 +51,21 @@ import { ToastProvider } from '@/components/ToastNotifications'
 import { useState, useEffect, type ReactNode } from 'react'
 import * as engine from '@/lib/engine'
 
-const LoadingScreen = () => null
+function LoadingScreen() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-light-bg">
+      <div className="flex flex-col items-center gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-forest-green shadow-md overflow-hidden">
+          <img src="/logo-icon-white.png" alt="YokeBot" className="h-8 w-8 object-contain" />
+        </div>
+        <div className="h-1 w-32 overflow-hidden rounded-full bg-border-subtle">
+          <div className="h-full w-1/2 rounded-full bg-forest-green" style={{ animation: 'loading-slide 1.2s ease-in-out infinite' }} />
+        </div>
+        <style>{`@keyframes loading-slide { 0% { transform: translateX(-100%) } 100% { transform: translateX(200%) } }`}</style>
+      </div>
+    </div>
+  )
+}
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
@@ -61,7 +75,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 }
 
 function OnboardingGuard({ children }: { children: ReactNode }) {
-  const { activeTeam, loading: teamLoading } = useTeam()
+  const { activeTeam, loading: teamLoading, isNewTeam } = useTeam()
   const [checking, setChecking] = useState(true)
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
 
@@ -70,6 +84,13 @@ function OnboardingGuard({ children }: { children: ReactNode }) {
 
     // If no active team (e.g. API failed with 401), skip onboarding check
     if (!activeTeam) {
+      setChecking(false)
+      return
+    }
+
+    // Brand new team (just created) — skip the API call, go straight to onboarding
+    if (isNewTeam) {
+      setNeedsOnboarding(true)
       setChecking(false)
       return
     }
@@ -83,7 +104,7 @@ function OnboardingGuard({ children }: { children: ReactNode }) {
         // Fail open — don't block users if profile endpoint fails
         setChecking(false)
       })
-  }, [activeTeam, teamLoading])
+  }, [activeTeam, teamLoading, isNewTeam])
 
   if (teamLoading || checking) return <LoadingScreen />
   if (needsOnboarding) return <Navigate to="/onboarding" replace />

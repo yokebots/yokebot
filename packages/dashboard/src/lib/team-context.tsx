@@ -13,6 +13,8 @@ interface TeamContextValue {
   teams: Team[]
   activeTeam: Team | null
   loading: boolean
+  /** True when the team was just created during this session (new user signup) */
+  isNewTeam: boolean
   switchTeam: (teamId: string) => void
   refresh: () => Promise<void>
   createAndSwitchTeam: (name: string) => Promise<Team>
@@ -26,6 +28,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
   const [teams, setTeams] = useState<Team[]>([])
   const [activeTeam, setActiveTeam] = useState<Team | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isNewTeam, setIsNewTeam] = useState(false)
   const creatingTeamRef = useRef(false)
 
   const loadTeams = useCallback(async () => {
@@ -45,6 +48,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
           : 'My Team'
         const newTeam = await createTeam(name)
         userTeams.push({ ...newTeam, role: 'admin' })
+        setIsNewTeam(true)
       }
 
       if (userTeams.length === 0) {
@@ -91,7 +95,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <TeamContext.Provider value={{ teams, activeTeam, loading, switchTeam, refresh: loadTeams, createAndSwitchTeam }}>
+    <TeamContext.Provider value={{ teams, activeTeam, loading, isNewTeam, switchTeam, refresh: loadTeams, createAndSwitchTeam }}>
       {children}
     </TeamContext.Provider>
   )

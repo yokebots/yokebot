@@ -481,6 +481,12 @@ export function BrowserPanel({ sessionId, popout }: BrowserPanelProps) {
               maxHeight: zoom <= 100 ? '100%' : 'none',
             }}
           />
+        ) : error === 'Browser session has ended' ? (
+          <div className="text-center text-text-muted text-sm" data-testid="browser-ended">
+            <span className="material-symbols-outlined text-4xl block mb-3 text-text-muted/40">tab_close</span>
+            <p className="font-medium text-text-main mb-1">Browser session ended</p>
+            <p>The agent has finished browsing.</p>
+          </div>
         ) : (
           <div className="text-center text-text-muted text-sm">
             <span className="material-symbols-outlined text-4xl block mb-3 text-forest-green/40">language</span>
