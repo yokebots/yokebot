@@ -209,6 +209,7 @@ export interface ChatMessage {
   audioKey: string | null
   audioDurationMs: number | null
   taskId: string | null
+  modelId: string | null
   parentMessageId: number | null
   replyCount: number
   latestReplyAt: string | null

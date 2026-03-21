@@ -2214,6 +2214,17 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 53,
+    name: 'add_model_id_to_chat_messages',
+    async up(db: Db) {
+      if (db.driver === 'postgres') {
+        await db.run(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS model_id TEXT`)
+      } else {
+        await db.run(`ALTER TABLE chat_messages ADD COLUMN model_id TEXT`)
+      }
+    },
+  },
 ]
 
 /**

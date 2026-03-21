@@ -309,9 +309,12 @@ export function MessageBubble({
             ? 'bg-amber-50 text-amber-800'
             : 'bg-white border border-border-subtle'
       }`}>
-        {/* Name + time */}
+        {/* Name + model + time */}
         <div className={`flex items-baseline gap-1.5 mb-0.5 ${isHuman ? 'justify-end' : ''}`}>
           <span className="text-[11px] font-bold" style={{ color }}>{displayName}</span>
+          {isAgent && message.modelId && (
+            <span className="text-[9px] font-medium text-text-muted/60 uppercase tracking-wide">{message.modelId}</span>
+          )}
           <span className="text-[10px] text-text-muted">{timeStr}</span>
         </div>
         {/* Embedded images (GIFs, markdown images) */}

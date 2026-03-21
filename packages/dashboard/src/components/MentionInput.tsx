@@ -563,17 +563,30 @@ export function MentionInput({ value, onChange, onSubmit, placeholder, completio
  * Returns an array of React elements (text spans + mention chips).
  */
 /** Render inline markdown: **bold**, *italic*, `code` */
-function renderInlineMarkdown(text: string, keyPrefix: string): React.ReactNode {
-  // Match **bold**, *italic*, `code` — in that order to avoid conflicts
-  const inlineRegex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g
+function renderInlineMarkdown(text: string, keyPrefix: string, onFileClick?: (docId: string) => void): React.ReactNode {
+  // Match **bold**, *italic*, `code`, and bare file paths (word/word.ext)
+  const inlineRegex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|(?<=^|[\s(])([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_.-]+)+\.[a-zA-Z]{1,6})(?=[\s,.)!?]|$))/gm
   const parts: React.ReactNode[] = []
   let last = 0
-  let m
+  let m: RegExpExecArray | null
   while ((m = inlineRegex.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index))
     if (m[2]) parts.push(<strong key={`${keyPrefix}-b-${m.index}`}>{m[2]}</strong>)
     else if (m[3]) parts.push(<em key={`${keyPrefix}-i-${m.index}`}>{m[3]}</em>)
     else if (m[4]) parts.push(<code key={`${keyPrefix}-c-${m.index}`} className="rounded bg-gray-100 px-1 py-0.5 text-[12px] font-mono">{m[4]}</code>)
+    else if (m[5]) {
+      const filePath = m[5]
+      parts.push(
+        <span
+          key={`${keyPrefix}-f-${m.index}`}
+          className="inline-flex items-center align-middle gap-0.5 rounded bg-amber-100 text-amber-700 px-1 text-[13px] font-medium cursor-pointer hover:bg-amber-200"
+          onClick={() => onFileClick?.(filePath)}
+        >
+          <span className="material-symbols-outlined text-[12px]">description</span>
+          {filePath}
+        </span>,
+      )
+    }
     last = m.index + m[0].length
   }
   if (last < text.length) parts.push(text.slice(last))
@@ -593,9 +606,9 @@ export function renderMentionContent(
   let match
 
   while ((match = regex.exec(content)) !== null) {
-    // Add text before the mention (with inline markdown)
+    // Add text before the mention (with inline markdown + file path detection)
     if (match.index > lastIndex) {
-      parts.push(<span key={`t-${lastIndex}`}>{renderInlineMarkdown(content.slice(lastIndex, match.index), `t-${lastIndex}`)}</span>)
+      parts.push(<span key={`t-${lastIndex}`}>{renderInlineMarkdown(content.slice(lastIndex, match.index), `t-${lastIndex}`, onFileClick)}</span>)
     }
 
     const [, displayName, type, id] = match
@@ -670,9 +683,9 @@ export function renderMentionContent(
     lastIndex = match.index + match[0].length
   }
 
-  // Add remaining text after last mention (with inline markdown)
+  // Add remaining text after last mention (with inline markdown + file path detection)
   if (lastIndex < content.length) {
-    parts.push(<span key={`t-${lastIndex}`}>{renderInlineMarkdown(content.slice(lastIndex), `t-${lastIndex}`)}</span>)
+    parts.push(<span key={`t-${lastIndex}`}>{renderInlineMarkdown(content.slice(lastIndex), `t-${lastIndex}`, onFileClick)}</span>)
   }
 
   return parts.length > 0 ? <>{parts}</> : <span>{content}</span>

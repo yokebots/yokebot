@@ -99,7 +99,7 @@ export interface ChatAttachment {
   duration?: number  // milliseconds (for audio/video)
 }
 
-export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; attachments: ChatAttachment[]; audioKey: string | null; audioDurationMs: number | null; taskId: string | null; parentMessageId: number | null; replyCount: number; latestReplyAt: string | null; createdAt: string }
+export interface ChatMessage { id: number; channelId: string; senderType: SenderType; senderId: string; content: string; attachments: ChatAttachment[]; audioKey: string | null; audioDurationMs: number | null; taskId: string | null; modelId: string | null; parentMessageId: number | null; replyCount: number; latestReplyAt: string | null; createdAt: string }
 
 // ---- Channels ----
 
@@ -143,12 +143,12 @@ export async function getTaskThread(db: Db, taskId: string, teamId: string): Pro
 export async function sendMessage(
   db: Db, channelId: string, senderType: SenderType, senderId: string, content: string,
   taskId?: string, teamId: string = '', attachments?: ChatAttachment[],
-  audioKey?: string, audioDurationMs?: number, parentMessageId?: number,
+  audioKey?: string, audioDurationMs?: number, parentMessageId?: number, modelId?: string,
 ): Promise<ChatMessage> {
   const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null
   const insertedId = await db.insert(
-    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id, attachments, audio_key, audio_duration_ms, parent_message_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-    [teamId, channelId, senderType, senderId, content, taskId ?? null, attachmentsJson, audioKey ?? null, audioDurationMs ?? null, parentMessageId ?? null],
+    'INSERT INTO chat_messages (team_id, channel_id, sender_type, sender_id, content, task_id, attachments, audio_key, audio_duration_ms, parent_message_id, model_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+    [teamId, channelId, senderType, senderId, content, taskId ?? null, attachmentsJson, audioKey ?? null, audioDurationMs ?? null, parentMessageId ?? null, modelId ?? null],
     'id',
   )
   const msgId = Number(insertedId)
@@ -493,6 +493,7 @@ function rowToMessage(row: Record<string, unknown>): ChatMessage {
     senderId: row.sender_id as string, content: row.content as string, attachments,
     audioKey: (row.audio_key as string) ?? null, audioDurationMs: (row.audio_duration_ms as number) ?? null,
     taskId: row.task_id as string | null,
+    modelId: (row.model_id as string) ?? null,
     parentMessageId: (row.parent_message_id as number) ?? null,
     replyCount: Number(row.reply_count ?? 0),
     latestReplyAt: (row.latest_reply_at as string) ?? null,

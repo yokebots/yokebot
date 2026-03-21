@@ -193,6 +193,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
       audioKey: null,
       audioDurationMs: null,
       taskId: null,
+      modelId: null,
       parentMessageId: null,
       replyCount: 0,
       latestReplyAt: null,

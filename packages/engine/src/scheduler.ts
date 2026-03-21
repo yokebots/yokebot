@@ -578,14 +578,25 @@ export async function respondToMention(
     inFlightSprints.add(mentionKey)
     void markSprintStart(db, agentId)
 
+    // Auto-create a task for this mention work so it's tracked and linked
+    let mentionTaskId: string | undefined
+    try {
+      const { createTask } = await import('./tasks.ts')
+      const mentionTaskTitle = triggerMessage.content.length > 120 ? triggerMessage.content.slice(0, 120) + '...' : triggerMessage.content
+      const mentionTask = await createTask(db, teamId, mentionTaskTitle, { status: 'in_progress', assignedAgentId: agentId })
+      mentionTaskId = mentionTask.id
+    } catch (err) {
+      console.error(`[scheduler] Failed to auto-create task for mention:`, err)
+    }
+
     // Check if this agent has a routing profile for multi-phase execution
     const mentionRoutingProfile = getRoutingProfile(agent.templateId ?? '')
 
     const mentionPromise = mentionRoutingProfile
       ? runRoutedSprint(
-          db, agent, { id: `mention-${Date.now()}`, title: triggerMessage.content, description: null },
+          db, agent, { id: mentionTaskId ?? `mention-${Date.now()}`, title: triggerMessage.content, description: null },
           mentionRoutingProfile, systemPrompt, mentionIterations, broadcastFileWritten,
-        ).then(r => ({ response: r.response, iterations: r.totalIterations }))
+        ).then(r => ({ response: r.response, iterations: r.totalIterations, taskCompleted: r.taskCompleted }))
       : (() => {
           const mentionBoosts = detectTaskCategories(triggerMessage.content, '')
           const runtimeConfig = { maxIterations: mentionIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && mentionCost > 0, extraToolCategories: mentionBoosts.length > 0 ? mentionBoosts : undefined }
@@ -601,6 +612,13 @@ export async function respondToMention(
         const refund = (mentionIterations - result.iterations) * mentionCost
         if (refund > 0) await releaseCredits(db, agent.teamId, refund, `Mention refund: ${mentionIterations - result.iterations} unused iterations`)
       }
+      // Mark task done if sprint completed it
+      if (mentionTaskId && result.taskCompleted) {
+        await db.run(`UPDATE tasks SET status = 'done' WHERE id = $1`, [mentionTaskId]).catch(() => {})
+      } else if (mentionTaskId) {
+        // Sprint didn't mark done — still in progress for next heartbeat
+      }
+
       const cleanResponse = result.response ? stripToolSyntax(result.response) : null
       if (cleanResponse && cleanResponse.trim().length > 0
         && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op') {
@@ -611,7 +629,7 @@ export async function respondToMention(
           const parentMsg = await getMessage(db, safeFollowupParentId)
           if (!parentMsg || parentMsg.channelId !== channelId) safeFollowupParentId = undefined
         }
-        await sendMessage(db, channelId, 'agent', agent.id, cleanResponse, undefined, teamId, undefined, undefined, undefined, safeFollowupParentId)
+        await sendMessage(db, channelId, 'agent', agent.id, cleanResponse, mentionTaskId, teamId, undefined, undefined, undefined, safeFollowupParentId, mentionModelId)
         await logActivity(db, 'mention_followup', agent.id, `Follow-up: ${cleanResponse.slice(0, 150)}`, undefined, teamId)
         console.log(`[scheduler] "${agent.name}" posted mention follow-up`)
       }
@@ -924,6 +942,19 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     const current = activeHeartbeatsPerTeam.get(agent.teamId) ?? 1
     if (current <= 1) activeHeartbeatsPerTeam.delete(agent.teamId)
     else activeHeartbeatsPerTeam.set(agent.teamId, current - 1)
+
+    // If agent has remaining in-progress tasks, schedule a faster follow-up (5 min)
+    // instead of waiting the full heartbeat interval (often 1 hour)
+    const FOLLOW_UP_MS = 5 * 60 * 1000 // 5 minutes
+    if (agent.heartbeatSeconds * 1000 > FOLLOW_UP_MS) {
+      try {
+        const remaining = await getAgentAssignedTasks(db, agent.id, agent.teamId)
+        if (remaining.length > 0) {
+          console.log(`[scheduler] "${agent.name}" has ${remaining.length} in-progress task(s) — scheduling 5-min follow-up`)
+          scheduleAgentWithOffset(db, agent, FOLLOW_UP_MS)
+        }
+      } catch { /* best-effort */ }
+    }
   }
 }
 
@@ -1372,7 +1403,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
               const teamChannel = await getTeamChannel(db, agent.teamId)
               const existingMsg = await findLatestTaskMessage(db, teamChannel.id, task.id)
               const parentId = existingMsg?.id ? Number(existingMsg.id) : undefined
-              await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, task.id, agent.teamId, undefined, undefined, undefined, parentId)
+              await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, task.id, agent.teamId, undefined, undefined, undefined, parentId, logicalModelId)
             } catch { /* best-effort */ }
           }
 
@@ -1499,7 +1530,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
                   const teamChannel = await getTeamChannel(db, agent.teamId)
                   const existingMsg = await findLatestTaskMessage(db, teamChannel.id, task.id)
                   const parentId = existingMsg?.id ? Number(existingMsg.id) : undefined
-                  await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, task.id, agent.teamId, undefined, undefined, undefined, parentId)
+                  await sendMessage(db, teamChannel.id, 'agent', agent.id, teamSummary, task.id, agent.teamId, undefined, undefined, undefined, parentId, logicalModelId)
                 } catch { /* best-effort */ }
               }
 
