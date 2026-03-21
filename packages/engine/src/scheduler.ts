@@ -943,18 +943,6 @@ async function heartbeat(db: Db, agent: Agent): Promise<void> {
     if (current <= 1) activeHeartbeatsPerTeam.delete(agent.teamId)
     else activeHeartbeatsPerTeam.set(agent.teamId, current - 1)
 
-    // If agent has remaining in-progress tasks, schedule a faster follow-up (5 min)
-    // instead of waiting the full heartbeat interval (often 1 hour)
-    const FOLLOW_UP_MS = 5 * 60 * 1000 // 5 minutes
-    if (agent.heartbeatSeconds * 1000 > FOLLOW_UP_MS) {
-      try {
-        const remaining = await getAgentAssignedTasks(db, agent.id, agent.teamId)
-        if (remaining.length > 0) {
-          console.log(`[scheduler] "${agent.name}" has ${remaining.length} in-progress task(s) — scheduling 5-min follow-up`)
-          scheduleAgentWithOffset(db, agent, FOLLOW_UP_MS)
-        }
-      } catch { /* best-effort */ }
-    }
   }
 }
 

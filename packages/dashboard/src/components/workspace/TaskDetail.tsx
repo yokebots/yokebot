@@ -33,6 +33,7 @@ interface TaskDetailProps {
 export function TaskDetail({ taskId, workspace, agents, onBack, onDeleted }: TaskDetailProps) {
   const [task, setTask] = useState<engine.EngineTask | null>(null)
   const [linkedFiles, setLinkedFiles] = useState<Array<{ path: string; name: string; size: number }>>([])
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [taskMessages, setTaskMessages] = useState<engine.ChatMessage[]>([])
   const [actionLoading, setActionLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
@@ -67,6 +68,7 @@ export function TaskDetail({ taskId, workspace, agents, onBack, onDeleted }: Tas
       setTask(detail.task)
       setLinkedFiles(detail.files)
       setTaskMessages(detail.messages)
+      setPreviewUrl(detail.previewUrl ?? null)
     } catch {
       setLoadError(true)
     }
@@ -419,6 +421,22 @@ export function TaskDetail({ taskId, workspace, agents, onBack, onDeleted }: Tas
             </div>
           )}
         </div>
+
+        {/* Preview URL (sandbox app) */}
+        {previewUrl && (
+          <div className="px-3 py-2 border-b border-border-subtle">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">Deliverable</p>
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-lg bg-forest-green/10 px-3 py-2 text-sm font-medium text-forest-green hover:bg-forest-green/20 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[18px]">open_in_new</span>
+              Open Live Preview
+            </a>
+          </div>
+        )}
 
         {/* Linked files */}
         {linkedFiles.length > 0 && (

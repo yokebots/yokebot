@@ -1072,9 +1072,18 @@ async function main() {
     if (!task || task.teamId !== teamId) return res.status(404).json({ error: 'Task not found' })
     // Fire-and-forget: mark task as read
     markTaskRead(db, userId, taskId).catch(() => {})
-    console.log(`[perf:detail] total=${t1-t0}ms`)
-    // taskMessages: team chat messages tagged with this task (chronological, latest first)
-    res.json({ task, channelId: '', messages: taskMessages, files })
+    // Resolve sandbox preview URL if this task has a linked project
+    let previewUrl: string | null = null
+    if (task.sandboxProjectId) {
+      try {
+        const { getSandboxProject } = await import('./sandbox.ts')
+        const project = await getSandboxProject(db, task.sandboxProjectId)
+        previewUrl = project?.previewUrl ?? null
+      } catch { /* best-effort */ }
+    }
+    const t2 = Date.now()
+    console.log(`[perf:detail] total=${t2-t0}ms`)
+    res.json({ task, channelId: '', messages: taskMessages, files, previewUrl })
   })
 
   app.post('/api/tasks', async (req, res) => {

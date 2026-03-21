@@ -160,6 +160,7 @@ export interface EngineTask {
   blockedReasonText: string | null
   scratchpad: string | null
   estimatedCredits: number | null
+  sandboxProjectId: string | null
   sprintCount: number
   createdAt: string
   updatedAt: string
@@ -304,6 +305,7 @@ export interface TaskDetailResponse {
   channelId: string
   messages: ChatMessage[]
   files: Array<{ path: string; name: string; size: number }>
+  previewUrl: string | null
 }
 
 /** Single request to load task + thread + files (replaces 5 separate calls) */
