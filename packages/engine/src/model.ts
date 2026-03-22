@@ -825,7 +825,6 @@ const yokebotAdapter: ToolFormatAdapter = {
     // NOTE: Nemotron removed — it uses Qwen3-Coder XML format natively, and DeepInfra/OpenRouter
     // handle the translation via their tool parsers. Our JSON-in-tags format caused 36x duplicate spam.
     return id.includes('qwen3.5') || id.includes('qwen3-5')
-      || id.includes('step-3')
   },
 
   formatToolPrompt(tools: ToolDef[]): string {
@@ -1050,8 +1049,202 @@ const dsmlAdapter: ToolFormatAdapter = {
   },
 }
 
-// Registry of all adapters — checked in order
-const TOOL_ADAPTERS: ToolFormatAdapter[] = [yokebotAdapter, dsmlAdapter]
+// ---- MiMo adapter (Qwen3 XML format) ----
+// MiMo-V2 models are trained on Qwen3-style XML tool calling format.
+// They expect: <tool_call><function=name><parameter=key>value</parameter></function></tool_call>
+
+const mimoAdapter: ToolFormatAdapter = {
+  id: 'mimo',
+
+  matches(modelId: string): boolean {
+    return modelId.toLowerCase().includes('mimo')
+  },
+
+  formatToolPrompt(tools: ToolDef[]): string {
+    const toolDefs = tools.map(t => {
+      const params = t.function.parameters as { properties?: Record<string, { type: string; description?: string }>; required?: string[] }
+      const paramLines = Object.entries(params?.properties ?? {}).map(([name, schema]) => {
+        const req = (params?.required ?? []).includes(name) ? ' (required)' : ' (optional)'
+        return `  - ${name}: ${schema.type}${req}${schema.description ? ' — ' + schema.description : ''}`
+      })
+      return `### ${t.function.name}\n${t.function.description}\nParameters:\n${paramLines.join('\n')}`
+    }).join('\n\n')
+
+    return `You have access to the following tools. To call a tool, use this EXACT format:
+
+<tool_call>
+<function=tool_name>
+<parameter=param_name>value</parameter>
+</function>
+</tool_call>
+
+You may call multiple tools by outputting multiple <tool_call> blocks.
+
+## Available Tools
+
+${toolDefs}
+
+## Rules
+1. ALWAYS call tools to take action. Never describe what you would do — just do it.
+2. To respond to the user, call the "respond" tool: <tool_call><function=respond><parameter=message>Your response here</parameter></function></tool_call>
+3. Use the "think" tool first to plan your approach.
+4. For multi-step tasks, keep calling tools until fully complete.
+5. The "arguments" must use <parameter=name>value</parameter> format, NOT JSON.
+6. Do NOT write code blocks or pseudo-code. Call the actual tools.`
+  },
+
+  parseToolCalls(text: string): ToolCall[] {
+    const calls: ToolCall[] = []
+    let match: RegExpExecArray | null
+
+    // Primary: <tool_call><function=NAME>...</function></tool_call>
+    // Also handle missing <tool_call> wrapper (common edge case ~15% of responses)
+    const funcRegex = /<function=([^>]+)>([\s\S]*?)(?:<\/function>|<\/tool_call>)/g
+    while ((match = funcRegex.exec(text)) !== null) {
+      const toolName = match[1].trim()
+      const body = match[2]
+      const params = parseXmlParams(body)
+      calls.push({
+        id: `mimo-${Date.now()}-${calls.length}`,
+        type: 'function',
+        function: { name: toolName, arguments: JSON.stringify(params) },
+      })
+    }
+
+    // Fallback: <tool_call>{"name":"...","arguments":{...}}</tool_call> (JSON-in-tags)
+    if (calls.length === 0) {
+      const blockRegex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g
+      while ((match = blockRegex.exec(text)) !== null) {
+        const jsonStr = match[1].trim()
+        try {
+          const parsed = JSON.parse(jsonStr) as { name: string; arguments: Record<string, unknown> }
+          if (parsed.name) {
+            calls.push({
+              id: `mimo-json-${Date.now()}-${calls.length}`,
+              type: 'function',
+              function: { name: parsed.name, arguments: JSON.stringify(parsed.arguments ?? {}) },
+            })
+          }
+        } catch { /* not JSON */ }
+      }
+    }
+
+    return calls
+  },
+
+  stripMarkup(text: string): string {
+    return text
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+      .replace(/<tool_call>[\s\S]*$/g, '')
+      .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '')
+      .replace(/<function=[^>]*>[\s\S]*$/g, '')
+      .replace(/<\/function>/g, '')
+      .replace(/<\/tool_call>/g, '')
+      .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
+      .replace(/<\/parameter>/g, '')
+      .trim()
+  },
+}
+
+// ---- Nemotron adapter (Qwen3 XML format, same as MiMo) ----
+// Nemotron models use Qwen3-Coder XML format natively.
+// Shares parse/strip logic with MiMo but has its own match rule.
+
+const nemotronAdapter: ToolFormatAdapter = {
+  id: 'nemotron',
+  matches(modelId: string): boolean {
+    return modelId.toLowerCase().includes('nemotron')
+  },
+  formatToolPrompt: mimoAdapter.formatToolPrompt,
+  parseToolCalls: mimoAdapter.parseToolCalls,
+  stripMarkup: mimoAdapter.stripMarkup,
+}
+
+// ---- Step 3.5 adapter (special token format) ----
+// Step 3.5 Flash uses special Unicode tokens for tool calls:
+// <｜tool▁call▁begin｜>function<｜tool▁sep｜>function_name\n```json\n{args}\n```<｜tool▁call▁end｜>
+
+const step3p5Adapter: ToolFormatAdapter = {
+  id: 'step3p5',
+  matches(modelId: string): boolean {
+    return modelId.toLowerCase().includes('step-3') || modelId.toLowerCase().includes('step3')
+  },
+
+  formatToolPrompt(tools: ToolDef[]): string {
+    const toolDefs = tools.map(t => {
+      const params = t.function.parameters as { properties?: Record<string, { type: string; description?: string }>; required?: string[] }
+      const paramLines = Object.entries(params?.properties ?? {}).map(([name, schema]) => {
+        const req = (params?.required ?? []).includes(name) ? ' (required)' : ' (optional)'
+        return `  - ${name}: ${schema.type}${req}${schema.description ? ' — ' + schema.description : ''}`
+      })
+      return `### ${t.function.name}\n${t.function.description}\nParameters:\n${paramLines.join('\n')}`
+    }).join('\n\n')
+
+    return `You have access to the following tools. To call a tool, use this format:
+
+<｜tool▁call▁begin｜>function<｜tool▁sep｜>tool_name
+\`\`\`json
+{"param": "value"}
+\`\`\`<｜tool▁call▁end｜>
+
+## Available Tools
+
+${toolDefs}
+
+## Rules
+1. ALWAYS call tools to take action. Never describe what you would do — just do it.
+2. To respond to the user, call the "respond" tool with {"message": "your response"}.
+3. Use the "think" tool first to plan your approach.
+4. For multi-step tasks, keep calling tools until fully complete.
+5. Do NOT write code blocks or pseudo-code. Call the actual tools.`
+  },
+
+  parseToolCalls(text: string): ToolCall[] {
+    const calls: ToolCall[] = []
+    // Match Step 3.5 special token format (Unicode chars ｜ and ▁)
+    const stepRegex = /<[｜|]tool[▁_]call[▁_]begin[｜|]>(?:function)?<[｜|]tool[▁_]sep[｜|]>([^\n]+)\n```(?:json)?\n([\s\S]*?)\n```(?:<[｜|]tool[▁_]call[▁_]end[｜|]>)?/g
+    let match: RegExpExecArray | null
+    while ((match = stepRegex.exec(text)) !== null) {
+      const toolName = match[1].trim()
+      try {
+        const args = JSON.parse(match[2].trim())
+        calls.push({
+          id: `step3p5-${Date.now()}-${calls.length}`,
+          type: 'function',
+          function: { name: toolName, arguments: JSON.stringify(args) },
+        })
+      } catch { /* JSON parse failed */ }
+    }
+
+    // Fallback: also try Qwen3 XML format (Step models sometimes mix formats)
+    if (calls.length === 0) {
+      const funcRegex = /<function=([^>]+)>([\s\S]*?)(?:<\/function>|<\/tool_call>)/g
+      while ((match = funcRegex.exec(text)) !== null) {
+        const toolName = match[1].trim()
+        const params = parseXmlParams(match[2])
+        calls.push({
+          id: `step3p5-xml-${Date.now()}-${calls.length}`,
+          type: 'function',
+          function: { name: toolName, arguments: JSON.stringify(params) },
+        })
+      }
+    }
+
+    return calls
+  },
+
+  stripMarkup(text: string): string {
+    return text
+      .replace(/<[｜|]tool[▁_]call[▁_]begin[｜|]>[\s\S]*?<[｜|]tool[▁_]call[▁_]end[｜|]>/g, '')
+      .replace(/<[｜|]tool[▁_]call[▁_]begin[｜|]>[\s\S]*$/g, '')
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+      .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '')
+      .trim()
+  },
+}
+
+// Registry of all adapters — checked in order (most specific first)
+const TOOL_ADAPTERS: ToolFormatAdapter[] = [step3p5Adapter, mimoAdapter, nemotronAdapter, yokebotAdapter, dsmlAdapter]
 
 /** Find the native tool format adapter for a given model ID, if any */
 function getToolAdapter(providerModelId: string): ToolFormatAdapter | null {

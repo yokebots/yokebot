@@ -196,84 +196,18 @@ export function getRoutingProfile(templateId: string): RoutingProfile | null {
  * Costs ~2-3 credits.
  */
 export async function runOrchestrator(
-  db: Db,
+  _db: Db,
   profile: RoutingProfile,
   taskTitle: string,
   taskDescription: string | null,
-  teamId: string,
-  installedSkills?: string[],
+  _teamId: string,
+  _installedSkills?: string[],
 ): Promise<PhasePlan> {
+  // Deterministic: always run all phases defined in the profile
   const allPhaseNames = profile.phases.map(p => p.name)
-  const fallbackPlan: PhasePlan = { phases: allPhaseNames, reasoning: 'fallback — running all phases', skillOverrides: {} }
+  console.log(`[routing] Orchestrator plan: [${allPhaseNames.join(', ')}] — all phases`)
 
-  try {
-    const modelConfig = await resolveModelConfig(db, profile.orchestratorModelId)
-
-    // Build prompt with skill awareness if agent has skills installed
-    let prompt = profile.orchestratorPrompt
-    if (installedSkills && installedSkills.length > 0) {
-      prompt += `\n\nThe agent has these skills installed: [${installedSkills.join(', ')}]
-If the task requires any of these skills, include a "skills" field mapping phase names to the skill names needed.
-Example: {"phases": ["build", "review"], "skills": {"review": ["slack-notify"]}, "reasoning": "..."}
-Only assign skills to phases where they are actually needed. Most phases need zero skills.`
-    }
-
-    const messages: ChatMessage[] = [
-      { role: 'system', content: prompt },
-      { role: 'user', content: `Task: ${taskTitle}\n${taskDescription ? `Description: ${taskDescription}` : '(no description)'}` },
-    ]
-
-    // Single LLM call, no tools
-    const completion = await chatCompletionWithFallback(modelConfig, messages)
-    const content = completion.content?.trim() ?? ''
-
-    // Parse JSON from response (handle markdown code blocks)
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      console.log(`[routing] Orchestrator returned non-JSON, using fallback plan`)
-      return fallbackPlan
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]) as { phases?: string[]; skills?: Record<string, string[]>; reasoning?: string }
-    if (!Array.isArray(parsed.phases) || parsed.phases.length === 0) {
-      console.log(`[routing] Orchestrator returned empty phases, using fallback plan`)
-      return fallbackPlan
-    }
-
-    // Validate phase names and enforce required phases
-    const validPhases = parsed.phases.filter(p => allPhaseNames.includes(p))
-    for (const phase of profile.phases) {
-      if (phase.required && !validPhases.includes(phase.name)) {
-        validPhases.push(phase.name)
-      }
-    }
-
-    // Preserve phase order from profile (not from LLM response)
-    const orderedPhases = allPhaseNames.filter(p => validPhases.includes(p))
-
-    // Validate skill overrides — only allow skills the agent actually has installed
-    const skillOverrides: Record<string, string[]> = {}
-    if (parsed.skills && installedSkills) {
-      const installedSet = new Set(installedSkills)
-      for (const [phaseName, skills] of Object.entries(parsed.skills)) {
-        if (allPhaseNames.includes(phaseName) && Array.isArray(skills)) {
-          const validSkills = skills.filter(s => installedSet.has(s))
-          if (validSkills.length > 0) {
-            skillOverrides[phaseName] = validSkills
-          }
-        }
-      }
-      if (Object.keys(skillOverrides).length > 0) {
-        console.log(`[routing] Orchestrator skill assignments: ${JSON.stringify(skillOverrides)}`)
-      }
-    }
-
-    console.log(`[routing] Orchestrator plan: [${orderedPhases.join(', ')}] — ${parsed.reasoning ?? 'no reasoning'}`)
-    return { phases: orderedPhases, reasoning: parsed.reasoning ?? '', skillOverrides }
-  } catch (err) {
-    console.error(`[routing] Orchestrator failed, using fallback plan:`, err)
-    return fallbackPlan
-  }
+  return { phases: allPhaseNames, reasoning: 'all phases', skillOverrides: {} }
 }
 
 /**

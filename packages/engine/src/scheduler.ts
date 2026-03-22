@@ -410,12 +410,12 @@ export async function respondToMention(
     }
   }
 
+  // Resolve the agent's primary model (used for Phase 2 work)
   let modelConfig
   try {
     modelConfig = await resolveModelConfig(db, agent.modelId || agent.modelEndpoint)
   } catch (err) {
     console.error(`[scheduler] Cannot resolve model for "${agent.name}":`, (err as Error).message)
-    // FP-9 fix: notify user instead of silent return
     await sendMessage(db, channelId, 'agent', agent.id,
       `Sorry, I'm having trouble connecting to my AI model right now. I'll try again on my next check-in.`,
       undefined, teamId)
@@ -463,8 +463,16 @@ export async function respondToMention(
   // Broadcast typing immediately so user sees the indicator
   broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'typing')
 
+  // Use a fast cheap model for ack (Qwen 3.5 9B), fall back to agent's model
+  let ackModelConfig = modelConfig
   try {
-    const result = await chatCompletion(modelConfig, ackMessages)
+    ackModelConfig = await resolveModelConfig(db, 'qwen-3.5-9b')
+  } catch {
+    // Qwen 3.5 9B not available (e.g. self-hosted without API key) — use agent's model
+  }
+
+  try {
+    const result = await chatCompletion(ackModelConfig, ackMessages)
     const reply = result.content?.trim()
     if (reply && reply.length > 0) {
       // Stop typing, post the ack message (in the same thread if the trigger was a thread reply)
@@ -582,7 +590,9 @@ export async function respondToMention(
     let mentionTaskId: string | undefined
     try {
       const { createTask } = await import('./tasks.ts')
-      const mentionTaskTitle = triggerMessage.content.length > 120 ? triggerMessage.content.slice(0, 120) + '...' : triggerMessage.content
+      // Strip @mention syntax from task title: @[Name](agent:id) → just the request text
+      const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
+      const mentionTaskTitle = rawTitle.length > 120 ? rawTitle.slice(0, 120) + '...' : rawTitle || triggerMessage.content.slice(0, 120)
       const mentionTask = await createTask(db, teamId, mentionTaskTitle, { status: 'in_progress', assignedAgentId: agentId })
       mentionTaskId = mentionTask.id
     } catch (err) {
@@ -599,7 +609,7 @@ export async function respondToMention(
         ).then(r => ({ response: r.response, iterations: r.totalIterations, taskCompleted: r.taskCompleted }))
       : (() => {
           const mentionBoosts = detectTaskCategories(triggerMessage.content, '')
-          const runtimeConfig = { maxIterations: mentionIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && mentionCost > 0, extraToolCategories: mentionBoosts.length > 0 ? mentionBoosts : undefined }
+          const runtimeConfig = { maxIterations: mentionIterations, onFileWritten: broadcastFileWritten, skipCredits: HOSTED_MODE && mentionCost > 0, extraToolCategories: mentionBoosts.length > 0 ? mentionBoosts : undefined, currentTaskId: mentionTaskId }
           return runReactLoop(
             db, agent.id, teamId, mentionWorkPrompt, modelConfig, systemPrompt,
             state.workspaceConfig, state.skillsDir, runtimeConfig, mentionModelId, channelId,
