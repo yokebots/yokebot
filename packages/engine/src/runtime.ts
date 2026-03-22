@@ -1732,8 +1732,17 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
       })
 
       // Install and start commands use the project directory
+      // Use the project's assigned port so each project runs on its own port
+      let projectPort = previewPort
+      if (ctx.sandboxProjectId) {
+        try {
+          const { getSandboxProject: getProj } = await import('./sandbox.ts')
+          const proj = await getProj(ctx.db, ctx.sandboxProjectId)
+          if (proj?.devPort) projectPort = proj.devPort
+        } catch { /* use previewPort */ }
+      }
       const installCmd = `cd ${PROJECT_DIR} && npm install`
-      const startCmd = `cd ${PROJECT_DIR} && npm run dev -- --host 0.0.0.0 &`
+      const startCmd = `cd ${PROJECT_DIR} && npm run dev -- --host 0.0.0.0 --port ${projectPort} &`
 
       // 1. Create project directory (preserves existing files — no destructive rm -rf)
       await sbExec(ctx.db, ctx.teamId, `mkdir -p ${PROJECT_DIR}`)
