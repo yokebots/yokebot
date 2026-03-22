@@ -783,6 +783,8 @@ interface ToolFormatAdapter {
   matches(providerModelId: string): boolean
   /** Build a system prompt section describing available tools in the model's native format */
   formatToolPrompt(tools: ToolDef[]): string
+  /** Format a single tool call in this adapter's native format (for conversation history) */
+  formatToolCall(name: string, args: Record<string, unknown>): string
   /** Parse tool calls from model text output; returns parsed calls and cleaned content */
   parseToolCalls(text: string): ToolCall[]
   /** Regex or marker to strip parsed tool call markup from content */
@@ -903,6 +905,10 @@ Step 3 — Respond when done:
 </tool_call>`
   },
 
+  formatToolCall(name: string, args: Record<string, unknown>): string {
+    return `<tool_call>\n${JSON.stringify({ name, arguments: args })}\n</tool_call>`
+  },
+
   parseToolCalls(text: string): ToolCall[] {
     const calls: ToolCall[] = []
 
@@ -1015,6 +1021,11 @@ const dsmlAdapter: ToolFormatAdapter = {
     return ''
   },
 
+  formatToolCall(name: string, args: Record<string, unknown>): string {
+    // DeepSeek uses native OpenAI format — this shouldn't be called (formatToolPrompt returns empty)
+    return `<tool_call>\n${JSON.stringify({ name, arguments: args })}\n</tool_call>`
+  },
+
   parseToolCalls(text: string): ToolCall[] {
     const calls: ToolCall[] = []
     const invokeRegex = /<[｜|]DSML[｜|]invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)(?:<[｜|]DSML[｜|]\/invoke>|<\/[｜|]DSML[｜|]invoke>|$)/g
@@ -1093,6 +1104,14 @@ ${toolDefs}
 6. Do NOT write code blocks or pseudo-code. Call the actual tools.`
   },
 
+  formatToolCall(name: string, args: Record<string, unknown>): string {
+    const params = Object.entries(args).map(([k, v]) => {
+      const val = typeof v === 'string' ? v : JSON.stringify(v)
+      return `<parameter=${k}>${val}</parameter>`
+    }).join('\n')
+    return `<tool_call>\n<function=${name}>\n${params}\n</function>\n</tool_call>`
+  },
+
   parseToolCalls(text: string): ToolCall[] {
     const calls: ToolCall[] = []
     let match: RegExpExecArray | null
@@ -1156,6 +1175,7 @@ const nemotronAdapter: ToolFormatAdapter = {
     return modelId.toLowerCase().includes('nemotron')
   },
   formatToolPrompt: mimoAdapter.formatToolPrompt,
+  formatToolCall: mimoAdapter.formatToolCall,
   parseToolCalls: mimoAdapter.parseToolCalls,
   stripMarkup: mimoAdapter.stripMarkup,
 }
@@ -1197,6 +1217,10 @@ ${toolDefs}
 3. Use the "think" tool first to plan your approach.
 4. For multi-step tasks, keep calling tools until fully complete.
 5. Do NOT write code blocks or pseudo-code. Call the actual tools.`
+  },
+
+  formatToolCall(name: string, args: Record<string, unknown>): string {
+    return `<｜tool▁call▁begin｜>function<｜tool▁sep｜>${name}\n\`\`\`json\n${JSON.stringify(args)}\n\`\`\`<｜tool▁call▁end｜>`
   },
 
   parseToolCalls(text: string): ToolCall[] {
@@ -1277,10 +1301,10 @@ function applyNativeToolFormat(
   const modified: ChatMessage[] = []
   for (const msg of messages) {
     if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
-      // Convert assistant tool_calls into JSON-in-tags format
+      // Convert assistant tool_calls into the adapter's native format
       const callText = msg.tool_calls.map((tc) => {
         const args = JSON.parse(tc.function.arguments) as Record<string, unknown>
-        return `<tool_call>\n${JSON.stringify({ name: tc.function.name, arguments: args })}\n</tool_call>`
+        return adapter.formatToolCall(tc.function.name, args)
       }).join('\n')
       const content = msg.content ? `${msg.content}\n\n${callText}` : callText
       modified.push({ role: 'assistant', content })

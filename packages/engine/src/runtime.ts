@@ -2342,13 +2342,15 @@ export async function runReactLoop(
   const builtinTools = getFilteredBuiltinTools(effectiveCategories as ToolCategory[])
   let tools = [...builtinTools, ...skillTools, ...mcpTools]
 
-  // For small models, prune tools to essentials based on task context
-  // This dramatically improves tool calling reliability (research shows max 5-7 tools per category)
+  // Keyword-based tool pruner — DISABLED
+  // The routing system's toolCategories already controls which tools each phase gets.
+  // The keyword pruner was double-pruning and removing tools that phases explicitly needed.
+  // Kept as dead code for now in case we need to re-enable.
   const logicalModel = logicalModelId ? getLogicalModel(logicalModelId) : undefined
-  const isSmallModel = logicalModel?.category === 'efficient' || (logicalModelId && /9b|8b|7b|3b|flash/i.test(logicalModelId))
-  if (isSmallModel) {
-    tools = pruneToolsForSmallModel(tools, userMessage)
-  }
+  // const isSmallModel = logicalModel?.category === 'efficient' || (logicalModelId && /9b|8b|7b|3b|flash/i.test(logicalModelId))
+  // if (isSmallModel) {
+  //   tools = pruneToolsForSmallModel(tools, userMessage)
+  // }
 
   // Look up agent name for progress broadcasts (reuse agentRow from above)
   const agentName = agentRow?.name ?? agentId
