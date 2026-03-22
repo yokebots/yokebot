@@ -671,7 +671,11 @@ export async function respondToMention(
         }
       }
 
-      const cleanResponse = result.response ? stripToolSyntax(result.response) : null
+      let cleanResponse = result.response ? stripToolSyntax(result.response) : null
+      // If task completed but response sounds like it's still working, override with completion message
+      if (result.taskCompleted && cleanResponse && /still working|pick it back up|next check-in|need a bit more time/i.test(cleanResponse)) {
+        cleanResponse = `Task completed successfully.`
+      }
       if (cleanResponse && cleanResponse.trim().length > 0
         && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op') {
         // Reuse the validated replyParentId from the ack phase (same mention context)

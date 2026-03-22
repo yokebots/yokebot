@@ -138,10 +138,23 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
         resetIdleTimer(session)
         sessions.set(teamId, session)
 
-        // Re-run startup command after resume (e.g. restart dev server)
-        // If it fails with a module error, auto-repair by reinstalling dependencies
+        // Re-run ALL project startup commands after resume (not just the last one)
+        if (wasResumed) {
+          try {
+            const projects = await listSandboxProjects(db, teamId)
+            for (const project of projects) {
+              if (project.startupCommand) {
+                console.log(`[sandbox] Re-starting "${project.name}" on port ${project.devPort}: ${project.startupCommand}`)
+                await session.sandbox.process.executeCommand(project.startupCommand, undefined, undefined, 15).catch(() => {})
+              }
+            }
+          } catch (err) {
+            console.error(`[sandbox] Failed to restart project servers:`, (err as Error).message)
+          }
+        }
+        // Legacy: also run the session-level startup command if no projects started
         if (wasResumed && row.startup_command) {
-          console.log(`[sandbox] Re-running startup command for team ${teamId}: ${row.startup_command}`)
+          console.log(`[sandbox] Re-running session startup command for team ${teamId}: ${row.startup_command}`)
           try {
             const startResult = await session.sandbox.process.executeCommand(row.startup_command, undefined, undefined, 15)
             const output = startResult.artifacts?.stdout ?? startResult.result ?? ''
@@ -696,12 +709,14 @@ export async function startProjectDevServer(db: Db, teamId: string, projectId: s
   const startCmd = project.startupCommand
     ?? `cd ${project.directory} && npm run dev -- --host 0.0.0.0 --port ${port} &`
 
-  // Ensure dependencies are installed before starting
+  // Ensure dependencies are installed before starting.
+  // Always run `npm install` — it's fast (~2s) when deps are already satisfied,
+  // and catches corrupted node_modules that `[ -d node_modules ]` alone would miss.
   console.log(`[sandbox] Ensuring deps for "${project.name}" in ${project.directory}`)
-  const installResult = await execCommand(db, teamId, `cd ${project.directory} && [ -d node_modules ] || npm install`)
+  const installResult = await execCommand(db, teamId, `cd ${project.directory} && npm install`)
   if (installResult.exitCode !== 0) {
-    // node_modules missing or corrupted — force reinstall
-    console.log(`[sandbox] Installing deps for "${project.name}"...`)
+    // node_modules corrupted or lock file stale — nuke and reinstall from scratch
+    console.log(`[sandbox] npm install failed, force-reinstalling deps for "${project.name}"...`)
     await execCommand(db, teamId, `cd ${project.directory} && rm -rf node_modules package-lock.json && npm install`)
   }
 
@@ -795,4 +810,133 @@ export async function getSandboxStatus(db: Db, teamId: string): Promise<{
     createdAt: row.created_at,
     lastActivity: row.last_activity,
   }
+}
+
+/**
+ * Scaffold a minimal Vite + React + TypeScript + Tailwind v4 project.
+ * Used when project source files are missing and need to be regenerated.
+ */
+export async function scaffoldViteProject(db: Db, teamId: string, dir: string, name: string, port: number): Promise<void> {
+  // Clean up any leftover files
+  await execCommand(db, teamId, `rm -rf ${dir} && mkdir -p ${dir}/src`)
+
+  const files: Array<{ path: string; content: string }> = [
+    {
+      path: `${dir}/package.json`,
+      content: JSON.stringify({
+        name: name.toLowerCase().replace(/\s+/g, '-'),
+        private: true,
+        version: '0.0.0',
+        type: 'module',
+        scripts: {
+          dev: 'vite',
+          build: 'tsc -b && vite build',
+          preview: 'vite preview',
+        },
+        dependencies: {
+          react: '^19.0.0',
+          'react-dom': '^19.0.0',
+        },
+        devDependencies: {
+          '@types/react': '^19.0.0',
+          '@types/react-dom': '^19.0.0',
+          '@vitejs/plugin-react': '^4.4.0',
+          '@tailwindcss/vite': '^4.0.0',
+          tailwindcss: '^4.0.0',
+          typescript: '~5.7.0',
+          vite: '^6.2.0',
+        },
+      }, null, 2),
+    },
+    {
+      path: `${dir}/index.html`,
+      content: `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${name}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`,
+    },
+    {
+      path: `${dir}/vite.config.ts`,
+      content: `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+})`,
+    },
+    {
+      path: `${dir}/tsconfig.json`,
+      content: JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020',
+          useDefineForClassFields: true,
+          lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+          module: 'ESNext',
+          skipLibCheck: true,
+          moduleResolution: 'bundler',
+          allowImportingTsExtensions: true,
+          isolatedModules: true,
+          moduleDetection: 'force',
+          noEmit: true,
+          jsx: 'react-jsx',
+          strict: true,
+          noUnusedLocals: false,
+          noUnusedParameters: false,
+        },
+        include: ['src'],
+      }, null, 2),
+    },
+    {
+      path: `${dir}/src/main.tsx`,
+      content: `import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)`,
+    },
+    {
+      path: `${dir}/src/index.css`,
+      content: `@import "tailwindcss";`,
+    },
+    {
+      path: `${dir}/src/App.tsx`,
+      content: `export default function App() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+      <div className="text-center p-8 bg-white rounded-2xl shadow-xl max-w-md">
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">${name}</h1>
+        <p className="text-gray-600">Project scaffolded successfully. Ready for development.</p>
+      </div>
+    </div>
+  )
+}`,
+    },
+  ]
+
+  for (const file of files) {
+    await sandboxWriteFile(db, teamId, file.path, file.content)
+  }
+
+  // Install dependencies
+  const installResult = await execCommand(db, teamId, `cd ${dir} && npm install`)
+  if (installResult.exitCode !== 0) {
+    console.error(`[sandbox] npm install failed during scaffold: ${installResult.stdout.slice(-300)}`)
+    throw new Error('Failed to install dependencies during project scaffold')
+  }
+
+  console.log(`[sandbox] Scaffolded fresh Vite project "${name}" in ${dir}`)
 }
