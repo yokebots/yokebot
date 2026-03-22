@@ -72,8 +72,12 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
     }
   }, [projectId])
 
+  // Track if this is the first mount — always fetch fresh token on first mount
+  const hasMountedRef = useRef(false)
   useEffect(() => {
-    if (url) return
+    // Skip re-fetch if URL exists AND we've already mounted (not first load)
+    if (url && hasMountedRef.current) return
+    hasMountedRef.current = true
     let cancelled = false
     setLoading(true)
 
@@ -84,7 +88,8 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
           const project = await engine.getSandboxProject(projectId)
           if (!cancelled && project.devPort) {
             const res = await engine.getSandboxProxyToken(project.devPort)
-            setUrl(`${engine.getBaseUrl()}${res.proxyUrl}`)
+            const newUrl = `${engine.getBaseUrl()}${res.proxyUrl}`
+            setUrl(newUrl)
             setLoading(false)
             return
           }
