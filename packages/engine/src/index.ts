@@ -637,7 +637,7 @@ async function main() {
   // This lets sendMessage() and createNotification() push real-time SSE events
   // without needing direct access to the SSE client map.
   {
-    const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast, setFileWrittenBroadcast } = await import('./chat.ts')
+    const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast, setFileWrittenBroadcast, setSandboxPreviewBroadcast } = await import('./chat.ts')
     setNewMessageBroadcast((teamId, channelId, messageId) => {
       broadcastToTeam(teamId, 'new_message', { channelId, messageId })
     })
@@ -649,6 +649,9 @@ async function main() {
     })
     setFileWrittenBroadcast((teamId, path) => {
       broadcastToTeam(teamId, 'file_written', { path })
+    })
+    setSandboxPreviewBroadcast((teamId, data) => {
+      broadcastToTeam(teamId, 'sandbox_preview', data)
     })
 
     const { setNotificationBroadcast } = await import('./notifications.ts')

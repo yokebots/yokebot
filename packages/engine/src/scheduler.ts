@@ -713,6 +713,18 @@ export async function respondToMention(
         await sendMessage(db, channelId, 'agent', agent.id, cleanResponse, mentionTaskId, teamId, undefined, undefined, undefined, safeFollowupParentId, mentionModelId)
         await logActivity(db, 'mention_followup', agent.id, `Follow-up: ${cleanResponse.slice(0, 150)}`, undefined, teamId)
         console.log(`[scheduler] "${agent.name}" posted mention follow-up`)
+
+        // Auto-open sandbox preview on completion for builder tasks
+        if (result.taskCompleted && mentionSandboxId) {
+          try {
+            const { getSandboxProject: getProj } = await import('./sandbox.ts')
+            const proj = await getProj(db, mentionSandboxId)
+            if (proj) {
+              const { broadcastSandboxPreview } = await import('./chat.ts')
+              broadcastSandboxPreview(teamId, { projectId: proj.id, projectName: proj.name })
+            }
+          } catch { /* best-effort */ }
+        }
       }
     }).catch(async (err) => {
       console.error(`[scheduler] Mention work error for "${agent.name}":`, err)

@@ -174,11 +174,16 @@ export function WorkspacePage() {
     })
   })
 
-  // Sandbox preview events — don't auto-open during build (shows errors while building).
-  // Preview tabs are opened explicitly by the user via "Open Preview" or by the review phase completion.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  useRealtimeEvent<{ projectId?: string; projectName?: string }>('sandbox_preview', (_data) => {
-    // Intentionally no-op — preview opens on demand, not on SSE event
+  // Auto-open sandbox preview on sprint completion (triggered by server after review phase)
+  useRealtimeEvent<{ projectId?: string; projectName?: string }>('sandbox_preview', (data) => {
+    if (!data?.projectId) return // ignore events without project context
+    addViewerTab({
+      id: `sandbox-preview:${data.projectId}`,
+      type: 'sandbox-preview',
+      label: data.projectName ?? 'Preview',
+      icon: 'preview',
+      resourceId: data.projectId,
+    })
   })
 
   const markFileReadLocally = useCallback((path: string) => {

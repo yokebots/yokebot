@@ -27,6 +27,7 @@ let _onNewMessage: ((teamId: string, channelId: string, messageId: number) => vo
 let _onAgentTyping: ((teamId: string, data: { channelId: string; agentId: string; agentName: string; status: 'typing' | 'working' | 'idle' }) => void) | null = null
 let _onAgentProgress: ((teamId: string, data: AgentProgressEvent) => void) | null = null
 let _onFileWritten: ((teamId: string, path: string) => void) | null = null
+let _onSandboxPreview: ((teamId: string, data: { projectId: string; projectName: string }) => void) | null = null
 
 export interface AgentProgressEvent {
   agentId: string
@@ -58,6 +59,14 @@ export function setFileWrittenBroadcast(fn: (teamId: string, path: string) => vo
 
 export function broadcastFileWritten(teamId: string, path: string): void {
   _onFileWritten?.(teamId, path)
+}
+
+export function setSandboxPreviewBroadcast(fn: (teamId: string, data: { projectId: string; projectName: string }) => void): void {
+  _onSandboxPreview = fn
+}
+
+export function broadcastSandboxPreview(teamId: string, data: { projectId: string; projectName: string }): void {
+  _onSandboxPreview?.(teamId, data)
 }
 
 export function broadcastAgentStatus(teamId: string, channelId: string, agentId: string, agentName: string, status: 'typing' | 'working' | 'idle'): void {
