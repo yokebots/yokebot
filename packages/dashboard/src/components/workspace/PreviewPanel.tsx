@@ -78,23 +78,15 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
     setLoading(true)
 
     async function fetchWithRetry() {
-      // If we have a specific project ID, fetch its preview URL or use its port
+      // If we have a specific project ID, get its port and use the proxy (never raw Daytona URL)
       if (projectId && projectId !== 'default') {
         try {
           const project = await engine.getSandboxProject(projectId)
-          if (!cancelled) {
-            if (project.previewUrl) {
-              setUrl(project.previewUrl)
-              setLoading(false)
-              return
-            }
-            // No previewUrl but has a port — use proxy with project-specific port
-            if (project.devPort) {
-              const res = await engine.getSandboxProxyToken(project.devPort)
-              setUrl(`${engine.getBaseUrl()}${res.proxyUrl}`)
-              setLoading(false)
-              return
-            }
+          if (!cancelled && project.devPort) {
+            const res = await engine.getSandboxProxyToken(project.devPort)
+            setUrl(`${engine.getBaseUrl()}${res.proxyUrl}`)
+            setLoading(false)
+            return
           }
         } catch { /* fall through to default proxy */ }
       }

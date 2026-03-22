@@ -1990,6 +1990,10 @@ export async function getSandboxPreview(port = 5173): Promise<{ url: string; por
   return request(`/api/sandbox/preview?port=${port}`)
 }
 
+export async function renameSandboxProject(projectId: string, name: string): Promise<void> {
+  await request(`/api/sandbox/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify({ name }) })
+}
+
 export async function getSandboxProxyToken(port = 5173): Promise<{ token: string; proxyUrl: string }> {
   return request(`/api/sandbox/proxy-token?port=${port}`)
 }

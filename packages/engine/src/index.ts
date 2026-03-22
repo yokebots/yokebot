@@ -2699,6 +2699,53 @@ async function main() {
     }
   })
 
+  // Force-reinstall node_modules for a project (fixes corrupted deps / missing source)
+  app.post('/api/sandbox/projects/:id/reinstall', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { getSandboxProject, execCommand, scaffoldViteProject } = await import('./sandbox.ts')
+      const project = await getSandboxProject(db, req.params.id)
+      if (!project) return res.status(404).json({ error: 'Project not found' })
+
+      const port = project.devPort ?? 5173
+      const dir = project.directory
+
+      console.log(`[sandbox] Force-reinstalling deps for "${project.name}" in ${dir}`)
+
+      // Kill any running dev server on the project port first
+      await execCommand(db, teamId, `kill $(lsof -t -i:${port}) 2>/dev/null || true`)
+
+      // Check if package.json exists — if not, the source is gone and we need to re-scaffold
+      const pkgCheck = await execCommand(db, teamId, `test -f ${dir}/package.json && echo "exists" || echo "missing"`)
+      const needsScaffold = pkgCheck.stdout.trim() === 'missing'
+
+      if (needsScaffold) {
+        console.log(`[sandbox] package.json missing — scaffolding fresh Vite project for "${project.name}"`)
+        await scaffoldViteProject(db, teamId, dir, project.name, port)
+      } else {
+        // Nuke and reinstall
+        await execCommand(db, teamId, `cd ${dir} && rm -rf node_modules package-lock.json`)
+        const installResult = await execCommand(db, teamId, `cd ${dir} && npm install 2>&1`)
+
+        if (installResult.exitCode !== 0) {
+          return res.status(500).json({ error: 'npm install failed', stdout: installResult.stdout.slice(-1000), stderr: installResult.stderr })
+        }
+      }
+
+      // Start the dev server
+      const startCmd = project.startupCommand
+        ?? `cd ${dir} && npm run dev -- --host 0.0.0.0 --port ${port} &`
+      await execCommand(db, teamId, startCmd)
+
+      // Wait for server to boot
+      await new Promise(resolve => setTimeout(resolve, 5000))
+
+      res.json({ ok: true, scaffolded: needsScaffold })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
   // ===== Visual Editor: apply-style + import =====
 
   const sandboxEditLimiter = rateLimit({ windowMs: 60_000, max: 60, keyGenerator: (req) => req.user?.activeTeamId ?? ipKeyGenerator(req.ip ?? '0.0.0.0') })
@@ -2884,6 +2931,24 @@ async function main() {
       if (!project) return res.status(404).json({ error: 'Project not found' })
       if (project.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
       res.json(project)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
+  app.patch('/api/sandbox/projects/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { getSandboxProject, updateSandboxProject } = await import('./sandbox.ts')
+      const project = await getSandboxProject(db, req.params.id)
+      if (!project) return res.status(404).json({ error: 'Project not found' })
+      if (project.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+      const { name } = req.body as { name?: string }
+      if (name) {
+        await db.run('UPDATE sandbox_projects SET name = $1, updated_at = NOW() WHERE id = $2', [name, req.params.id])
+      }
+      const updated = await getSandboxProject(db, req.params.id)
+      res.json(updated)
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }

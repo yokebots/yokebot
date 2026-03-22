@@ -154,7 +154,7 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
         />
       </div>
 
-      {/* Tab context menu (file tabs only) */}
+      {/* Tab context menu (file tabs) */}
       {tabContextMenu && tabContextMenu.tab.type === 'file' && (
         <FileContextMenu
           x={tabContextMenu.x}
@@ -173,6 +173,44 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
           onOpenInTab={() => setTabContextMenu(null)}
           onDownload={(path) => { setTabContextMenu(null); handleTabDownload(path) }}
         />
+      )}
+
+      {/* Tab context menu (sandbox preview tabs) */}
+      {tabContextMenu && tabContextMenu.tab.type === 'sandbox-preview' && (
+        <div
+          className="fixed z-50 rounded-lg border border-border-subtle bg-white shadow-lg py-1 min-w-[160px]"
+          style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
+          onClick={() => setTabContextMenu(null)}
+        >
+          <button
+            onClick={async () => {
+              const projectId = tabContextMenu.tab.resourceId
+              const currentName = tabContextMenu.tab.label
+              const newName = prompt('Rename project:', currentName)
+              if (newName && newName !== currentName && projectId) {
+                try {
+                  await engine.renameSandboxProject(projectId, newName)
+                  workspace.updateViewerTab(tabContextMenu.tab.id, { label: newName })
+                } catch { /* best-effort */ }
+              }
+              setTabContextMenu(null)
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-main hover:bg-gray-100"
+          >
+            <span className="material-symbols-outlined text-[14px]">edit</span>
+            Rename Project
+          </button>
+          <button
+            onClick={() => {
+              workspace.closeViewerTab(tabContextMenu.tab.id)
+              setTabContextMenu(null)
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-main hover:bg-gray-100"
+          >
+            <span className="material-symbols-outlined text-[14px]">close</span>
+            Close Tab
+          </button>
+        </div>
       )}
     </div>
   )

@@ -627,7 +627,8 @@ export async function respondToMention(
         } else {
           // Auto-create a project from the task title
           const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
-          const projectName = rawTitle.length > 50 ? rawTitle.slice(0, 50) : rawTitle || 'New Project'
+          const cleanName = rawTitle.replace(/\b(scaffold|build|create|set up|implement|make|develop)\b/gi, '').trim()
+          const projectName = (cleanName || rawTitle).slice(0, 30).trim() || 'New Project'
           const project = await createSandboxProject(db, teamId, projectName)
           mentionSandboxDir = project.directory
           mentionSandboxId = project.id
@@ -1336,7 +1337,8 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
                 const existing = await listSandboxProjects(db, agent.teamId)
                 if (existing.length === 0) {
                   // No projects yet — create one from task title
-                  const projectName = task.title.replace(/\b(scaffold|build|create|set up|implement)\b/gi, '').trim() || task.title
+                  const cleanName = task.title.replace(/\b(scaffold|build|create|set up|implement|make|develop)\b/gi, '').trim()
+                  const projectName = (cleanName || task.title).slice(0, 30).trim() || 'New Project'
                   const project = await createSandboxProject(db, agent.teamId, projectName)
                   sandboxProjectDir = project.directory
                   sandboxProjectId = project.id
