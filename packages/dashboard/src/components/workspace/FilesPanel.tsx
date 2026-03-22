@@ -1231,9 +1231,17 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
 
   const activeProject = projects.find(p => p.id === activeProjectId)
 
-  // Fetch files when expanded and sandbox is running
+  // Fetch files when expanded — auto-start sandbox if needed
   useEffect(() => {
-    if (!expanded || status?.status !== 'running') return
+    if (!expanded) return
+    // If sandbox isn't running, try to start it
+    if (status && status.status !== 'running') {
+      engine.startSandbox().then(r => {
+        setStatus({ ...status, status: r.status as 'running' | 'stopped' })
+      }).catch(() => {})
+      return
+    }
+    if (!status) return
     setLoading(true)
     // If we have an active project, browse its directory
     const dir = activeProject ? `${activeProject.directory}${currentDir === '/' ? '' : currentDir}` : currentDir

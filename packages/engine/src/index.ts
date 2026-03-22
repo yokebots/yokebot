@@ -20,7 +20,7 @@ import { startScheduler, stopScheduler, drainScheduler, scheduleAgent, unschedul
 import { createApproval, listPendingApprovals, resolveApproval, countPendingApprovals } from './approval.ts'
 import { createTask, listTasks, getTask, updateTask, deleteTask, unblockTask } from './tasks.ts'
 import { createTag, listTags, updateTag, deleteTag, tagResource, untagResource, bulkSetResourceTags } from './tags.ts'
-import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getChannelMessages, getThreadReplies, getMessagesByTaskId, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
+import { createChannel, getChannel, listChannels, getDmChannel, getTaskThread, getTeamChannel, sendMessage, getMessage, getChannelMessages, getThreadReplies, getMessagesByTaskId, processMentions, searchMessages, addChatSseClient, broadcastChatEvent, markChannelRead, getUnreadCounts, markTaskRead, getUnreadTaskIds } from './chat.ts'
 import { initWorkspace, listFiles, readFile, readBinaryFile, writeFile, writeBinaryFile, renameFile, deleteFile, getFilesByTask, markFileRead, getUnreadFileIds, getFileByPath, type WorkspaceConfig } from './workspace.ts'
 // Note: WorkspaceConfig kept for backward compat — workspace is now DB-backed
 import { loadSkillsFromDir, getAgentSkills, installSkill, uninstallSkill } from './skills.ts'
@@ -1435,6 +1435,25 @@ async function main() {
     processMentions(db, teamId, channelId, msg).catch((err) =>
       console.error('[chat] Mention processing error:', err),
     )
+
+    // Detect human resolving a task — if replying to a message with a task_id and content sounds like resolution
+    if (senderType === 'human' && parentMessageId) {
+      ;(async () => {
+        try {
+          const parentMsg = await getMessage(db, parentMessageId)
+          if (parentMsg?.taskId) {
+            const lc = content.toLowerCase()
+            const isResolution = /\b(done|completed|resolved|fixed|looks good|that works|perfect|approved|great|thanks|thank you|good job|nice work)\b/i.test(lc)
+            if (isResolution) {
+              const { updateTask } = await import('./tasks.ts')
+              await updateTask(db, parentMsg.taskId, { status: 'done' })
+              console.log(`[chat] Human resolved task ${parentMsg.taskId} via chat reply`)
+            }
+          }
+        } catch { /* best-effort */ }
+      })()
+    }
+
     // Instant agent reply — when a human messages, trigger the right agent immediately
     if (senderType === 'human') {
       const channel = await getChannel(db, channelId)
