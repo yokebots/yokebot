@@ -1050,9 +1050,19 @@ async function runRoutedSprint(
     let previewUrl: string | undefined
     if (sandboxProjectId && phase.toolCategories.includes('browser')) {
       try {
-        const { getSandboxProject } = await import('./sandbox.ts')
+        const { getSandboxProject, getPreviewUrl, updateSandboxProject } = await import('./sandbox.ts')
         const project = await getSandboxProject(db, sandboxProjectId)
-        if (project?.previewUrl) previewUrl = project.previewUrl
+        if (project?.previewUrl) {
+          previewUrl = project.previewUrl
+        } else if (project?.devPort) {
+          // No preview URL stored — generate one from the project's port
+          try {
+            const url = await getPreviewUrl(db, teamId, project.devPort)
+            previewUrl = url
+            await updateSandboxProject(db, sandboxProjectId, { previewUrl: url })
+            console.log(`[routing] Generated preview URL for "${project.name}" on port ${project.devPort}`)
+          } catch { /* sandbox might not be running */ }
+        }
       } catch { /* best-effort */ }
     }
     const phasePrompt = buildPhasePrompt(phase, task.title, task.description, phaseResults, {

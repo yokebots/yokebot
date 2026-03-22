@@ -161,8 +161,7 @@ DO NOT skip steps or cut corners. Common excuses to reject:
       },
       {
         name: 'review',
-        modelId: 'nemotron-3-super',
-        fallbackModelId: 'deepseek-v3.2',
+        modelId: 'deepseek-v3.2',
         maxIterations: 8,
         toolCategories: ['core', 'browser', 'sandbox', 'tasks'],
         skillFilter: [],
