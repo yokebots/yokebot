@@ -187,7 +187,7 @@ export function TaskDetail({ taskId, workspace, agents, onBack, onDeleted }: Tas
           <span className="material-symbols-outlined text-[18px]">arrow_back</span>
         </button>
         <span className="material-symbols-outlined text-[16px] text-text-muted">task_alt</span>
-        <span className="text-sm font-semibold text-text-main truncate flex-1">{task.title}</span>
+        <span className={`text-sm font-semibold truncate flex-1 ${task.status === 'done' ? 'line-through text-text-muted' : 'text-text-main'}`}>{task.title}</span>
         <button
           onClick={handleDelete}
           disabled={actionLoading}

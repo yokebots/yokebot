@@ -259,7 +259,7 @@ export function MissionControlPage() {
                     {/* Mobile: stacked card layout */}
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <p className="text-sm font-medium text-text-main truncate">{task.title}</p>
+                        <p className={`text-sm font-medium truncate ${task.status === 'done' ? 'line-through text-text-muted' : 'text-text-main'}`}>{task.title}</p>
                         {task.tags?.length > 0 && (
                           <div className="flex items-center gap-0.5 shrink-0">
                             {task.tags.slice(0, 3).map((tag) => (
