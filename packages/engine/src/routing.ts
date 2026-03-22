@@ -79,12 +79,13 @@ Rules:
         maxIterations: 8,
         toolCategories: ['core', 'browser'],
         skillFilter: [],
-        systemInstruction: `Browse the target site. Extract: color palette (hex values), fonts, layout structure, logo description, key sections, navigation, and overall branding. Output a structured report. Do NOT write code. Do NOT visit external sites.
+        systemInstruction: `Research the task requirements.
 
-DO NOT skip steps or cut corners. Common excuses to reject:
-- "I can infer the design without browsing" — NO. Always browse. You miss details when guessing.
-- "The site is simple enough to summarize quickly" — NO. Extract every detail systematically.
-- "I already know what this type of site looks like" — NO. Every site is unique. Browse it.`,
+If the task references a specific URL or website, browse it and extract: color palette (hex values), fonts, layout structure, logo, key sections, navigation, and branding details.
+
+If NO URL is given, search the web for similar existing apps or examples. Navigate to https://www.bing.com/search?q=YOUR+SEARCH+TERMS and browse 2-3 results to gather design inspiration, feature ideas, and UX patterns.
+
+Output a structured report with your findings. Do NOT write code. Do NOT ask the human for a URL — find references yourself.`,
         required: false,
       },
       {
@@ -165,19 +166,68 @@ DO NOT skip steps or cut corners. Common excuses to reject:
         maxIterations: 8,
         toolCategories: ['core', 'browser', 'sandbox', 'tasks'],
         skillFilter: [],
-        systemInstruction: `Visit the preview URL with browser_navigate. Compare the app to the requirements and the design spec from earlier phases. Fix any visual or functional issues using sandbox_write_files.
+        systemInstruction: `You MUST browse the preview URL to verify the app works. Do NOT skip this step.
 
-WHEN DONE: You MUST call update_task with status "done" to mark the task complete. Do NOT just describe what you see — always end by calling update_task.
+Step 1: Call browser_navigate with the preview URL to open the app.
+Step 2: Take a browser_snapshot to see what's on the page.
+Step 3: Test the app — click buttons, fill in fields, verify the UI matches the requirements.
+Step 4: If anything is broken or missing, fix it using sandbox_write_files, then browse again to verify.
+Step 5: When everything works correctly, call update_task with status "done".
 
-CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is still broken, STOP. Describe the issue clearly and call update_task with status "blocked".
+You MUST make at least 2 browser calls (navigate + snapshot). Do NOT mark the task done without actually looking at the app.
 
-DO NOT skip steps or cut corners. Common excuses to reject:
-- "It looks close enough" — NO. Compare every detail to the requirements.
-- "This is a minor visual difference" — NO. Users notice every pixel. Fix it.
-- "The functionality works so the task is done" — NO. Visual fidelity matters equally.`,
+CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is still broken, describe the issue and call update_task with status "blocked".`,
       },
     ],
   },
+
+  // ===== Universal agent profile (research → execute → deliver) =====
+  // Used by non-builder agents: ContentBot, ProspectorBot, AdvisorBot, ReputationBot, etc.
+  // 3 phases: research the topic, do the work, deliver a polished result.
+  ...[
+    'content-bot', 'prospector-bot', 'advisor-bot', 'reputation-bot',
+    'social-bot', 'ad-bot', 'seo-bot', 'email-bot', 'closer-bot',
+    'onboarder-bot', 'creative-bot', 'support-bot', 'analytics-bot',
+    'finance-bot', 'bookkeeper-bot', 'recruiter-bot', 'legal-bot',
+    'dev-bot', 'commerce-bot', 'scheduler-bot', 'project-bot',
+  ].map(templateId => ({
+    templateId,
+    orchestratorModelId: '',
+    orchestratorPrompt: '',
+    phases: [
+      {
+        name: 'research',
+        modelId: 'step-3.5-flash',
+        fallbackModelId: 'deepseek-v3.2',
+        maxIterations: 10,
+        toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+        skillFilter: undefined as string[] | undefined,
+        systemInstruction: `Research the task. Browse the web for relevant information, check workspace files for existing context, and gather what you need to produce a high-quality deliverable. Output a structured summary of your research findings. Do NOT do the actual work yet — just research.
+
+If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SEARCH+TERMS and browse results. Do NOT ask the human for URLs.`,
+        required: false,
+      },
+      {
+        name: 'execute',
+        modelId: 'deepseek-v3.2',
+        maxIterations: 20,
+        toolCategories: ['core', 'workspace', 'tasks', 'chat', 'data', 'browser', 'skills'] as ToolCategory[],
+        skillFilter: undefined as string[] | undefined,
+        systemInstruction: `Do the work. Using your research findings, produce the deliverable the task requires. Write files to the workspace, create data tables, send messages, or use any tools needed. Be thorough and complete — do NOT cut corners or produce partial work.`,
+        required: true,
+      },
+      {
+        name: 'deliver',
+        modelId: 'mimo-v2-flash',
+        fallbackModelId: 'deepseek-v3.2',
+        maxIterations: 3,
+        toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
+        skillFilter: [] as string[],
+        systemInstruction: `Review what was produced in the execute phase. Post a concise summary to the team chat using the respond tool — include what was created, where to find it, and any key highlights. Then call update_task with status "done".`,
+        required: true,
+      },
+    ],
+  } as RoutingProfile)),
 ]
 
 // ---- Public API ----

@@ -1478,16 +1478,41 @@ async function main() {
               return
             }
 
-            // Quick LLM call to pick the best agent
-            const agentList = available.map((a, i) => `${i + 1}. ${a.name} — ${a.department ?? 'general'}`).join('\n')
-            const routerModel = await resolveModelConfig(db, 'qwen-3.5-9b')
-            const result = await chatCompletion(routerModel, [
-              { role: 'system', content: 'You are a routing assistant. Given a user message and a list of agents, reply with ONLY the number of the most relevant agent. Nothing else.' },
-              { role: 'user', content: `Agents:\n${agentList}\n\nMessage: "${content.slice(0, 300)}"\n\nWhich agent number should respond?` },
-            ] as LlmMessage[])
-
-            const pick = parseInt(result.content?.trim() ?? '', 10)
-            const chosenAgent = pick >= 1 && pick <= available.length ? available[pick - 1] : available[0]
+            // Deterministic agent routing — match keywords against agent templates
+            const msg = content.toLowerCase()
+            let chosenAgent = available[0] // default fallback
+            let bestScore = 0
+            for (const agent of available) {
+              let score = 0
+              const template = agent.templateId ? getTemplate(agent.templateId) : null
+              if (!template) continue
+              const haystack = [template.name, template.title, template.department, template.description, ...(template.commonTasks ?? [])].join(' ').toLowerCase()
+              // Score by word overlap between message and agent description
+              const words = msg.split(/\s+/).filter(w => w.length > 3)
+              for (const word of words) {
+                if (haystack.includes(word)) score++
+              }
+              // Boost by department keywords
+              const dept = (template.department ?? '').toLowerCase()
+              if (msg.includes('sales') && dept === 'sales') score += 5
+              if (msg.includes('marketing') && dept === 'marketing') score += 5
+              if (msg.includes('content') && (dept === 'marketing' || dept === 'content')) score += 5
+              if (msg.includes('build') && template.id === 'builder-bot') score += 5
+              if (msg.includes('code') && template.id === 'builder-bot') score += 5
+              if (msg.includes('app') && template.id === 'builder-bot') score += 5
+              if (msg.includes('lead') && template.id === 'prospector-bot') score += 5
+              if (msg.includes('prospect') && template.id === 'prospector-bot') score += 5
+              if (msg.includes('review') && template.id === 'reputation-bot') score += 5
+              if (msg.includes('reputation') && template.id === 'reputation-bot') score += 5
+              if (msg.includes('seo') && template.id === 'seo-bot') score += 5
+              if (msg.includes('email') && template.id === 'email-bot') score += 5
+              if (msg.includes('social') && template.id === 'social-bot') score += 5
+              if (msg.includes('strategy') && template.id === 'advisor-bot') score += 5
+              if (msg.includes('plan') && template.id === 'advisor-bot') score += 3
+              if (msg.includes('advice') && template.id === 'advisor-bot') score += 5
+              if (score > bestScore) { bestScore = score; chosenAgent = agent }
+            }
+            console.log(`[chat] Dispatcher routed to "${chosenAgent.name}" (score: ${bestScore})`)
             triggerAgentReply(chosenAgent)
           } catch (err) {
             console.error('[chat] Group auto-reply routing error:', err)

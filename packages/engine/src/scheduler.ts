@@ -473,7 +473,15 @@ export async function respondToMention(
 
   try {
     const result = await chatCompletion(ackModelConfig, ackMessages)
-    const reply = result.content?.trim()
+    // Strip any tool call syntax from ack (model sometimes outputs sandbox_exec(...) etc.)
+    let reply = result.content?.trim() ?? ''
+    reply = reply
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+      .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '')
+      .replace(/<｜tool[▁_]call[▁_]begin｜>[\s\S]*?<｜tool[▁_]call[▁_]end｜>/g, '')
+      .replace(/```(?:typescript|javascript|json)?\n[\s\S]*?```/g, '')
+      .replace(/sandbox_\w+\([^)]*\)/g, '')
+      .trim()
     if (reply && reply.length > 0) {
       // Stop typing, post the ack message (in the same thread if the trigger was a thread reply)
       broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
