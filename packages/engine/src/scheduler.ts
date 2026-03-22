@@ -686,9 +686,20 @@ export async function respondToMention(
       }
 
       let cleanResponse = result.response ? stripToolSyntax(result.response) : null
-      // If task completed but response sounds like it's still working, override with completion message
-      if (result.taskCompleted && cleanResponse && /still working|pick it back up|next check-in|need a bit more time/i.test(cleanResponse)) {
-        cleanResponse = `Task completed successfully.`
+      // If task completed but response sounds like it's still working, override with rich completion message
+      if (result.taskCompleted && (!cleanResponse || /still working|pick it back up|next check-in|need a bit more time/i.test(cleanResponse))) {
+        const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
+        const taskChip = mentionTaskId ? `@[${rawTitle.slice(0, 60)}](task:${mentionTaskId})` : ''
+        // Look up preview URL if this is a builder task
+        let previewSuffix = ''
+        if (mentionSandboxId) {
+          try {
+            const { getSandboxProject: getProj } = await import('./sandbox.ts')
+            const proj = await getProj(db, mentionSandboxId)
+            if (proj?.previewUrl) previewSuffix = `\n\n**Preview:** [Open app](${proj.previewUrl})`
+          } catch { /* best-effort */ }
+        }
+        cleanResponse = `${taskChip} — Completed${previewSuffix}`
       }
       if (cleanResponse && cleanResponse.trim().length > 0
         && !cleanResponse.includes('[no-op]') && cleanResponse.trim() !== 'no-op') {
