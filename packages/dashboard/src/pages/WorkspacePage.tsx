@@ -235,9 +235,20 @@ export function WorkspacePage() {
 
   const addViewerTab = useCallback((tab: ViewerTab) => {
     setViewerTabs(prev => {
+      // Check by resourceId first (exact match)
       const existing = prev.find(t => t.resourceId === tab.resourceId && t.type === tab.type)
       if (existing) {
         setActiveTabId(existing.id)
+        return prev
+      }
+      // Check by tab ID (same tab, possibly updated resourceId — e.g. browser session refresh)
+      const sameId = prev.find(t => t.id === tab.id)
+      if (sameId) {
+        setActiveTabId(sameId.id)
+        // Update the resourceId if it changed (e.g. new browser session for same agent)
+        if (sameId.resourceId !== tab.resourceId) {
+          return prev.map(t => t.id === tab.id ? { ...t, resourceId: tab.resourceId, label: tab.label } : t)
+        }
         return prev
       }
       setActiveTabId(tab.id)
