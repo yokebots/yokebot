@@ -53,7 +53,7 @@ async function main() {
   // Wire broadcast callbacks to relay SSE events through the API server
   // The worker has no SSE connections — it POSTs events to the API server's internal endpoint
   {
-    const API_PORT = process.env.YOKEBOT_PORT || '3001'
+    const API_PORT = process.env.PORT || process.env.YOKEBOT_PORT || '3001'
     const API_BASE = `http://127.0.0.1:${API_PORT}`
     const INTERNAL_SECRET = process.env.INTERNAL_BROADCAST_SECRET || 'yokebot-internal-broadcast'
 
