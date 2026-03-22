@@ -153,12 +153,13 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
     setIframeLoaded(false)
   }, [url])
 
-  // Auto-refresh iframe when tab becomes visible (e.g. clicking Open Preview on existing tab)
+  // Auto-refresh iframe when URL is set or changes
   useEffect(() => {
     if (url && iframeRef.current) {
+      // Force reload by re-setting src (handles cases where iframe shows blank)
       iframeRef.current.src = url
     }
-  }, [])
+  }, [url])
 
   // ---- Edit mode: postMessage listener for element selection ----
   useEffect(() => {
