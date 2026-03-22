@@ -625,15 +625,29 @@ export async function respondToMention(
           const project = await getSandboxProject(db, mentionTask.sandboxProjectId)
           if (project) { mentionSandboxDir = project.directory; mentionSandboxId = project.id }
         } else {
-          // Auto-create a project from the task title
-          const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
-          const cleanName = rawTitle.replace(/\b(scaffold|build|create|set up|implement|make|develop)\b/gi, '').trim()
-          const projectName = (cleanName || rawTitle).slice(0, 30).trim() || 'New Project'
-          const project = await createSandboxProject(db, teamId, projectName)
-          mentionSandboxDir = project.directory
-          mentionSandboxId = project.id
-          await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [project.id, mentionTaskId])
-          console.log(`[scheduler] Auto-created sandbox project "${project.name}" for mention task`)
+          // Check if user is asking to fix/edit an existing project
+          const msg = triggerMessage.content.toLowerCase()
+          const isEditRequest = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair/i.test(msg)
+          const existing = await listSandboxProjects(db, teamId)
+
+          if (isEditRequest && existing.length > 0) {
+            // Reuse the most recent project
+            const latest = existing[0]
+            mentionSandboxDir = latest.directory
+            mentionSandboxId = latest.id
+            await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [latest.id, mentionTaskId])
+            console.log(`[scheduler] Reusing existing project "${latest.name}" for edit request`)
+          } else {
+            // New project
+            const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
+            const cleanName = rawTitle.replace(/\b(scaffold|build|create|set up|implement|make|develop)\b/gi, '').trim()
+            const projectName = (cleanName || rawTitle).slice(0, 30).trim() || 'New Project'
+            const project = await createSandboxProject(db, teamId, projectName)
+            mentionSandboxDir = project.directory
+            mentionSandboxId = project.id
+            await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [project.id, mentionTaskId])
+            console.log(`[scheduler] Auto-created sandbox project "${project.name}" for mention task`)
+          }
         }
       } catch (err) {
         console.error(`[scheduler] Failed to resolve sandbox project for mention:`, err)

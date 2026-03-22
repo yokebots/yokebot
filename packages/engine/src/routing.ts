@@ -144,7 +144,13 @@ DO NOT skip the mockup. The build phase needs both the spec AND the image to ach
         maxIterations: 30,
         toolCategories: ['core', 'sandbox', 'tasks'],
         skillFilter: [],
-        systemInstruction: `Build a complete working web app using sandbox_setup (one call, all files). Use React + Vite + Tailwind v4.
+        systemInstruction: `Build a complete working web app using sandbox_setup (one call, all files). Use React + TypeScript + Vite + Tailwind CSS v4.
+
+CRITICAL — Tailwind v4 setup (do NOT use v3 PostCSS setup):
+- Install: \`tailwindcss @tailwindcss/vite\` (NOT \`tailwindcss postcss autoprefixer\`)
+- vite.config.ts: import tailwindcss from "@tailwindcss/vite" and add to plugins array
+- index.css: use \`@import "tailwindcss"\` (NOT \`@tailwind base/components/utilities\`)
+- Do NOT create tailwind.config.js or postcss.config.js — v4 doesn't need them
 
 If a plan phase ran, follow the component list and file structure exactly.
 If a design phase ran, match the color palette, typography, spacing, and layout from the design spec. If a mockup image was generated, replicate its visual layout as closely as possible.

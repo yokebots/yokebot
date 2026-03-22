@@ -39,6 +39,7 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
   const [uploadingFile, setUploadingFile] = useState(false)
   const [fileDragOver, setFileDragOver] = useState(false)
   const [agentStatuses, setAgentStatuses] = useState<Map<string, { agentName: string; status: 'typing' | 'working' | 'idle' }>>(new Map())
+  const [activeProgressAgent, setActiveProgressAgent] = useState<string | null>(null)
   const { progressMap } = useAgentProgress()
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
@@ -405,51 +406,63 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
         />
       )}
 
-      {/* Agent live progress panels — Gemini-style expandable reasoning */}
-      {/* Show when we have typing status OR progress events (either signal means agent is working) */}
-      {(agentStatuses.size > 0 || progressMap.size > 0) && (
-        <div className="px-3 py-2 border-t border-border-subtle shrink-0 space-y-2">
-          {/* Merge agent IDs from both sources */}
-          {Array.from(new Set([...agentStatuses.keys(), ...progressMap.keys()])).map(agentId => {
-            const statusEntry = agentStatuses.get(agentId)
-            const agentName = statusEntry?.agentName ?? progressMap.get(agentId)?.[0]?.agentName ?? 'Agent'
-            const status = statusEntry?.status ?? 'working'
-            const steps = progressMap.get(agentId)
-            if (steps && steps.length > 0) {
-              // Derive dynamic activity label from recent tool calls
-              const recentTools = steps.filter(s => s.type === 'tool_start').slice(-3)
-              const latestTool = recentTools[recentTools.length - 1]?.label?.toLowerCase() ?? ''
-              const latestStep = steps[steps.length - 1]
-              let activity = 'Working'
-              if (latestStep?.type === 'responding') activity = 'Responding'
-              else if (latestTool.includes('browser') || latestTool.includes('navigate')) activity = 'Browsing'
-              else if (latestTool.includes('search') || latestTool.includes('web_search')) activity = 'Searching'
-              else if (latestTool.includes('write_file') || latestTool.includes('sandbox')) activity = 'Building'
-              else if (latestTool.includes('read') || latestTool.includes('workspace')) activity = 'Researching'
-              else if (latestTool.includes('send_message') || latestTool.includes('update_task')) activity = 'Updating'
-              else if (latestTool.includes('exec') || latestTool.includes('install')) activity = 'Running'
-              else if (latestStep?.type === 'thinking') activity = 'Analyzing'
-              return (
-                <div key={agentId}>
-                  <div className="flex items-center gap-1.5 mb-1">
+      {/* Agent progress tabs — compact overview, click to expand details */}
+      {(agentStatuses.size > 0 || progressMap.size > 0) && (() => {
+        const agentIds = Array.from(new Set([...agentStatuses.keys(), ...progressMap.keys()]))
+        // Auto-select first agent if none selected
+        if (activeProgressAgent === null && agentIds.length > 0) setActiveProgressAgent(agentIds[0])
+        const getActivity = (agentId: string) => {
+          const steps = progressMap.get(agentId)
+          if (!steps || steps.length === 0) return 'Working'
+          const recentTools = steps.filter(s => s.type === 'tool_start').slice(-3)
+          const latestTool = recentTools[recentTools.length - 1]?.label?.toLowerCase() ?? ''
+          const latestStep = steps[steps.length - 1]
+          if (latestStep?.type === 'responding') return 'Responding'
+          if (latestTool.includes('browser') || latestTool.includes('navigate')) return 'Browsing'
+          if (latestTool.includes('search') || latestTool.includes('web_search')) return 'Searching'
+          if (latestTool.includes('write_file') || latestTool.includes('sandbox')) return 'Building'
+          if (latestTool.includes('read') || latestTool.includes('workspace')) return 'Researching'
+          if (latestTool.includes('send_message') || latestTool.includes('update_task')) return 'Updating'
+          if (latestTool.includes('exec') || latestTool.includes('install')) return 'Running'
+          if (latestStep?.type === 'thinking') return 'Analyzing'
+          return 'Working'
+        }
+        return (
+          <div className="border-t border-border-subtle shrink-0">
+            {/* Tab bar */}
+            <div className="flex gap-0.5 px-2 py-1 overflow-x-auto">
+              {agentIds.map(agentId => {
+                const statusEntry = agentStatuses.get(agentId)
+                const agentName = statusEntry?.agentName ?? progressMap.get(agentId)?.[0]?.agentName ?? 'Agent'
+                const status = statusEntry?.status ?? 'working'
+                const activity = getActivity(agentId)
+                const isActive = activeProgressAgent === agentId
+                return (
+                  <button
+                    key={agentId}
+                    onClick={() => setActiveProgressAgent(isActive ? null : agentId)}
+                    className={`shrink-0 flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors ${
+                      isActive
+                        ? 'bg-forest-green/10 text-forest-green font-semibold'
+                        : 'text-text-muted hover:bg-light-surface-alt'
+                    }`}
+                  >
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === 'typing' ? 'bg-accent-green' : 'bg-accent-gold'}`} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
-                    <span className="text-xs font-medium text-text-main">{agentName}</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">{activity}</span>
-                  </div>
-                  <AgentProgressPanel steps={steps} />
-                </div>
-              )
-            }
-            // Fallback: no progress data yet, show simple indicator
-            return (
-              <div key={agentId} className="flex items-center gap-1.5 text-xs text-text-muted">
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === 'typing' ? 'bg-accent-green' : 'bg-accent-gold'}`} style={{ animation: 'pulse 2s ease-in-out infinite' }} />
-                <span>{agentName} {status === 'typing' ? 'is typing' : 'is working'}...</span>
+                    <span>{agentName}</span>
+                    <span className="text-[9px] uppercase tracking-wider opacity-70">{activity}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {/* Expanded detail for selected agent */}
+            {activeProgressAgent && progressMap.get(activeProgressAgent) && progressMap.get(activeProgressAgent)!.length > 0 && (
+              <div className="px-3 pb-2">
+                <AgentProgressPanel steps={progressMap.get(activeProgressAgent)!} />
               </div>
-            )
-          })}
-        </div>
-      )}
+            )}
+          </div>
+        )
+      })()}
 
       {/* Message input */}
       <div
