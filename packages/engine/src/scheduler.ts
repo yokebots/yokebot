@@ -612,10 +612,38 @@ export async function respondToMention(
     // Check if this agent has a routing profile for multi-phase execution
     const mentionRoutingProfile = getRoutingProfile(agent.templateId ?? '')
 
+    // Resolve sandbox project for builder agents (same logic as heartbeat flow)
+    let mentionSandboxDir: string | undefined
+    let mentionSandboxId: string | undefined
+    const sandboxTemplates = new Set(['builder-bot', 'game-dev', 'full-stack-dev', 'frontend-dev', 'backend-dev'])
+    if (mentionTaskId && sandboxTemplates.has(agent.templateId ?? '')) {
+      try {
+        const { listSandboxProjects, createSandboxProject, getSandboxProject } = await import('./sandbox.ts')
+        const { getTask } = await import('./tasks.ts')
+        const mentionTask = await getTask(db, mentionTaskId)
+        if (mentionTask?.sandboxProjectId) {
+          const project = await getSandboxProject(db, mentionTask.sandboxProjectId)
+          if (project) { mentionSandboxDir = project.directory; mentionSandboxId = project.id }
+        } else {
+          // Auto-create a project from the task title
+          const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
+          const projectName = rawTitle.length > 50 ? rawTitle.slice(0, 50) : rawTitle || 'New Project'
+          const project = await createSandboxProject(db, teamId, projectName)
+          mentionSandboxDir = project.directory
+          mentionSandboxId = project.id
+          await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [project.id, mentionTaskId])
+          console.log(`[scheduler] Auto-created sandbox project "${project.name}" for mention task`)
+        }
+      } catch (err) {
+        console.error(`[scheduler] Failed to resolve sandbox project for mention:`, err)
+      }
+    }
+
     const mentionPromise = mentionRoutingProfile
       ? runRoutedSprint(
           db, agent, { id: mentionTaskId ?? `mention-${Date.now()}`, title: triggerMessage.content, description: null },
           mentionRoutingProfile, systemPrompt, mentionIterations, broadcastFileWritten,
+          mentionSandboxDir, mentionSandboxId,
         ).then(r => ({ response: r.response, iterations: r.totalIterations, taskCompleted: r.taskCompleted }))
       : (() => {
           const mentionBoosts = detectTaskCategories(triggerMessage.content, '')
@@ -1123,10 +1151,21 @@ async function runRoutedSprint(
   // (safety net — the review model should call update_task but often exits with plain text)
   if (!taskCompleted && !taskBlocked && phaseResults.length > 0) {
     const lastPhase = phaseResults[phaseResults.length - 1]
-    if ((lastPhase.phase === 'review' || lastPhase.phase === 'build') && lastPhase.success) {
+    if ((lastPhase.phase === 'review' || lastPhase.phase === 'build' || lastPhase.phase === 'deliver') && lastPhase.success) {
       console.log(`[routing] Auto-marking task completed — all phases ran, last phase "${lastPhase.phase}" succeeded`)
       taskCompleted = true
     }
+  }
+
+  // Persist task status to DB immediately (don't rely on caller's .then() which can be lost on engine restart)
+  if (taskCompleted) {
+    await db.run(`UPDATE tasks SET status = 'done', sprint_count = sprint_count + 1, scratchpad = NULL WHERE id = $1`, [task.id]).catch(() => {})
+    console.log(`[routing] Task "${task.title.slice(0, 50)}" marked done in DB`)
+  } else if (taskBlocked) {
+    await db.run(`UPDATE tasks SET status = 'blocked', sprint_count = sprint_count + 1 WHERE id = $1`, [task.id]).catch(() => {})
+  } else {
+    const now = db.driver === 'postgres' ? 'NOW()' : "datetime('now')"
+    await db.run(`UPDATE tasks SET sprint_count = sprint_count + 1, last_sprint_at = ${now} WHERE id = $1`, [task.id]).catch(() => {})
   }
 
   return { totalIterations, response: lastResponse, taskCompleted, taskBlocked, phaseResults }
