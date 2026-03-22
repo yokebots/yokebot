@@ -174,17 +174,11 @@ export function WorkspacePage() {
     })
   })
 
-  // Auto-open sandbox preview tab when a preview URL is generated
-  useRealtimeEvent<{ projectId?: string; projectName?: string }>('sandbox_preview', (data) => {
-    const projectId = data?.projectId ?? 'default'
-    const projectName = data?.projectName ?? 'Preview'
-    addViewerTab({
-      id: `sandbox-preview:${projectId}`,
-      type: 'sandbox-preview',
-      label: projectName,
-      icon: 'preview',
-      resourceId: projectId,
-    })
+  // Sandbox preview events — don't auto-open during build (shows errors while building).
+  // Preview tabs are opened explicitly by the user via "Open Preview" or by the review phase completion.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  useRealtimeEvent<{ projectId?: string; projectName?: string }>('sandbox_preview', (_data) => {
+    // Intentionally no-op — preview opens on demand, not on SSE event
   })
 
   const markFileReadLocally = useCallback((path: string) => {

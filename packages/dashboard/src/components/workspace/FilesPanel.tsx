@@ -1217,6 +1217,7 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
   const [importError, setImportError] = useState<string | null>(null)
   const [projects, setProjects] = useState<engine.SandboxProject[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [projectContextMenu, setProjectContextMenu] = useState<{ x: number; y: number; project: engine.SandboxProject } | null>(null)
 
   // Fetch sandbox status + projects on expand
   useEffect(() => {
@@ -1344,6 +1345,7 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
                 <button
                   key={p.id}
                   onClick={() => { setActiveProjectId(p.id); setCurrentDir('/') }}
+                  onContextMenu={(e) => { e.preventDefault(); setProjectContextMenu({ x: e.clientX, y: e.clientY, project: p }) }}
                   className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-1 text-[10px] transition-colors ${
                     p.id === activeProjectId
                       ? 'bg-forest-green/10 text-forest-green font-semibold border border-forest-green/20'
@@ -1359,7 +1361,10 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
 
           {/* Single project header */}
           {projects.length === 1 && (
-            <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-muted">
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-muted cursor-default"
+              onContextMenu={(e) => { e.preventDefault(); setProjectContextMenu({ x: e.clientX, y: e.clientY, project: projects[0] }) }}
+            >
               <span className="material-symbols-outlined text-[12px] text-forest-green">folder_special</span>
               <span className="font-medium text-text-main">{projects[0].name}</span>
               {projects[0].framework && (
@@ -1511,6 +1516,50 @@ function SandboxSection({ workspace, height, expanded, setExpanded }: {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* Project right-click context menu */}
+      {projectContextMenu && (
+        <div
+          className="fixed z-50 rounded-lg border border-border-subtle bg-white shadow-lg py-1 min-w-[160px]"
+          style={{ left: projectContextMenu.x, top: projectContextMenu.y }}
+          onClick={() => setProjectContextMenu(null)}
+        >
+          <button
+            onClick={async () => {
+              const proj = projectContextMenu.project
+              const newName = prompt('Rename project:', proj.name)
+              if (newName && newName !== proj.name) {
+                try {
+                  await engine.renameSandboxProject(proj.id, newName)
+                  setProjects(prev => prev.map(p => p.id === proj.id ? { ...p, name: newName } : p))
+                } catch { /* best-effort */ }
+              }
+              setProjectContextMenu(null)
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-main hover:bg-gray-100"
+          >
+            <span className="material-symbols-outlined text-[14px]">edit</span>
+            Rename Project
+          </button>
+          <button
+            onClick={() => {
+              const proj = projectContextMenu.project
+              workspace.addViewerTab({
+                id: `sandbox-preview:${proj.id}`,
+                type: 'sandbox-preview' as import('@/pages/WorkspacePage').ViewerTabType,
+                label: proj.name,
+                icon: 'preview',
+                resourceId: proj.id,
+              })
+              setProjectContextMenu(null)
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-main hover:bg-gray-100"
+          >
+            <span className="material-symbols-outlined text-[14px]">preview</span>
+            Open Preview
+          </button>
         </div>
       )}
     </div>
