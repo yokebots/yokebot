@@ -460,6 +460,18 @@ export async function respondToMention(
 
   let needsWork = false
 
+  // Auto-create a task for this mention work so it's tracked and linked
+  let mentionTaskId: string | undefined
+  try {
+    const { createTask } = await import('./tasks.ts')
+    const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
+    const mentionTaskTitle = rawTitle.length > 120 ? rawTitle.slice(0, 120) + '...' : rawTitle || triggerMessage.content.slice(0, 120)
+    const mentionTask = await createTask(db, teamId, mentionTaskTitle, { status: 'in_progress', assignedAgentId: agentId })
+    mentionTaskId = mentionTask.id
+  } catch (err) {
+    console.error(`[scheduler] Failed to auto-create task for mention:`, err)
+  }
+
   // Broadcast typing immediately so user sees the indicator
   broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'typing')
 
@@ -491,7 +503,9 @@ export async function respondToMention(
         const parentMsg = await getMessage(db, replyParentId)
         if (!parentMsg || parentMsg.channelId !== channelId) replyParentId = undefined
       }
-      await sendMessage(db, channelId, 'agent', agent.id, reply, undefined, teamId, undefined, undefined, undefined, replyParentId, agent.modelId || undefined)
+      // Include task chip in ack message if task was created
+      const ackContent = mentionTaskId ? `@[${triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim().slice(0, 60)}](task:${mentionTaskId})\n\n${reply}` : reply
+      await sendMessage(db, channelId, 'agent', agent.id, ackContent, mentionTaskId, teamId, undefined, undefined, undefined, replyParentId, agent.modelId || undefined)
       await logActivity(db, 'mention_response', agent.id, `Replied to @mention: ${reply.slice(0, 150)}`, undefined, teamId)
 
       if (HOSTED_MODE && agent.modelId) {
@@ -594,18 +608,6 @@ export async function respondToMention(
     inFlightSprints.add(mentionKey)
     void markSprintStart(db, agentId)
 
-    // Auto-create a task for this mention work so it's tracked and linked
-    let mentionTaskId: string | undefined
-    try {
-      const { createTask } = await import('./tasks.ts')
-      // Strip @mention syntax from task title: @[Name](agent:id) → just the request text
-      const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
-      const mentionTaskTitle = rawTitle.length > 120 ? rawTitle.slice(0, 120) + '...' : rawTitle || triggerMessage.content.slice(0, 120)
-      const mentionTask = await createTask(db, teamId, mentionTaskTitle, { status: 'in_progress', assignedAgentId: agentId })
-      mentionTaskId = mentionTask.id
-    } catch (err) {
-      console.error(`[scheduler] Failed to auto-create task for mention:`, err)
-    }
 
     // Check if this agent has a routing profile for multi-phase execution
     const mentionRoutingProfile = getRoutingProfile(agent.templateId ?? '')

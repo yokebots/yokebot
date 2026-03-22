@@ -337,6 +337,16 @@ export function TaskDetail({ taskId, workspace, agents, onBack, onDeleted }: Tas
         {/* Status + Priority + Agent */}
         <div className="px-3 py-3 space-y-2.5 border-b border-border-subtle">
           {/* Status */}
+          {/* Quick Mark Done button */}
+          {task.status !== 'done' && task.status !== 'archived' && (
+            <button
+              onClick={() => updateField('status', 'done')}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-forest-green px-3 py-2 text-xs font-medium text-white hover:bg-forest-green/90 transition-colors mb-2"
+            >
+              <span className="material-symbols-outlined text-[16px]">check_circle</span>
+              Mark Done
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted w-14">Status</span>
             <select

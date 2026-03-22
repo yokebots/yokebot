@@ -406,9 +406,14 @@ export function TeamChat({ teamChannelId, onFileClick, onTaskClick, onAgentClick
       )}
 
       {/* Agent live progress panels — Gemini-style expandable reasoning */}
-      {agentStatuses.size > 0 && (
+      {/* Show when we have typing status OR progress events (either signal means agent is working) */}
+      {(agentStatuses.size > 0 || progressMap.size > 0) && (
         <div className="px-3 py-2 border-t border-border-subtle shrink-0 space-y-2">
-          {Array.from(agentStatuses.entries()).map(([agentId, { agentName, status }]) => {
+          {/* Merge agent IDs from both sources */}
+          {Array.from(new Set([...agentStatuses.keys(), ...progressMap.keys()])).map(agentId => {
+            const statusEntry = agentStatuses.get(agentId)
+            const agentName = statusEntry?.agentName ?? progressMap.get(agentId)?.[0]?.agentName ?? 'Agent'
+            const status = statusEntry?.status ?? 'working'
             const steps = progressMap.get(agentId)
             if (steps && steps.length > 0) {
               // Derive dynamic activity label from recent tool calls
