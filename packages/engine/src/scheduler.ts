@@ -717,6 +717,7 @@ export async function respondToMention(
         console.log(`[scheduler] "${agent.name}" posted mention follow-up`)
 
         // Auto-open sandbox preview on completion for builder tasks
+        console.log(`[scheduler] Follow-up check: taskCompleted=${result.taskCompleted}, mentionSandboxId=${mentionSandboxId ?? 'null'}`)
         if (result.taskCompleted && mentionSandboxId) {
           try {
             const { getSandboxProject: getProj } = await import('./sandbox.ts')
@@ -724,8 +725,13 @@ export async function respondToMention(
             if (proj) {
               const { broadcastSandboxPreview } = await import('./chat.ts')
               broadcastSandboxPreview(teamId, { projectId: proj.id, projectName: proj.name })
+              console.log(`[scheduler] Broadcast sandbox_preview for "${proj.name}"`)
+            } else {
+              console.log(`[scheduler] No project found for sandbox ID ${mentionSandboxId}`)
             }
-          } catch { /* best-effort */ }
+          } catch (err) {
+            console.error(`[scheduler] Failed to broadcast sandbox preview:`, (err as Error).message)
+          }
         }
       }
     }).catch(async (err) => {
