@@ -600,7 +600,7 @@ export function renderMentionContent(
   agentColorMap?: Map<string, { color: string; icon: string }>,
   onTaskClick?: (taskId: string) => void,
 ): React.ReactNode {
-  const regex = /@\[([^\]]+)\]\((agent|user|file|task|everyone):([^)]+)\)/g
+  const regex = /@\[([^\]]+)\]\((agent|user|file|task|everyone|sandbox):([^)]+)\)/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let match
@@ -675,6 +675,21 @@ export function renderMentionContent(
           >
             <span className="material-symbols-outlined text-[12px]">groups</span>
             @Everyone
+          </span>,
+        )
+        break
+      case 'sandbox':
+        parts.push(
+          <span
+            key={key}
+            className="inline-flex items-center align-middle gap-0.5 rounded bg-purple-100 text-purple-700 px-1 text-[13px] font-medium cursor-pointer hover:bg-purple-200"
+            onClick={() => {
+              // Dispatch custom event to open sandbox preview tab
+              window.dispatchEvent(new CustomEvent('yokebot:open-sandbox-preview', { detail: { projectId: id, projectName: displayName } }))
+            }}
+          >
+            <span className="material-symbols-outlined text-[12px]">preview</span>
+            {displayName}
           </span>,
         )
         break

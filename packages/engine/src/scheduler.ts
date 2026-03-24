@@ -692,13 +692,13 @@ export async function respondToMention(
       if (result.taskCompleted && (!cleanResponse || /still working|pick it back up|next check-in|need a bit more time/i.test(cleanResponse))) {
         const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
         const taskChip = mentionTaskId ? `@[${rawTitle.slice(0, 60)}](task:${mentionTaskId})` : ''
-        // Look up preview URL if this is a builder task
+        // Include sandbox project chip if this is a builder task
         let previewSuffix = ''
         if (mentionSandboxId) {
           try {
             const { getSandboxProject: getProj } = await import('./sandbox.ts')
             const proj = await getProj(db, mentionSandboxId)
-            if (proj?.previewUrl) previewSuffix = `\n\n**Preview:** [Open app](${proj.previewUrl})`
+            if (proj) previewSuffix = `\n\n**Preview:** @[${proj.name}](sandbox:${proj.id})`
           } catch { /* best-effort */ }
         }
         cleanResponse = `${taskChip} — Completed${previewSuffix}`

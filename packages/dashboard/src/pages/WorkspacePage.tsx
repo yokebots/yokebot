@@ -255,6 +255,24 @@ export function WorkspacePage() {
     })
   }, [])
 
+  // Listen for sandbox preview open requests from chat chips
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { projectId, projectName } = (e as CustomEvent).detail
+      if (projectId) {
+        addViewerTab({
+          id: `sandbox-preview:${projectId}`,
+          type: 'sandbox-preview',
+          label: projectName ?? 'Preview',
+          icon: 'preview',
+          resourceId: projectId,
+        })
+      }
+    }
+    window.addEventListener('yokebot:open-sandbox-preview', handler)
+    return () => window.removeEventListener('yokebot:open-sandbox-preview', handler)
+  }, [addViewerTab])
+
   // Open file/task from URL search params (e.g. from activity log clicks)
   useEffect(() => {
     const filePath = searchParams.get('file')
