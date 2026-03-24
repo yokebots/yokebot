@@ -468,6 +468,8 @@ export async function respondToMention(
     const mentionTaskTitle = rawTitle.length > 120 ? rawTitle.slice(0, 120) + '...' : rawTitle || triggerMessage.content.slice(0, 120)
     const mentionTask = await createTask(db, teamId, mentionTaskTitle, { status: 'in_progress', assignedAgentId: agentId })
     mentionTaskId = mentionTask.id
+    const { broadcastTaskEvent } = await import('./chat.ts')
+    broadcastTaskEvent(teamId, 'task_created', mentionTask.id)
   } catch (err) {
     console.error(`[scheduler] Failed to auto-create task for mention:`, err)
   }

@@ -69,6 +69,12 @@ export function broadcastSandboxPreview(teamId: string, data: { projectId: strin
   _onSandboxPreview?.(teamId, data)
 }
 
+let _onTaskEvent: ((teamId: string, event: string, data: { taskId: string }) => void) | null = null
+export function setTaskEventBroadcast(fn: typeof _onTaskEvent): void { _onTaskEvent = fn }
+export function broadcastTaskEvent(teamId: string, event: 'task_created' | 'task_updated', taskId: string): void {
+  _onTaskEvent?.(teamId, event, { taskId })
+}
+
 export function broadcastAgentStatus(teamId: string, channelId: string, agentId: string, agentName: string, status: 'typing' | 'working' | 'idle'): void {
   console.log(`[chat] Agent status: ${agentName} → ${status}`)
   _onAgentTyping?.(teamId, { channelId, agentId, agentName, status })

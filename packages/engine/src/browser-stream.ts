@@ -247,9 +247,20 @@ async function startStreamProxy(
 
   // Wait for CDP connection
   await new Promise<void>((resolve, reject) => {
-    cdpWs.on('open', resolve)
-    cdpWs.on('error', reject)
+    cdpWs.on('open', () => {
+      console.log(`[browser-stream] CDP WebSocket connected for session ${sessionId}`)
+      resolve()
+    })
+    cdpWs.on('error', (err) => {
+      console.error(`[browser-stream] CDP WebSocket error for session ${sessionId}:`, (err as Error).message)
+      reject(err)
+    })
     setTimeout(() => reject(new Error('CDP connection timeout')), 5000)
+  }).catch((err) => {
+    console.error(`[browser-stream] CDP connection failed for session ${sessionId}:`, (err as Error).message)
+    sendToClient(clientWs, { type: 'error', message: `CDP connection failed: ${(err as Error).message}` })
+    clientWs.close()
+    return
   })
 
   // Helper to send CDP command and await result
@@ -483,14 +494,16 @@ async function startStreamProxy(
     }, 100)
   })
 
-  cdpWs.on('close', () => {
+  cdpWs.on('close', (code, reason) => {
+    console.log(`[browser-stream] CDP WebSocket closed for session ${sessionId}: code=${code} reason=${reason?.toString() ?? ''}`)
     if (clientWs.readyState === WebSocket.OPEN) {
-      sendToClient(clientWs, { type: 'error', message: 'Browser session ended' })
+      sendToClient(clientWs, { type: 'error', message: 'Browser session ended', code: 'SESSION_NOT_FOUND' })
       clientWs.close()
     }
   })
 
-  cdpWs.on('error', () => {
+  cdpWs.on('error', (err) => {
+    console.error(`[browser-stream] CDP WebSocket error mid-stream for session ${sessionId}:`, (err as Error).message)
     if (clientWs.readyState === WebSocket.OPEN) {
       sendToClient(clientWs, { type: 'error', message: 'CDP connection error' })
       clientWs.close()

@@ -69,12 +69,13 @@ async function main() {
       })
     }
 
-    const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast, setFileWrittenBroadcast, setSandboxPreviewBroadcast } = await import('./chat.ts')
+    const { setNewMessageBroadcast, setAgentTypingBroadcast, setAgentProgressBroadcast, setFileWrittenBroadcast, setSandboxPreviewBroadcast, setTaskEventBroadcast } = await import('./chat.ts')
     setAgentTypingBroadcast((teamId, data) => relay('agent_typing', teamId, data))
     setAgentProgressBroadcast((teamId, data) => relay('agent_progress', teamId, data))
     setNewMessageBroadcast((teamId, channelId, messageId) => relay('new_message', teamId, { channelId, messageId }))
     setFileWrittenBroadcast((teamId, path) => relay('file_written', teamId, { path }))
     setSandboxPreviewBroadcast((teamId, data) => relay('sandbox_preview', teamId, data))
+    setTaskEventBroadcast((teamId, event, data) => relay(event, teamId, data))
     console.log('[worker] Broadcast relay configured → API server')
   }
 

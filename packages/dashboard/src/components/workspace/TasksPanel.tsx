@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { TaskDetail } from './TaskDetail'
 import TagFilterBar from '@/components/TagFilterBar'
 import { useAgentProgress } from '@/hooks/useAgentProgress'
+import { useRealtimeEvent } from '@/lib/use-realtime'
 import type { AgentProgressEvent } from '@/hooks/useAgentProgress'
 import type { WorkspaceState } from '@/pages/WorkspacePage'
 import { useAuth } from '@/lib/auth'
@@ -128,6 +129,10 @@ export function TasksPanel({ workspace, unreadTaskIds, agents }: TasksPanelProps
   }, [filterAgent, filterMyTasks, filterTags, filterTypeTab, user?.id])
 
   useEffect(() => { loadTasks() }, [loadTasks])
+
+  // Real-time task list updates — refresh when tasks are created or updated
+  useRealtimeEvent('task_created', () => { loadTasks() })
+  useRealtimeEvent('task_updated', () => { loadTasks() })
 
   const switchView = (v: 'list' | 'kanban') => {
     setView(v)

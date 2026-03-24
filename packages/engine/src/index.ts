@@ -653,6 +653,10 @@ async function main() {
     setSandboxPreviewBroadcast((teamId, data) => {
       broadcastToTeam(teamId, 'sandbox_preview', data)
     })
+    const { setTaskEventBroadcast } = await import('./chat.ts')
+    setTaskEventBroadcast((teamId, event, data) => {
+      broadcastToTeam(teamId, event, data)
+    })
 
     const { setNotificationBroadcast } = await import('./notifications.ts')
     setNotificationBroadcast((userId, count) => {
@@ -1102,6 +1106,7 @@ async function main() {
     }
 
     const task = await createTask(db, teamId, body.title, body)
+    broadcastToTeam(teamId, 'task_created', { taskId: task.id })
     res.status(201).json(task)
   })
 
@@ -1154,6 +1159,7 @@ async function main() {
         } catch (err) { console.error('[tasks] Failed to auto-unblock parent:', err) }
       }
     }
+    broadcastToTeam(teamId, 'task_updated', { taskId: req.params.id })
     res.json(task)
   })
 
