@@ -336,7 +336,14 @@ async function main() {
         const resolved = resolveProxyToken(req as unknown as Request)
         if (!contentType.includes('text/html') || !resolved) {
           // Non-HTML or no token: copy status + headers and pipe through
-          res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers)
+          // Strip framing-restrictive headers so iframe embedding works
+          const passHeaders = { ...proxyRes.headers }
+          delete passHeaders['x-frame-options']
+          if (typeof passHeaders['content-security-policy'] === 'string') {
+            passHeaders['content-security-policy'] = passHeaders['content-security-policy']
+              .replace(/frame-ancestors\s+[^;]+;?\s*/gi, '')
+          }
+          res.writeHead(proxyRes.statusCode ?? 200, passHeaders)
           proxyRes.pipe(res)
           return
         }
@@ -350,8 +357,14 @@ async function main() {
           // Inject visual editor bridge script before </body>
           html = html.replace('</body>', `<script src="/api/sandbox/yokebot-editor.js"></script>\n</body>`)
           // Copy headers but fix content-length since we modified the body
+          // Strip framing-restrictive headers so iframe embedding works
           const headers = { ...proxyRes.headers }
           delete headers['content-length']
+          delete headers['x-frame-options']
+          if (typeof headers['content-security-policy'] === 'string') {
+            headers['content-security-policy'] = headers['content-security-policy']
+              .replace(/frame-ancestors\s+[^;]+;?\s*/gi, '')
+          }
           res.writeHead(proxyRes.statusCode ?? 200, headers)
           res.end(html)
         })
@@ -5069,6 +5082,10 @@ ${truncated}`,
 
   // WebSocket upgrade handler for Vite HMR through the sandbox proxy
   server.on('upgrade', (req, socket, head) => {
+    // Skip browser-stream URLs — those are handled by installBrowserStreamHandler above
+    const upgradeUrl = new URL(req.url ?? '', 'http://localhost')
+    if (upgradeUrl.pathname.startsWith('/api/browser-sessions/')) return
+
     const cookieHeader = req.headers.cookie ?? ''
     const cookieToken = cookieHeader.split(';').map((c: string) => c.trim()).find((c: string) => c.startsWith('spt='))?.slice(4)
     if (cookieToken && proxyTokenStore.has(cookieToken)) {

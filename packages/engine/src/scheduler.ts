@@ -617,6 +617,7 @@ export async function respondToMention(
     // Resolve sandbox project for builder agents (same logic as heartbeat flow)
     let mentionSandboxDir: string | undefined
     let mentionSandboxId: string | undefined
+    let mentionIsEdit = false
     const sandboxTemplates = new Set(['builder-bot', 'game-dev', 'full-stack-dev', 'frontend-dev', 'backend-dev'])
     if (mentionTaskId && sandboxTemplates.has(agent.templateId ?? '')) {
       try {
@@ -634,6 +635,7 @@ export async function respondToMention(
 
           if (isEditRequest && existing.length > 0) {
             // Reuse the most recent project
+            mentionIsEdit = true
             const latest = existing[0]
             mentionSandboxDir = latest.directory
             mentionSandboxId = latest.id
@@ -656,11 +658,17 @@ export async function respondToMention(
       }
     }
 
+    // Detect edit intent for non-sandbox agents too (universal agents editing workspace files, etc.)
+    if (!mentionIsEdit) {
+      const editPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise/i
+      mentionIsEdit = editPattern.test(triggerMessage.content)
+    }
+
     const mentionPromise = mentionRoutingProfile
       ? runRoutedSprint(
           db, agent, { id: mentionTaskId ?? `mention-${Date.now()}`, title: triggerMessage.content, description: null },
           mentionRoutingProfile, systemPrompt, mentionIterations, broadcastFileWritten,
-          mentionSandboxDir, mentionSandboxId,
+          mentionSandboxDir, mentionSandboxId, mentionIsEdit,
         ).then(r => ({ response: r.response, iterations: r.totalIterations, taskCompleted: r.taskCompleted }))
       : (() => {
           const mentionBoosts = detectTaskCategories(triggerMessage.content, '')
@@ -1061,6 +1069,7 @@ async function runRoutedSprint(
   onFileWritten?: (teamId: string, path: string) => void,
   sandboxProjectDir?: string,
   sandboxProjectId?: string,
+  isEdit?: boolean,
 ): Promise<{ totalIterations: number; response: string | null; taskCompleted: boolean; taskBlocked: boolean; phaseResults: PhaseResult[] }> {
   const teamId = agent.teamId
 
@@ -1069,13 +1078,14 @@ async function runRoutedSprint(
   const installedSkills = (await getAgentSkills(db, agent.id)).map(s => s.skillName)
   let plan: { phases: string[]; skillOverrides?: Record<string, string[]> }
   try {
-    plan = await runOrchestrator(db, profile, task.title, task.description, teamId, installedSkills.length > 0 ? installedSkills : undefined)
+    plan = await runOrchestrator(db, profile, task.title, task.description, teamId, installedSkills.length > 0 ? installedSkills : undefined, isEdit)
   } catch (err) {
     // FP-15 fix: fall back to running all phases from the profile instead of killing the sprint
-    console.warn(`[routing] Orchestrator failed for "${agent.name}": ${(err as Error).message} — falling back to all phases`)
-    plan = { phases: profile.phases.map(p => p.name) }
+    const phases = (isEdit && profile.editPhases) ? profile.editPhases : profile.phases
+    console.warn(`[routing] Orchestrator failed for "${agent.name}": ${(err as Error).message} — falling back to all ${isEdit ? 'edit' : 'build'} phases`)
+    plan = { phases: phases.map(p => p.name) }
   }
-  console.log(`[routing] "${agent.name}" — orchestrator planned: [${plan.phases.join(', ')}]`)
+  console.log(`[routing] "${agent.name}" — orchestrator planned: [${plan.phases.join(', ')}]${isEdit ? ' (edit mode)' : ''}`)
 
   // Step 2: Execute each phase sequentially
   const phaseResults: PhaseResult[] = []
@@ -1084,8 +1094,10 @@ async function runRoutedSprint(
   let taskCompleted = false
   let taskBlocked = false
 
+  const activePhaseDefs = (isEdit && profile.editPhases) ? profile.editPhases : profile.phases
+
   for (const phaseName of plan.phases) {
-    const phase = profile.phases.find(p => p.name === phaseName)
+    const phase = activePhaseDefs.find(p => p.name === phaseName)
     if (!phase) continue
 
     const remainingBudget = maxBudget - totalIterations
@@ -1097,21 +1109,23 @@ async function runRoutedSprint(
     const phaseMaxIters = Math.min(phase.maxIterations, remainingBudget)
 
     // Look up preview URL for review/browser phases so the model knows where to look
+    // Always generate a fresh signed URL — stored URLs expire and Daytona redirects to login
     let previewUrl: string | undefined
     if (sandboxProjectId && phase.toolCategories.includes('browser')) {
       try {
         const { getSandboxProject, getPreviewUrl, updateSandboxProject } = await import('./sandbox.ts')
         const project = await getSandboxProject(db, sandboxProjectId)
-        if (project?.previewUrl) {
-          previewUrl = project.previewUrl
-        } else if (project?.devPort) {
-          // No preview URL stored — generate one from the project's port
+        if (project?.devPort) {
           try {
             const url = await getPreviewUrl(db, teamId, project.devPort)
             previewUrl = url
             await updateSandboxProject(db, sandboxProjectId, { previewUrl: url })
-            console.log(`[routing] Generated preview URL for "${project.name}" on port ${project.devPort}`)
+            console.log(`[routing] Fresh signed preview URL for "${project.name}" on port ${project.devPort}`)
           } catch { /* sandbox might not be running */ }
+        }
+        // Fall back to stored URL only if we couldn't generate a fresh one
+        if (!previewUrl && project?.previewUrl) {
+          previewUrl = project.previewUrl
         }
       } catch { /* best-effort */ }
     }
@@ -1408,12 +1422,16 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
           let result: { iterations: number; response: string | null; taskCompleted?: boolean; taskBlocked?: boolean }
 
+          // Detect edit intent from task title + description
+          const editPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise/i
+          const taskIsEdit = editPattern.test(task.title) || (task.description ? editPattern.test(task.description) : false)
+
           // ---- Dynamic model routing: multi-phase sprint ----
           if (routingProfile) {
             const routedResult = await runRoutedSprint(
               db, agent, task, routingProfile, systemPrompt,
               remainingBudget, broadcastFileWritten,
-              sandboxProjectDir, sandboxProjectId,
+              sandboxProjectDir, sandboxProjectId, taskIsEdit,
             )
             result = { iterations: routedResult.totalIterations, response: routedResult.response, taskCompleted: routedResult.taskCompleted, taskBlocked: routedResult.taskBlocked }
 
@@ -1576,11 +1594,14 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
               let result: { iterations: number; response: string | null; taskCompleted?: boolean; taskBlocked?: boolean }
 
+              const subEditPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise/i
+              const subTaskIsEdit = subEditPattern.test(task.title) || (task.description ? subEditPattern.test(task.description) : false)
+
               if (routingProfile) {
                 const routedResult = await runRoutedSprint(
                   db, agent, task, routingProfile, systemPrompt,
                   remainingBudget, broadcastFileWritten,
-                  subSandboxProjectDir, subSandboxProjectId,
+                  subSandboxProjectDir, subSandboxProjectId, subTaskIsEdit,
                 )
                 result = { iterations: routedResult.totalIterations, response: routedResult.response, taskCompleted: routedResult.taskCompleted, taskBlocked: routedResult.taskBlocked }
               } else {

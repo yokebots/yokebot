@@ -31,6 +31,9 @@ export interface RoutingProfile {
   orchestratorModelId: string
   phases: PhaseConfig[]
   orchestratorPrompt: string
+  /** Optional edit-mode phases — used when modifying existing work instead of building from scratch */
+  editPhases?: PhaseConfig[]
+  editOrchestratorPrompt?: string
 }
 
 export interface PhasePlan {
@@ -184,7 +187,88 @@ You MUST make at least 2 browser calls (navigate + snapshot). Do NOT mark the ta
 CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is still broken, describe the issue and call update_task with status "blocked".`,
       },
     ],
+    editOrchestratorPrompt: `You are a task planner for editing an existing web app. Given a fix/edit task, decide which phases are needed.
+
+Available phases:
+- "research": Browse the preview URL and read existing code to understand what's broken or needs changing. ALWAYS needed for edits.
+- "build": Make targeted code changes to fix/edit the app. ALWAYS needed.
+- "review": Browse the preview URL after changes to verify the fix works. ALWAYS needed.
+
+Respond with JSON only: {"phases": ["research", "build", "review"], "reasoning": "one sentence"}
+
+Rules:
+- "research" is always required for edits — you MUST look at the current state before changing anything
+- "build" is always required
+- "review" is always required — verify your fix works
+- Do NOT include "plan" or "design" — those are for new builds only
+- Do NOT add phases not in the list above`,
+    editPhases: [
+      {
+        name: 'research',
+        modelId: 'deepseek-v3.2',
+        fallbackModelId: 'step-3.5-flash',
+        maxIterations: 8,
+        toolCategories: ['core', 'browser', 'sandbox'],
+        skillFilter: [],
+        systemInstruction: `You are editing an EXISTING app, not building a new one. Your job is to diagnose what needs to change.
+
+Step 1: Browse the preview URL to see the current state of the app. Take a browser_snapshot to understand what's visible.
+Step 2: Read the existing source code using sandbox_read_file to understand the current implementation. Start with the main entry point and follow imports.
+Step 3: Identify exactly what needs to change and why.
+
+Output a clear diagnosis:
+- **Current behavior:** What the app does now
+- **Expected behavior:** What the user wants
+- **Root cause:** Why the current behavior differs
+- **Files to change:** Exact file paths and what to modify in each
+
+Do NOT write code yet. Do NOT create new projects. Do NOT use sandbox_setup. Diagnose only.`,
+        required: true,
+      },
+      {
+        name: 'build',
+        modelId: 'mimo-v2-pro',
+        fallbackModelId: 'deepseek-v3.2',
+        maxIterations: 15,
+        toolCategories: ['core', 'sandbox', 'tasks'],
+        skillFilter: [],
+        systemInstruction: `You are making TARGETED edits to an existing app. Do NOT rebuild from scratch. Do NOT call sandbox_setup.
+
+Use sandbox_write_file or sandbox_write_files to update ONLY the files that need to change based on the research phase diagnosis.
+
+Rules:
+- Preserve all existing functionality that isn't being changed
+- Make the minimum changes needed to fix the issue
+- Do NOT rewrite entire files unless absolutely necessary — change only the relevant sections
+- Do NOT change the project structure, framework, or dependencies unless the fix requires it
+- If the research phase identified specific files and changes, follow that plan exactly`,
+        required: true,
+      },
+      {
+        name: 'review',
+        modelId: 'deepseek-v3.2',
+        maxIterations: 8,
+        toolCategories: ['core', 'browser', 'sandbox', 'tasks'],
+        skillFilter: [],
+        systemInstruction: `Verify that your edits fixed the issue. You MUST browse the preview URL.
+
+Step 1: Call browser_navigate with the preview URL.
+Step 2: Take a browser_snapshot to see the result.
+Step 3: Test the specific thing that was broken/changed — click buttons, check layouts, verify data.
+Step 4: If still broken, make a targeted fix with sandbox_write_files, then browse again.
+Step 5: When the fix is verified, call update_task with status "done".
+
+You MUST make at least 2 browser calls. Do NOT mark done without visually verifying.
+
+CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is still broken, describe the issue and call update_task with status "blocked".`,
+      },
+    ],
   },
+
+  // ===== BuilderBot edit phases (research → build → review) =====
+  // When editing/fixing an existing project, skip plan + design and use targeted prompts.
+  // The research phase MUST browse the preview + read existing code to diagnose the issue.
+  // Defined inline above via editPhases on the builder-bot profile.
 
   // ===== Universal agent profile (research → execute → deliver) =====
   // Used by non-builder agents: ContentBot, ProspectorBot, AdvisorBot, ReputationBot, etc.
@@ -232,6 +316,51 @@ If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SE
         required: true,
       },
     ],
+    editPhases: [
+      {
+        name: 'research',
+        modelId: 'step-3.5-flash',
+        fallbackModelId: 'deepseek-v3.2',
+        maxIterations: 6,
+        toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+        skillFilter: undefined as string[] | undefined,
+        systemInstruction: `You are editing/fixing EXISTING work, not starting fresh. Research what currently exists and what needs to change.
+
+Read the relevant workspace files, check existing data, and understand the current state before making changes. If the task references something visible (a page, report, etc.), browse it first.
+
+Output a clear diagnosis:
+- **Current state:** What exists now
+- **Requested change:** What the user wants different
+- **What to modify:** Specific files, data, or content that need to change
+
+Do NOT do the actual work yet — diagnose only.`,
+        required: true,
+      },
+      {
+        name: 'execute',
+        modelId: 'deepseek-v3.2',
+        maxIterations: 12,
+        toolCategories: ['core', 'workspace', 'tasks', 'chat', 'data', 'browser', 'skills'] as ToolCategory[],
+        skillFilter: undefined as string[] | undefined,
+        systemInstruction: `Make TARGETED changes based on your research. Do NOT redo work that already exists.
+
+- Only modify what needs to change
+- Preserve everything that's working correctly
+- If updating a document, edit the specific sections — don't rewrite the entire thing
+- If fixing data, update the specific records — don't regenerate all data`,
+        required: true,
+      },
+      {
+        name: 'deliver',
+        modelId: 'mimo-v2-flash',
+        fallbackModelId: 'deepseek-v3.2',
+        maxIterations: 3,
+        toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
+        skillFilter: [] as string[],
+        systemInstruction: `Summarize what was changed. Post to team chat using the respond tool — describe what was fixed/edited and verify the change looks correct. Then call update_task with status "done".`,
+        required: true,
+      },
+    ],
   } as RoutingProfile)),
 ]
 
@@ -257,12 +386,15 @@ export async function runOrchestrator(
   taskDescription: string | null,
   _teamId: string,
   _installedSkills?: string[],
+  isEdit?: boolean,
 ): Promise<PhasePlan> {
-  // Deterministic: always run all phases defined in the profile
-  const allPhaseNames = profile.phases.map(p => p.name)
-  console.log(`[routing] Orchestrator plan: [${allPhaseNames.join(', ')}] — all phases`)
+  // Select edit phases when available and this is an edit/fix request
+  const phases = (isEdit && profile.editPhases) ? profile.editPhases : profile.phases
+  const mode = (isEdit && profile.editPhases) ? 'edit' : 'build'
+  const allPhaseNames = phases.map(p => p.name)
+  console.log(`[routing] Orchestrator plan: [${allPhaseNames.join(', ')}] — ${mode} mode`)
 
-  return { phases: allPhaseNames, reasoning: 'all phases', skillOverrides: {} }
+  return { phases: allPhaseNames, reasoning: `${mode} mode — all ${mode} phases`, skillOverrides: {} }
 }
 
 /**
