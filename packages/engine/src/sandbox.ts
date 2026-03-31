@@ -139,13 +139,15 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
         sessions.set(teamId, session)
 
         // Re-run ALL project startup commands after resume (not just the last one)
+        // Redirect output to /dev/null to avoid flooding Railway's 500 logs/sec limit.
         if (wasResumed) {
           try {
             const projects = await listSandboxProjects(db, teamId)
             for (const project of projects) {
               if (project.startupCommand) {
-                console.log(`[sandbox] Re-starting "${project.name}" on port ${project.devPort}: ${project.startupCommand}`)
-                await session.sandbox.process.executeCommand(project.startupCommand, undefined, undefined, 15).catch(() => {})
+                console.log(`[sandbox] Re-starting "${project.name}" on port ${project.devPort}`)
+                const silentCmd = project.startupCommand.replace(/ &$/, ' > /dev/null 2>&1 &')
+                await session.sandbox.process.executeCommand(silentCmd, undefined, undefined, 15).catch(() => {})
               }
             }
           } catch (err) {
@@ -710,18 +712,16 @@ export async function startProjectDevServer(db: Db, teamId: string, projectId: s
     ?? `cd ${project.directory} && npm run dev -- --host 0.0.0.0 --port ${port} &`
 
   // Ensure dependencies are installed before starting.
-  // Always run `npm install` — it's fast (~2s) when deps are already satisfied,
-  // and catches corrupted node_modules that `[ -d node_modules ]` alone would miss.
+  // Redirect output to /dev/null to avoid flooding Railway's 500 logs/sec limit.
   console.log(`[sandbox] Ensuring deps for "${project.name}" in ${project.directory}`)
-  const installResult = await execCommand(db, teamId, `cd ${project.directory} && npm install`)
+  const installResult = await execCommand(db, teamId, `cd ${project.directory} && npm install > /dev/null 2>&1`)
   if (installResult.exitCode !== 0) {
-    // node_modules corrupted or lock file stale — nuke and reinstall from scratch
     console.log(`[sandbox] npm install failed, force-reinstalling deps for "${project.name}"...`)
-    await execCommand(db, teamId, `cd ${project.directory} && rm -rf node_modules package-lock.json && npm install`)
+    await execCommand(db, teamId, `cd ${project.directory} && rm -rf node_modules package-lock.json && npm install > /dev/null 2>&1`)
   }
 
-  console.log(`[sandbox] Starting dev server for "${project.name}" on port ${port}: ${startCmd}`)
-  await execCommand(db, teamId, startCmd)
+  console.log(`[sandbox] Starting dev server for "${project.name}" on port ${port}`)
+  await execCommand(db, teamId, startCmd.replace(/ &$/, ' > /dev/null 2>&1 &'))
 
   // Save the startup command for future use if it wasn't stored
   if (!project.startupCommand) {

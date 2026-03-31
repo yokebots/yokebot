@@ -1949,12 +1949,21 @@ export async function getAgentBrowserScreenshot(agentId: string): Promise<{ scre
 
 /** Build a WebSocket URL for CDP Screencast streaming. */
 export async function getBrowserStreamUrl(sessionId: string): Promise<string> {
-  // Use the same token source as all other API calls.
-  // Previously this tried refreshSession() which fails in many scenarios
-  // (e.g. expired refresh token, test users, stale Supabase client state),
-  // resulting in an empty token and a blank browser viewer.
-  const token = await getToken() ?? ''
-  const wsBase = ENGINE_URL.replace(/^http/, 'ws')
+  // Force a fresh token for WebSocket connections — the cached token may be stale
+  // or the JWKS key on the server may not be warmed up yet after a deploy.
+  // WebSocket connections are infrequent so the extra getSession() call is fine.
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token ?? ''
+  if (data.session) {
+    // Update the cache while we're at it
+    _cachedToken = data.session.access_token
+    _cachedTokenExp = Date.now() + 4 * 60 * 1000
+  }
+  // Use the Railway direct domain for WebSocket connections, NOT the custom domain.
+  // Custom domains (api.yokebot.com) route through Fastly CDN which does NOT support
+  // WebSocket passthrough. The *.up.railway.app domain bypasses Fastly.
+  const wsEngineUrl = import.meta.env.VITE_WS_ENGINE_URL ?? ENGINE_URL
+  const wsBase = wsEngineUrl.replace(/^http/, 'ws')
   return `${wsBase}/api/browser-sessions/${sessionId}/stream?token=${encodeURIComponent(token)}`
 }
 

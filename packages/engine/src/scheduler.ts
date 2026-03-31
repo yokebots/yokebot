@@ -1108,24 +1108,44 @@ async function runRoutedSprint(
 
     const phaseMaxIters = Math.min(phase.maxIterations, remainingBudget)
 
-    // Look up preview URL for review/browser phases so the model knows where to look
-    // Always generate a fresh signed URL — stored URLs expire and Daytona redirects to login
+    // Look up preview URL for browser phases.
+    // 1. Ensure the dev server is running (it may have stopped after sandbox idle/archive)
+    // 2. Generate a proxy URL through the engine — NOT the raw Daytona URL.
+    //    The engine proxy adds X-Daytona-Skip-Preview-Warning to bypass the interstitial.
+    //    The agent's Chromium browser doesn't add this header, so raw URLs show a warning page.
     let previewUrl: string | undefined
     if (sandboxProjectId && phase.toolCategories.includes('browser')) {
       try {
-        const { getSandboxProject, getPreviewUrl, updateSandboxProject } = await import('./sandbox.ts')
+        const { getSandboxProject, getPreviewUrl, startProjectDevServer, updateSandboxProject } = await import('./sandbox.ts')
         const project = await getSandboxProject(db, sandboxProjectId)
         if (project?.devPort) {
+          // Ensure dev server is running
           try {
-            const url = await getPreviewUrl(db, teamId, project.devPort)
-            previewUrl = url
-            await updateSandboxProject(db, sandboxProjectId, { previewUrl: url })
-            console.log(`[routing] Fresh signed preview URL for "${project.name}" on port ${project.devPort}`)
-          } catch { /* sandbox might not be running */ }
-        }
-        // Fall back to stored URL only if we couldn't generate a fresh one
-        if (!previewUrl && project?.previewUrl) {
-          previewUrl = project.previewUrl
+            await startProjectDevServer(db, teamId, sandboxProjectId)
+            console.log(`[routing] Dev server started/verified for "${project.name}" on port ${project.devPort}`)
+          } catch (err) {
+            console.log(`[routing] Dev server start failed for "${project.name}": ${(err as Error).message}`)
+          }
+
+          // Generate a proxy token and URL through the engine
+          try {
+            const signedUrl = await getPreviewUrl(db, teamId, project.devPort)
+            await updateSandboxProject(db, sandboxProjectId, { previewUrl: signedUrl })
+            // Create a proxy token so the agent browses through the engine proxy
+            const token = `spt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+            const proxyTokenStore = (globalThis as Record<string, unknown>).__proxyTokenStore as Map<string, { teamId: string; signedUrl: string; expires: number }> | undefined
+            if (proxyTokenStore) {
+              proxyTokenStore.set(token, { teamId, signedUrl, expires: Date.now() + 4 * 3600_000 })
+            }
+            // Build the full proxy URL the agent should browse
+            const engineUrl = process.env.RAILWAY_STATIC_URL
+              ? `https://${process.env.RAILWAY_STATIC_URL}`
+              : `http://localhost:${process.env.PORT || 3001}`
+            previewUrl = `${engineUrl}/api/sandbox/proxy/${token}/`
+            console.log(`[routing] Proxy preview URL for "${project.name}": /api/sandbox/proxy/${token}/`)
+          } catch (err) {
+            console.log(`[routing] Failed to generate proxy preview URL: ${(err as Error).message}`)
+          }
         }
       } catch { /* best-effort */ }
     }

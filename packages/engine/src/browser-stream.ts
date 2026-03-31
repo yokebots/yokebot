@@ -289,6 +289,43 @@ async function startStreamProxy(
     cdpWs.send(JSON.stringify({ id: nextCdpId(), method, params, sessionId: cdpSessionId }))
   }
 
+  // Handle CDP connection drop — notify client so it can reconnect
+  cdpWs.on('close', (code, reason) => {
+    console.log(`[browser-stream] CDP WebSocket closed for session ${sessionId}: code=${code} reason=${reason?.toString() ?? ''}`)
+    sendToClient(clientWs, { type: 'error', message: 'Browser connection lost — reconnecting...', code: 'CDP_CLOSED' })
+    // Try to reconnect to CDP after a brief delay
+    setTimeout(async () => {
+      try {
+        const newCdpUrl = getSessionCdpUrl(sessionId)
+        if (!newCdpUrl) {
+          sendToClient(clientWs, { type: 'error', message: 'Browser session has ended', code: 'SESSION_NOT_FOUND' })
+          clientWs.close(4004, 'Session ended')
+          return
+        }
+        // If the session is still alive, close the client and let it reconnect
+        // (simpler than trying to re-establish CDP inline)
+        clientWs.close(4001, 'CDP reconnect')
+      } catch { /* best effort */ }
+    }, 500)
+  })
+
+  cdpWs.on('error', (err) => {
+    console.error(`[browser-stream] CDP WebSocket error for session ${sessionId}:`, (err as Error).message)
+  })
+
+  // Keepalive ping every 30s to prevent Railway/proxy from killing the connection
+  const keepaliveInterval = setInterval(() => {
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.ping()
+    } else {
+      clearInterval(keepaliveInterval)
+    }
+  }, 30_000)
+
+  clientWs.on('close', () => {
+    clearInterval(keepaliveInterval)
+  })
+
   // Handle CDP messages
   cdpWs.on('message', (data) => {
     try {
@@ -368,15 +405,29 @@ async function startStreamProxy(
     console.log(`[browser-stream] Screencast started for session ${sessionId}`)
   }
 
-  // Re-attach after cross-origin navigation
+  // Re-attach after cross-origin navigation (with retries for complex redirects)
+  let reattaching = false
   async function reattachToPage(): Promise<void> {
-    // Wait a moment for the new target to settle
-    await new Promise(r => setTimeout(r, 200))
-    // Find the new page target
+    if (reattaching) return // prevent concurrent reattach attempts
+    reattaching = true
     try {
-      pageTargetId = await getPageTargetId(cdpWsUrl)
-    } catch { /* use whatever pageTargetId we last saw */ }
-    await attachToPage()
+      for (let attempt = 0; attempt < 3; attempt++) {
+        // Wait for the new target to settle — longer for subsequent attempts
+        await new Promise(r => setTimeout(r, 300 + attempt * 500))
+        try {
+          pageTargetId = await getPageTargetId(cdpWsUrl)
+          await attachToPage()
+          console.log(`[browser-stream] Re-attached to page target on attempt ${attempt + 1}`)
+          return
+        } catch (err) {
+          console.log(`[browser-stream] Reattach attempt ${attempt + 1} failed: ${(err as Error).message}`)
+        }
+      }
+      console.log(`[browser-stream] All reattach attempts failed for session ${sessionId}`)
+      sendToClient(clientWs, { type: 'error', message: 'Lost page target — try refreshing the browser panel' })
+    } finally {
+      reattaching = false
+    }
   }
 
   // Listen for target lifecycle events at the browser level
@@ -494,21 +545,8 @@ async function startStreamProxy(
     }, 100)
   })
 
-  cdpWs.on('close', (code, reason) => {
-    console.log(`[browser-stream] CDP WebSocket closed for session ${sessionId}: code=${code} reason=${reason?.toString() ?? ''}`)
-    if (clientWs.readyState === WebSocket.OPEN) {
-      sendToClient(clientWs, { type: 'error', message: 'Browser session ended', code: 'SESSION_NOT_FOUND' })
-      clientWs.close()
-    }
-  })
-
-  cdpWs.on('error', (err) => {
-    console.error(`[browser-stream] CDP WebSocket error mid-stream for session ${sessionId}:`, (err as Error).message)
-    if (clientWs.readyState === WebSocket.OPEN) {
-      sendToClient(clientWs, { type: 'error', message: 'CDP connection error' })
-      clientWs.close()
-    }
-  })
+  // Note: cdpWs close/error handlers are registered earlier in this function
+  // (before the CDP message handler) so they can trigger reconnection logic.
 }
 
 /** Get the first page's target ID from the browser endpoint. */

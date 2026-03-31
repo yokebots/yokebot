@@ -153,16 +153,13 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
     return () => window.removeEventListener('yokebot:agent-progress', handler as EventListener)
   }, [url])
 
-  // Reset iframe loaded state when URL changes
+  // Reset iframe loaded state when URL changes, with timeout fallback
   useEffect(() => {
     setIframeLoaded(false)
-  }, [url])
-
-  // Auto-refresh iframe when URL is set or changes
-  useEffect(() => {
-    if (url && iframeRef.current) {
-      // Force reload by re-setting src (handles cases where iframe shows blank)
-      iframeRef.current.src = url
+    // Fallback: if onLoad never fires (slow/partial response), clear overlay after 8s
+    if (url) {
+      const timeout = setTimeout(() => setIframeLoaded(true), 8000)
+      return () => clearTimeout(timeout)
     }
   }, [url])
 
