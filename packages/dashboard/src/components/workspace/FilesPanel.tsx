@@ -149,10 +149,12 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
     setCreatingBrowser(true)
     try {
       const result = await engine.createBrowserSession()
+      // Count existing browser tabs to generate unique label
+      const browserTabCount = workspace.viewerTabs.filter(t => t.type === 'browser').length
       workspace.addViewerTab({
         id: `browser:${result.sessionId}`,
         type: 'browser',
-        label: 'Browser',
+        label: browserTabCount > 0 ? `Browser ${browserTabCount + 1}` : 'Browser',
         icon: 'language',
         resourceId: result.sessionId,
       })

@@ -105,7 +105,7 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
                 <DataTableViewer tableId={activeTab.resourceId} />
               )}
               {activeTab?.type === 'browser' && (
-                <BrowserPanel sessionId={activeTab.resourceId} />
+                <BrowserPanel key={activeTab.resourceId} sessionId={activeTab.resourceId} />
               )}
               {activeTab?.type === 'workflow' && (
                 <WorkflowViewer workflowId={activeTab.resourceId} workspace={workspace} />
