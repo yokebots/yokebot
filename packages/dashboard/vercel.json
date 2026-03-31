@@ -1,6 +1,9 @@
 {
   "rewrites": [
-    { "source": "/sandbox-preview/(.*)", "destination": "https://api.yokebot.com/api/sandbox/proxy/$1" },
-    { "source": "/((?!sandbox-preview).*)", "destination": "/index.html" }
+    {
+      "source": "/sandbox-preview/(.*)",
+      "destination": "https://api.yokebot.com/api/sandbox/proxy/$1"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

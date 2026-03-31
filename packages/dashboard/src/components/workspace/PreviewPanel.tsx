@@ -811,7 +811,8 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
                 // In annotate mode, disable iframe pointer events so canvas gets them
                 pointerEvents: editMode === 'annotate' ? 'none' : 'auto',
               }}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              // sandbox removed — was causing blank pages in cross-origin iframes
+              // by restricting module script loading and cookie/storage access
               onLoad={() => setIframeLoaded(true)}
             />
           ) : (

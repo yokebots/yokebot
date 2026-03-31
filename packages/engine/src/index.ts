@@ -364,8 +364,6 @@ async function main() {
           // (with token in URL path — no cookie dependency, no race condition)
           html = html.replace(/(src|href|from)\s*=\s*"\/(?!\/)/g, `$1="${proxyBase}/`)
           html = html.replace(/from\s+"\/(?!\/)/g, `from "${proxyBase}/`)
-          // Also set cookie as fallback for dynamically loaded modules
-          html = html.replace('<head>', `<head>\n<script>document.cookie="spt=${resolved.token};path=/;max-age=14400;SameSite=None;Secure";</script>`)
           // Inject visual editor bridge script before </body>
           html = html.replace('</body>', `<script src="/api/sandbox/yokebot-editor.js"></script>\n</body>`)
           // Copy headers but fix content-length since we modified the body
@@ -373,6 +371,17 @@ async function main() {
           const headers = { ...proxyRes.headers }
           delete headers['content-length']
           delete headers['x-frame-options']
+          // Set cookie via HTTP header (not JavaScript) so it's available before
+          // any scripts execute — critical for dynamic imports in cross-origin iframes
+          const existingCookies = headers['set-cookie']
+          const sptCookie = `spt=${resolved.token}; Path=/; Max-Age=14400; SameSite=None; Secure`
+          if (Array.isArray(existingCookies)) {
+            headers['set-cookie'] = [...existingCookies, sptCookie]
+          } else if (existingCookies) {
+            headers['set-cookie'] = [existingCookies as string, sptCookie]
+          } else {
+            headers['set-cookie'] = [sptCookie]
+          }
           // Override Helmet's no-referrer so sub-resource requests include Referer with proxy token
           headers['referrer-policy'] = 'same-origin'
           if (typeof headers['content-security-policy'] === 'string') {
