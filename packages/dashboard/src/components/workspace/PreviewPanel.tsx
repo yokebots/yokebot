@@ -251,12 +251,33 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
     if (editMode !== 'edit') setSelectedElement(null)
   }, [editMode])
 
-  const handleRefresh = useCallback(() => {
-    if (iframeRef.current && url) {
-      setIframeLoaded(false)
-      iframeRef.current.src = url
+  const handleRefresh = useCallback(async () => {
+    if (!iframeRef.current) return
+    setIframeLoaded(false)
+    setError(null)
+    try {
+      // Fetch a fresh proxy token (also wakes the sandbox if stopped)
+      const port = projectId && projectId !== 'default'
+        ? (await engine.getSandboxProject(projectId))?.devPort ?? 5173
+        : 5173
+      const res = await engine.getSandboxProxyToken(port)
+      const newUrl = `${engine.getBaseUrl()}${res.proxyUrl}`
+      setUrl(newUrl)
+      iframeRef.current.src = newUrl
+    } catch {
+      // Fallback: try starting the sandbox, then retry
+      try {
+        await engine.startSandbox()
+        await new Promise(r => setTimeout(r, 3000))
+        const res = await engine.getSandboxProxyToken()
+        const newUrl = `${engine.getBaseUrl()}${res.proxyUrl}`
+        setUrl(newUrl)
+        iframeRef.current!.src = newUrl
+      } catch (err) {
+        setError((err as Error).message)
+      }
     }
-  }, [url])
+  }, [projectId])
 
   // ---- Undo/redo ----
   const handleUndo = useCallback(() => {
