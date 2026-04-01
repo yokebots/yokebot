@@ -82,18 +82,32 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
     setLoading(true)
 
     async function fetchWithRetry() {
-      // If we have a specific project ID, get its port and use the proxy (never raw Daytona URL)
+      // If we have a specific project ID, get its port and use the proxy
+      // Start the sandbox + dev server if needed, with retry
       if (projectId && projectId !== 'default') {
-        try {
-          const project = await engine.getSandboxProject(projectId)
-          if (!cancelled && project.devPort) {
-            const res = await engine.getSandboxProxyToken(project.devPort)
-            const newUrl = `${engine.getBaseUrl()}${res.proxyUrl}`
-            setUrl(newUrl)
-            setLoading(false)
-            return
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            const project = await engine.getSandboxProject(projectId)
+            if (!cancelled && project.devPort) {
+              const res = await engine.getSandboxProxyToken(project.devPort)
+              const newUrl = `${engine.getBaseUrl()}${res.proxyUrl}`
+              setUrl(newUrl)
+              setLoading(false)
+              setWakingUp(false)
+              return
+            }
+          } catch {
+            if (cancelled) return
+            if (attempt === 0) {
+              setWakingUp(true)
+              setWakeProgress(10)
+              try { await engine.startSandbox() } catch { /* may already be starting */ }
+            }
+            setWakeProgress(Math.min(90, 10 + (attempt + 1) * 18))
+            await new Promise(r => setTimeout(r, 3000))
           }
-        } catch { /* fall through to default proxy */ }
+        }
+        // Fall through to default proxy if project-specific failed
       }
 
       for (let attempt = 0; attempt < 10; attempt++) {

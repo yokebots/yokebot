@@ -2717,12 +2717,24 @@ async function main() {
     const teamId = req.user!.activeTeamId!
     const port = Number(req.query.port) || 5173
     try {
-      const { getPreviewUrl } = await import('./sandbox.ts')
+      const { getPreviewUrl, getOrCreateSandbox, startProjectDevServer, listSandboxProjects } = await import('./sandbox.ts')
+
+      // Ensure sandbox is running (creates or resumes if needed)
+      await getOrCreateSandbox(db, teamId)
+
+      // If a specific port was requested, start that project's dev server
+      if (port !== 5173) {
+        const projects = await listSandboxProjects(db, teamId)
+        const project = projects.find(p => p.devPort === port)
+        if (project) {
+          await startProjectDevServer(db, teamId, project.id).catch(() => {})
+        }
+      }
+
       const signedUrl = await getPreviewUrl(db, teamId, port)
-      // Generate a random token valid for 4 hours
       const token = `spt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
       proxyTokenStore.set(token, { teamId, signedUrl, expires: Date.now() + 4 * 3600_000 })
-      // Clean up expired tokens periodically
+      // Clean up expired tokens
       for (const [k, v] of proxyTokenStore) {
         if (Date.now() > v.expires) proxyTokenStore.delete(k)
       }
