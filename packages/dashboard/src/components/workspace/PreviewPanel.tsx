@@ -251,32 +251,36 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
     if (editMode !== 'edit') setSelectedElement(null)
   }, [editMode])
 
+  const [refreshing, setRefreshing] = useState(false)
   const handleRefresh = useCallback(async () => {
     if (!iframeRef.current) return
+    setRefreshing(true)
     setIframeLoaded(false)
     setError(null)
     try {
-      // Fetch a fresh proxy token (also wakes the sandbox if stopped)
-      const port = projectId && projectId !== 'default'
-        ? (await engine.getSandboxProject(projectId))?.devPort ?? 5173
-        : 5173
+      // Start sandbox first (no-op if already running)
+      await engine.startSandbox().catch(() => {})
+      // Get the project's port
+      let port = 5173
+      if (projectId && projectId !== 'default') {
+        try {
+          const project = await engine.getSandboxProject(projectId)
+          if (project?.devPort) port = project.devPort
+        } catch { /* use default */ }
+      }
+      // Start the dev server for this project
+      if (projectId && projectId !== 'default') {
+        await engine.startProjectDevServer(projectId).catch(() => {})
+      }
+      // Get a fresh proxy token
       const res = await engine.getSandboxProxyToken(port)
       const newUrl = `${engine.getBaseUrl()}${res.proxyUrl}`
       setUrl(newUrl)
       iframeRef.current.src = newUrl
-    } catch {
-      // Fallback: try starting the sandbox, then retry
-      try {
-        await engine.startSandbox()
-        await new Promise(r => setTimeout(r, 3000))
-        const res = await engine.getSandboxProxyToken()
-        const newUrl = `${engine.getBaseUrl()}${res.proxyUrl}`
-        setUrl(newUrl)
-        iframeRef.current!.src = newUrl
-      } catch (err) {
-        setError((err as Error).message)
-      }
+    } catch (err) {
+      setError((err as Error).message)
     }
+    setRefreshing(false)
   }, [projectId])
 
   // ---- Undo/redo ----
@@ -475,10 +479,11 @@ export function PreviewPanel({ previewUrl: initialUrl, channelId, projectId }: P
         <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border-subtle bg-light-surface-alt shrink-0">
           <button
             onClick={handleRefresh}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors"
-            title="Refresh preview"
+            disabled={refreshing}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-muted hover:bg-light-surface-alt hover:text-text-main transition-colors disabled:opacity-50"
+            title="Refresh preview (wakes sandbox if stopped)"
           >
-            <span className="material-symbols-outlined text-[14px]">refresh</span>
+            <span className={`material-symbols-outlined text-[14px] ${refreshing ? 'animate-spin' : ''}`}>refresh</span>
           </button>
 
           <div className="h-4 w-px bg-border-subtle mx-1" />
