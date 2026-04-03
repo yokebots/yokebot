@@ -716,6 +716,18 @@ export async function respondToMention(
             console.log(`[scheduler] Reusing existing project "${latest.name}" for new work (not creating duplicate)`)
           } else {
             // No projects at all — create the first one
+            // Re-check agent lock (may have been set by a concurrent mention)
+            const freshAgent = await getAgent(db, agentId)
+            if (freshAgent?.activeProjectId) {
+              const proj = await getSandboxProject(db, freshAgent.activeProjectId)
+              if (proj) {
+                mentionSandboxDir = proj.directory
+                mentionSandboxId = proj.id
+                await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [proj.id, mentionTaskId])
+                console.log(`[scheduler] Concurrent mention already created project "${proj.name}" — reusing`)
+              }
+            }
+            if (!mentionSandboxId) {
             // Generate a clean project name from the user's message
             const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
             // Strip common verbs, pronouns, filler words to extract the app concept
@@ -738,6 +750,7 @@ export async function respondToMention(
             // Lock agent to this new project
             await db.run('UPDATE agents SET active_project_id = $1 WHERE id = $2', [project.id, agent.id])
             console.log(`[scheduler] Created first project "${projectName}" and locked agent to it`)
+          }
           }
         }
       } catch (err) {
