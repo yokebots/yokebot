@@ -407,12 +407,17 @@ export function buildPhasePrompt(
   taskTitle: string,
   taskDescription: string | null,
   priorResults: PhaseResult[],
-  extraContext?: { previewUrl?: string; sandboxProjectDir?: string; projectName?: string },
+  extraContext?: { previewUrl?: string; sandboxProjectDir?: string; projectName?: string; detectedError?: string },
 ): string {
   const parts: string[] = []
 
   // Phase instruction
   parts.push(`## Your Role\n${phase.systemInstruction}`)
+
+  // Inject auto-detected errors so the agent doesn't waste iterations diagnosing
+  if (extraContext?.detectedError) {
+    parts.push(`## Auto-Detected Error\nThe harness probed the preview and found this error BEFORE you started:\n\`\`\`\n${extraContext.detectedError}\n\`\`\`\nFix this specific error. Read the failing file(s), identify the bug, and fix it.`)
+  }
 
   // Inject concrete sandbox context so the model doesn't have to guess
   if (extraContext?.previewUrl) {

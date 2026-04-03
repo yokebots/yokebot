@@ -1268,10 +1268,50 @@ async function runRoutedSprint(
         }
       } catch { /* best-effort */ }
     }
+    // Smart error detection: probe the preview URL and capture any errors
+    // so the agent gets the error context automatically without wasting iterations
+    let previewError: string | undefined
+    if (previewUrl && isEdit && phase.name === 'research') {
+      try {
+        const probe = await fetch(previewUrl, { signal: AbortSignal.timeout(8000) })
+        const body = await probe.text()
+        // Check for Vite compile errors, blank pages, or error JSON
+        if (body.includes('statusCode') && body.includes('bad request')) {
+          previewError = `Sandbox error: ${body.slice(0, 300)}`
+        } else if (body.includes('Internal Server Error') || body.includes('500')) {
+          previewError = `Server error loading preview`
+        }
+        // Check for Vite error overlay or empty root
+        if (body.includes('vite-error-overlay') || body.includes('SyntaxError') || body.includes('TypeError')) {
+          const errorMatch = body.match(/(?:SyntaxError|TypeError|ReferenceError|Error)[^<]{0,300}/)
+          previewError = errorMatch ? `Vite compile error: ${errorMatch[0]}` : 'Vite compile error detected'
+        }
+        if (body.includes('<div id="root"></div>') && body.length < 2000) {
+          previewError = 'App renders empty — React root has no content. Check for import/export errors in main.tsx and App.tsx.'
+        }
+      } catch { /* probe failed, sandbox might be down */ }
+
+      // Also check for 500 errors on known source files
+      if (sandboxProjectDir) {
+        try {
+          const { execCommand } = await import('./sandbox.ts')
+          const result = await execCommand(db, teamId, `cd ${sandboxProjectDir} && npx tsc --noEmit 2>&1 | head -20`)
+          if (result.exitCode !== 0 && result.stdout.trim()) {
+            previewError = (previewError ? previewError + '\n\n' : '') + `TypeScript errors:\n${result.stdout.slice(0, 500)}`
+          }
+        } catch { /* best effort */ }
+      }
+
+      if (previewError) {
+        console.log(`[routing] Auto-detected error for "${sandboxProjectName}": ${previewError.slice(0, 100)}`)
+      }
+    }
+
     const phasePrompt = buildPhasePrompt(phase, task.title, task.description, phaseResults, {
       previewUrl,
       sandboxProjectDir: sandboxProjectDir,
       projectName: sandboxProjectName,
+      detectedError: previewError,
     })
 
     // Resolve this phase's model
