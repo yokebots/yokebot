@@ -3011,6 +3011,33 @@ async function main() {
     }
   })
 
+  app.delete('/api/sandbox/projects/:id', async (req, res) => {
+    const teamId = req.user!.activeTeamId!
+    try {
+      const { getSandboxProject, execCommand, getOrCreateSandbox } = await import('./sandbox.ts')
+      const project = await getSandboxProject(db, req.params.id)
+      if (!project) return res.status(404).json({ error: 'Project not found' })
+      if (project.teamId !== teamId) return res.status(403).json({ error: 'Forbidden' })
+
+      // Remove files from sandbox
+      try {
+        await getOrCreateSandbox(db, teamId)
+        await execCommand(db, teamId, `rm -rf ${project.directory} > /dev/null 2>&1`)
+      } catch { /* sandbox may be stopped */ }
+
+      // Clear any agent locks pointing to this project
+      await db.run('UPDATE agents SET active_project_id = NULL WHERE active_project_id = $1', [req.params.id])
+
+      // Delete from DB (ON DELETE SET NULL cascades to tasks.sandbox_project_id)
+      await db.run('DELETE FROM sandbox_projects WHERE id = $1', [req.params.id])
+
+      console.log(`[sandbox] Deleted project "${project.name}" (${req.params.id})`)
+      res.status(204).end()
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+
   app.get('/api/sandbox/projects/:id/files', async (req, res) => {
     const teamId = req.user!.activeTeamId!
     try {

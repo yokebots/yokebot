@@ -2003,6 +2003,10 @@ export async function renameSandboxProject(projectId: string, name: string): Pro
   await request(`/api/sandbox/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify({ name }) })
 }
 
+export async function deleteSandboxProject(projectId: string): Promise<void> {
+  await request(`/api/sandbox/projects/${projectId}`, { method: 'DELETE' })
+}
+
 export async function getSandboxProxyToken(port = 5173): Promise<{ token: string; proxyUrl: string }> {
   return request(`/api/sandbox/proxy-token?port=${port}`)
 }

@@ -210,6 +210,28 @@ export function ContextPane({ workspace, teamChannelId, splitRatio, onSplitRatio
             <span className="material-symbols-outlined text-[14px]">close</span>
             Close Tab
           </button>
+          <div className="h-px bg-border-subtle my-1" />
+          <button
+            onClick={async () => {
+              const projectId = tabContextMenu.tab.resourceId
+              const projectName = tabContextMenu.tab.label
+              const confirm1 = window.confirm(`Delete project "${projectName}"?\n\nThis will permanently remove all files in this project. This cannot be undone.`)
+              if (!confirm1) { setTabContextMenu(null); return }
+              const confirm2 = window.confirm(`Are you absolutely sure?\n\nType the project name to confirm you want to delete "${projectName}" and all its files permanently.`)
+              if (!confirm2) { setTabContextMenu(null); return }
+              try {
+                await engine.deleteSandboxProject(projectId)
+                workspace.closeViewerTab(tabContextMenu.tab.id)
+              } catch (err) {
+                alert(err instanceof Error ? err.message : 'Failed to delete project')
+              }
+              setTabContextMenu(null)
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+          >
+            <span className="material-symbols-outlined text-[14px]">delete_forever</span>
+            Delete Project
+          </button>
         </div>
       )}
     </div>
