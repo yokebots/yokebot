@@ -88,7 +88,7 @@ If the task references a specific URL or website, browse it and extract: color p
 
 If NO URL is given, search the web for similar existing apps or examples. Navigate to https://www.bing.com/search?q=YOUR+SEARCH+TERMS and browse 2-3 results to gather design inspiration, feature ideas, and UX patterns.
 
-Output a structured report with your findings. Do NOT write code. Do NOT ask the human for a URL — find references yourself.`,
+Output a structured report with your findings. Do NOT write code. Do NOT ask the human for a URL — find references yourself. Do NOT post your research to chat — keep it as internal context for the next phase. Do NOT call the respond tool.`,
         required: false,
       },
       {
