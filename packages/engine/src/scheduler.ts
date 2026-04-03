@@ -634,13 +634,35 @@ export async function respondToMention(
           const existing = await listSandboxProjects(db, teamId)
 
           if (isEditRequest && existing.length > 0) {
-            // Reuse the most recent project
             mentionIsEdit = true
-            const latest = existing[0]
-            mentionSandboxDir = latest.directory
-            mentionSandboxId = latest.id
-            await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [latest.id, mentionTaskId])
-            console.log(`[scheduler] Reusing existing project "${latest.name}" for edit request`)
+            // Match user's message against project names — pick the best match
+            const msgLower = msg.toLowerCase()
+            let bestMatch = existing[0]
+            let bestScore = 0
+            for (const proj of existing) {
+              const words = proj.name.toLowerCase().split(/\s+/)
+              const score = words.filter(w => w.length > 2 && msgLower.includes(w)).length
+              if (score > bestScore) {
+                bestScore = score
+                bestMatch = proj
+              }
+            }
+
+            // If multiple projects and no strong match, inject project list into ack prompt
+            // so the agent asks the user to confirm which project
+            if (existing.length > 1 && bestScore < 2) {
+              const projectList = existing.map((p, i) => `${i + 1}. ${p.name}`).join('\n')
+              ackMessages[0].content += `\n\nIMPORTANT: There are ${existing.length} sandbox projects. The user wants to edit one but didn't clearly specify which. Ask them to confirm by replying with the number:\n${projectList}\n\nDo NOT start working until the user confirms which project.`
+              console.log(`[scheduler] Ambiguous project match (score: ${bestScore}) — asking user to confirm`)
+              // Don't assign a project yet — wait for confirmation
+            } else {
+              mentionSandboxDir = bestMatch.directory
+              mentionSandboxId = bestMatch.id
+              await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [bestMatch.id, mentionTaskId])
+              // Inject project name into ack so user knows which project
+              ackMessages[0].content += `\n\nYou will be working on the project: "${bestMatch.name}". Mention this project name in your response so the user can confirm.`
+              console.log(`[scheduler] Matched project "${bestMatch.name}" (score: ${bestScore}) for edit request`)
+            }
           } else {
             // New project
             const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
