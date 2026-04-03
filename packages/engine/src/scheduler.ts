@@ -1196,6 +1196,16 @@ async function runRoutedSprint(
 
   const activePhaseDefs = (isEdit && profile.editPhases) ? profile.editPhases : profile.phases
 
+  // Resolve sandbox project name for workspace file paths
+  let sandboxProjectName: string | undefined
+  if (sandboxProjectId) {
+    try {
+      const { getSandboxProject } = await import('./sandbox.ts')
+      const proj = await getSandboxProject(db, sandboxProjectId)
+      if (proj) sandboxProjectName = proj.name
+    } catch { /* best-effort */ }
+  }
+
   for (const phaseName of plan.phases) {
     const phase = activePhaseDefs.find(p => p.name === phaseName)
     if (!phase) continue
@@ -1252,6 +1262,7 @@ async function runRoutedSprint(
     const phasePrompt = buildPhasePrompt(phase, task.title, task.description, phaseResults, {
       previewUrl,
       sandboxProjectDir: sandboxProjectDir,
+      projectName: sandboxProjectName,
     })
 
     // Resolve this phase's model

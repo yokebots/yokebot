@@ -1580,6 +1580,14 @@ for (const t of TEMPLATES) {
   }
 }
 
+// Append workspace file organization guidance to all agents with workspace access
+for (const t of TEMPLATES) {
+  const cats = t.toolCategories ?? []
+  if (cats.includes('workspace')) {
+    t.systemPrompt += `\n\n## Workspace File Organization\nStore deliverables in organized workspace folders: Projects/ for project work, Reports/ for generated reports, Documents/ for general docs, Knowledge Base/ for reference material, Templates/ for reusable content.`
+  }
+}
+
 /** Get all templates. Filters out hostedOnly templates when not in hosted mode. */
 export function listTemplates(options?: { includeHostedOnly?: boolean }): AgentTemplate[] {
   const includeHosted = options?.includeHostedOnly ?? (process.env.YOKEBOT_HOSTED_MODE === 'true')

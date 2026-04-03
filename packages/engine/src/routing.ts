@@ -88,7 +88,7 @@ If the task references a specific URL or website, browse it and extract: color p
 
 If NO URL is given, search the web for similar existing apps or examples. Navigate to https://www.bing.com/search?q=YOUR+SEARCH+TERMS and browse 2-3 results to gather design inspiration, feature ideas, and UX patterns.
 
-Output a structured report with your findings. Do NOT write code. Do NOT ask the human for a URL — find references yourself. Do NOT post your research to chat — keep it as internal context for the next phase. Do NOT call the respond tool.`,
+Output a structured report with your findings. Write your research findings to the workspace using write_workspace_file. Do NOT write code. Do NOT ask the human for a URL — find references yourself. Do NOT post your research to chat — keep it as internal context for the next phase. Do NOT call the respond tool.`,
         required: false,
       },
       {
@@ -107,7 +107,7 @@ Output a structured report with your findings. Do NOT write code. Do NOT ask the
 5. **Responsive Strategy** — breakpoints, mobile-first considerations
 6. **Edge Cases** — error states, loading states, empty states
 
-Be specific and opinionated. The build phase will follow this plan exactly. Do NOT write code — only plan.
+Be specific and opinionated. The build phase will follow this plan exactly. Do NOT write code — only plan. Write your implementation plan to the workspace using write_workspace_file.
 
 DO NOT skip steps or cut corners. Common excuses to reject:
 - "This is simple enough to figure out during build" — NO. Plan everything upfront.
@@ -137,7 +137,7 @@ If a research phase provided branding details from a target site, match those ex
 
 **Step 2 — Visual Mockup**: Call generate_image with modelId "nano-banana-2" to generate a mockup of the main page/screen. Write a detailed prompt describing the exact layout, colors, and content. This image will be passed to the build phase as a visual reference.
 
-DO NOT skip the mockup. The build phase needs both the spec AND the image to achieve visual fidelity.`,
+Write your design spec to the workspace using write_workspace_file. DO NOT skip the mockup. The build phase needs both the spec AND the image to achieve visual fidelity.`,
         required: false,
       },
       {
@@ -291,7 +291,7 @@ CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is stil
         maxIterations: 10,
         toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
         skillFilter: undefined as string[] | undefined,
-        systemInstruction: `Research the task. Browse the web for relevant information, check workspace files for existing context, and gather what you need to produce a high-quality deliverable. Output a structured summary of your research findings. Do NOT do the actual work yet — just research.
+        systemInstruction: `Research the task. Browse the web for relevant information, check workspace files for existing context, and gather what you need to produce a high-quality deliverable. Write your research findings to Reports/ or Documents/ in the workspace using write_workspace_file. Do NOT do the actual work yet — just research.
 
 If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SEARCH+TERMS and browse results. Do NOT ask the human for URLs.`,
         required: false,
@@ -312,7 +312,7 @@ If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SE
         maxIterations: 3,
         toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
         skillFilter: [] as string[],
-        systemInstruction: `Review what was produced in the execute phase. Post a concise summary to the team chat using the respond tool — include what was created, where to find it, and any key highlights. Then call update_task with status "done".`,
+        systemInstruction: `Review what was produced in the execute phase. Write the full deliverable to the workspace (Reports/ or Documents/) using write_workspace_file if not already saved. Post a concise summary to the team chat using the respond tool — include what was created, where to find it, and any key highlights. Then call update_task with status "done".`,
         required: true,
       },
     ],
@@ -407,7 +407,7 @@ export function buildPhasePrompt(
   taskTitle: string,
   taskDescription: string | null,
   priorResults: PhaseResult[],
-  extraContext?: { previewUrl?: string; sandboxProjectDir?: string },
+  extraContext?: { previewUrl?: string; sandboxProjectDir?: string; projectName?: string },
 ): string {
   const parts: string[] = []
 
@@ -420,6 +420,9 @@ export function buildPhasePrompt(
   }
   if (extraContext?.sandboxProjectDir) {
     parts.push(`## Sandbox Project\nAll code files are at: ${extraContext.sandboxProjectDir}`)
+  }
+  if (extraContext?.projectName) {
+    parts.push(`## Workspace Project\nWrite project documents (research, plan, design-spec) to: Projects/${extraContext.projectName}/`)
   }
 
   // Task context

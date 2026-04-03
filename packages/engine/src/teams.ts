@@ -4,6 +4,7 @@
 
 import type { Db } from './db/types.ts'
 import { randomUUID } from 'crypto'
+import { writeFile } from './workspace.ts'
 
 export interface Team { id: string; name: string; createdAt: string }
 export interface TeamMember { teamId: string; userId: string; email: string; role: string; joinedAt: string; displayName: string | null }
@@ -11,7 +12,17 @@ export interface TeamMember { teamId: string; userId: string; email: string; rol
 export async function createTeam(db: Db, name: string): Promise<Team> {
   const id = randomUUID()
   await db.run('INSERT INTO teams (id, name) VALUES ($1, $2)', [id, name])
-  return (await getTeam(db, id))!
+  const team = (await getTeam(db, id))!
+
+  // Auto-create default workspace folders by writing placeholder files
+  const defaultFolders = ['Knowledge Base', 'Reports', 'Documents', 'Templates']
+  for (const folder of defaultFolders) {
+    await writeFile(db, id, `${folder}/.gitkeep`, '', 'system').catch(() => {
+      // Best-effort — don't fail team creation if workspace init fails
+    })
+  }
+
+  return team
 }
 
 export async function getTeam(db: Db, id: string): Promise<Team | null> {

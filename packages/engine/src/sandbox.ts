@@ -627,6 +627,14 @@ export async function createSandboxProject(db: Db, teamId: string, name: string,
 
   console.log(`[sandbox] Created project "${name}" → ${directory} (port ${devPort}) for team ${teamId}`)
 
+  // Auto-create a Projects/{name}/ directory in the workspace
+  try {
+    const { writeFile } = await import('./workspace.ts')
+    await writeFile(db, teamId, `Projects/${name}/.gitkeep`, '', 'system')
+  } catch {
+    // Best-effort — don't fail project creation if workspace init fails
+  }
+
   return (await getSandboxProject(db, id))!
 }
 
