@@ -678,7 +678,7 @@ export async function respondToMention(
         } else {
           // Check if user is asking to fix/edit an existing project
           const msg = triggerMessage.content.toLowerCase()
-          const isEditRequest = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair/i.test(msg)
+          const isEditRequest = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise|broken|issue|error|bug|wrong|not working|not loading|doesn't work|figure.?it.?out/i.test(msg)
           const existing = await listSandboxProjects(db, teamId)
 
           if (isEditRequest && existing.length > 0) {
@@ -768,7 +768,7 @@ export async function respondToMention(
 
     // Detect edit intent for non-sandbox agents too (universal agents editing workspace files, etc.)
     if (!mentionIsEdit) {
-      const editPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise/i
+      const editPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise|broken|issue|error|bug|wrong|not working|not loading|doesn't work|figure.?it.?out/i
       mentionIsEdit = editPattern.test(triggerMessage.content)
     }
 
@@ -1603,7 +1603,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
           let result: { iterations: number; response: string | null; taskCompleted?: boolean; taskBlocked?: boolean }
 
           // Detect edit intent from task title + description
-          const editPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise/i
+          const editPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise|broken|issue|error|bug|wrong|not working|not loading|doesn't work|figure.?it.?out/i
           const taskIsEdit = editPattern.test(task.title) || (task.description ? editPattern.test(task.description) : false)
 
           // ---- Dynamic model routing: multi-phase sprint ----
@@ -1774,7 +1774,7 @@ async function heartbeatInner(db: Db, agent: Agent): Promise<void> {
 
               let result: { iterations: number; response: string | null; taskCompleted?: boolean; taskBlocked?: boolean }
 
-              const subEditPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise/i
+              const subEditPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise|broken|issue|error|bug|wrong|not working|not loading|doesn't work|figure.?it.?out/i
               const subTaskIsEdit = subEditPattern.test(task.title) || (task.description ? subEditPattern.test(task.description) : false)
 
               if (routingProfile) {
