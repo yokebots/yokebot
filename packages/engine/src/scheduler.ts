@@ -703,16 +703,41 @@ export async function respondToMention(
               ackMessages[0].content += `\n\nYou will be working on the project: "${bestMatch.name}". Mention this project name in your response so the user can confirm.`
               console.log(`[scheduler] Matched project "${bestMatch.name}" (score: ${bestScore}) for edit request`)
             }
+          } else if (existing.length > 0) {
+            // Non-edit request but projects exist — reuse the most recent one
+            // (user is likely continuing a conversation about the same project)
+            const latest = existing[0]
+            mentionSandboxDir = latest.directory
+            mentionSandboxId = latest.id
+            await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [latest.id, mentionTaskId])
+            // Lock the agent to this project
+            await db.run('UPDATE agents SET active_project_id = $1 WHERE id = $2', [latest.id, agent.id])
+            ackMessages[0].content += `\n\nYou will be working in the existing project: "${latest.name}".`
+            console.log(`[scheduler] Reusing existing project "${latest.name}" for new work (not creating duplicate)`)
           } else {
-            // New project
+            // No projects at all — create the first one
+            // Generate a clean project name from the user's message
             const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
-            const cleanName = rawTitle.replace(/\b(scaffold|build|create|set up|implement|make|develop)\b/gi, '').trim()
-            const projectName = (cleanName || rawTitle).slice(0, 30).trim() || 'New Project'
+            // Strip common verbs, pronouns, filler words to extract the app concept
+            const cleanName = rawTitle
+              .replace(/\b(scaffold|build|create|set up|implement|make|develop|please|can you|could you|i want|i need|a|an|the|for me|for us|that|which|with)\b/gi, '')
+              .replace(/[.!?,;:]+/g, '')
+              .replace(/\s+/g, ' ')
+              .trim()
+            // Capitalize first letter of each word
+            const projectName = (cleanName || 'New App')
+              .slice(0, 40)
+              .trim()
+              .split(' ')
+              .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+              .join(' ')
             const project = await createSandboxProject(db, teamId, projectName)
             mentionSandboxDir = project.directory
             mentionSandboxId = project.id
             await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [project.id, mentionTaskId])
-            console.log(`[scheduler] Auto-created sandbox project "${project.name}" for mention task`)
+            // Lock agent to this new project
+            await db.run('UPDATE agents SET active_project_id = $1 WHERE id = $2', [project.id, agent.id])
+            console.log(`[scheduler] Created first project "${projectName}" and locked agent to it`)
           }
         }
       } catch (err) {
