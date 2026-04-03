@@ -518,9 +518,16 @@ export async function respondToMention(
       const elapsed = Date.now() - startMs
       console.log(`[scheduler] "${agent.name}" ack'd @mention in ${elapsed}ms`)
 
-      // Always run Phase 2 after a mention — let the agent decide if there's work to do.
-      // Unused iterations are refunded via the credit reservation system.
-      needsWork = true
+      // Check if the ack contains questions — if so, wait for user reply instead of sprinting
+      const hasQuestion = reply.includes('?') && (
+        /\b(which|what|how|would you|do you|should|prefer|want me|before I|quick que)/i.test(reply)
+      )
+      if (hasQuestion) {
+        console.log(`[scheduler] "${agent.name}" asked clarifying questions — waiting for reply before sprinting`)
+        needsWork = false
+      } else {
+        needsWork = true
+      }
     } else {
       broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
     }
@@ -608,6 +615,7 @@ export async function respondToMention(
     // Track in-flight sprint for graceful drain
     const mentionKey = `${agentId}:mention`
     inFlightSprints.add(mentionKey)
+    inFlightSprints.add(agentId) // Also block heartbeat sprints while mention sprint runs
     void markSprintStart(db, agentId)
 
 
@@ -732,8 +740,8 @@ export async function respondToMention(
             const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
             // Strip common verbs, pronouns, filler words to extract the app concept
             const cleanName = rawTitle
-              .replace(/\b(scaffold|build|create|set up|implement|make|develop|please|can you|could you|i want|i need|a|an|the|for me|for us|that|which|with)\b/gi, '')
-              .replace(/[.!?,;:]+/g, '')
+              .replace(/\b(scaffold|build|create|set up|implement|make|develop|please|can you|could you|i want|i need|i'd like|let's|lets|let me|give me|me|a|an|the|for me|for us|that|which|with|and|see|have|add|check|them|off|daily|weekly|clean|modern|simple|super|really|very|just|also|some|like|want|it|app|—|–|-)\b/gi, '')
+              .replace(/[.!?,;:—–"']+/g, '')
               .replace(/\s+/g, ' ')
               .trim()
             // Capitalize first letter of each word
@@ -853,6 +861,7 @@ export async function respondToMention(
     }).finally(() => {
       markSprintEnd(db, agentId).catch(() => {})
       inFlightSprints.delete(mentionKey)
+      inFlightSprints.delete(agentId)
       broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'idle')
     })
   }
