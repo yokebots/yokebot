@@ -753,7 +753,18 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
             )}
             {/* Active sessions */}
             {browserSessions.map(session => {
-              const domain = (() => { try { return new URL(session.currentUrl).hostname } catch { return 'about:blank' } })()
+              const label = (() => {
+                try {
+                  const url = new URL(session.currentUrl)
+                  const host = url.hostname
+                  // Show a readable label: domain + path for non-trivial URLs
+                  if (host && host !== 'about:blank' && !url.href.startsWith('about:')) {
+                    const path = url.pathname !== '/' ? url.pathname.slice(0, 30) : ''
+                    return host + path
+                  }
+                } catch { /* ignore */ }
+                return session.mode === 'agent_browser' ? 'Agent Browser' : 'New Tab'
+              })()
               return (
                 <button
                   key={session.id}
@@ -761,8 +772,8 @@ export function FilesPanel({ workspace, unreadFileIds, onMarkFileRead, onMarkAll
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-xs text-text-main hover:bg-light-surface-alt transition-colors"
                 >
                   <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
-                  <span className="truncate flex-1 text-left">{domain}</span>
-                  <span className="text-[10px] text-text-muted">{session.mode === 'agent_browser' ? 'Agent' : 'Live'}</span>
+                  <span className="truncate flex-1 text-left">{label}</span>
+                  <span className="text-[10px] text-text-muted shrink-0">{session.mode === 'agent_browser' ? 'Agent' : 'Live'}</span>
                 </button>
               )
             })}

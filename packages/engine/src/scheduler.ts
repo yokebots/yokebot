@@ -623,10 +623,50 @@ export async function respondToMention(
       try {
         const { listSandboxProjects, createSandboxProject, getSandboxProject } = await import('./sandbox.ts')
         const { getTask } = await import('./tasks.ts')
+
+        // Check if user is asking to switch projects
+        const switchMatch = triggerMessage.content.toLowerCase().match(/switch\s+(?:to\s+)?(?:project\s+)?(\d+|.{3,30})/i)
+        if (switchMatch) {
+          const existing = await listSandboxProjects(db, teamId)
+          const input = switchMatch[1].trim()
+          const num = parseInt(input, 10)
+          let target = num > 0 && num <= existing.length ? existing[num - 1] : null
+          if (!target) {
+            // Match by name
+            const inputLower = input.toLowerCase()
+            target = existing.find(p => p.name.toLowerCase().includes(inputLower)) ?? null
+          }
+          if (target) {
+            await db.run('UPDATE agents SET active_project_id = $1 WHERE id = $2', [target.id, agent.id])
+            agent.activeProjectId = target.id
+            ackMessages[0].content += `\n\nThe user wants to switch projects. Confirm: "Switched to project: ${target.name}. All future work will be in this project until you tell me to switch again."`
+            console.log(`[scheduler] Agent "${agent.name}" switched to project "${target.name}"`)
+          } else {
+            const projectList = existing.map((p, i) => `${i + 1}. ${p.name}`).join('\n')
+            ackMessages[0].content += `\n\nThe user wants to switch projects but the project wasn't found. List the available projects and ask them to pick:\n${projectList}`
+          }
+        }
+
         const mentionTask = await getTask(db, mentionTaskId)
+
+        // Priority 1: Task already linked to a project
         if (mentionTask?.sandboxProjectId) {
           const project = await getSandboxProject(db, mentionTask.sandboxProjectId)
           if (project) { mentionSandboxDir = project.directory; mentionSandboxId = project.id }
+
+        // Priority 2: Agent has a locked active project
+        } else if (agent.activeProjectId) {
+          const project = await getSandboxProject(db, agent.activeProjectId)
+          if (project) {
+            mentionSandboxDir = project.directory
+            mentionSandboxId = project.id
+            mentionIsEdit = true
+            await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [project.id, mentionTaskId])
+            ackMessages[0].content += `\n\nYou are currently assigned to project: "${project.name}". You will work in this project.`
+            console.log(`[scheduler] Using agent's locked project "${project.name}" for mention`)
+          }
+
+        // Priority 3: Detect edit intent and match/confirm project
         } else {
           // Check if user is asking to fix/edit an existing project
           const msg = triggerMessage.content.toLowerCase()
