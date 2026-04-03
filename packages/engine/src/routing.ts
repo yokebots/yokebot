@@ -227,12 +227,11 @@ Do NOT write code yet. Do NOT create new projects. Do NOT use sandbox_setup. Dia
       },
       {
         name: 'build',
-        modelId: 'mimo-v2-pro',
-        fallbackModelId: 'deepseek-v3.2',
+        modelId: 'deepseek-v3.2',
         maxIterations: 15,
         toolCategories: ['core', 'sandbox', 'tasks'],
         skillFilter: [],
-        systemInstruction: `You are making TARGETED edits to an existing app. Do NOT rebuild from scratch. Do NOT call sandbox_setup.
+        systemInstruction: `You are making TARGETED edits to an existing app. Do NOT rebuild from scratch. Do NOT call sandbox_setup. Do NOT try to browse — you don't have browser tools in this phase.
 
 Use sandbox_write_file or sandbox_write_files to update ONLY the files that need to change based on the research phase diagnosis.
 
@@ -241,7 +240,8 @@ Rules:
 - Make the minimum changes needed to fix the issue
 - Do NOT rewrite entire files unless absolutely necessary — change only the relevant sections
 - Do NOT change the project structure, framework, or dependencies unless the fix requires it
-- If the research phase identified specific files and changes, follow that plan exactly`,
+- If the research phase identified specific files and changes, follow that plan exactly
+- If an auto-detected error was provided, fix that specific error first`,
         required: true,
       },
       {
