@@ -1366,6 +1366,28 @@ async function runRoutedSprint(
 
     console.log(`[routing] Phase "${phaseName}" → ${phaseModelId} (max ${phaseMaxIters} iters, tools: [${phase.toolCategories.join(', ')}])`)
 
+    // Broadcast phase status to dashboard so user sees progress
+    const phaseLabels: Record<string, string> = {
+      research: '🔍 Researching...',
+      plan: '📋 Planning the architecture...',
+      design: '🎨 Creating the design...',
+      build: '🔨 Building the app...',
+      test: '🧪 Running tests...',
+      review: '👀 Reviewing the preview...',
+      execute: '⚡ Working on it...',
+      deliver: '📦 Wrapping up...',
+    }
+    broadcastAgentProgress(teamId, {
+      agentId: agent.id,
+      agentName: agent.name,
+      type: 'thinking',
+      label: phaseLabels[phaseName] ?? `Working on ${phaseName}...`,
+      taskId: task.id,
+      iteration: 0,
+      maxIterations: phaseMaxIters,
+      timestamp: Date.now(),
+    })
+
     let result = await runReactLoop(
       db, agent.id, teamId, phasePrompt, phaseModelConfig, systemPrompt,
       state.workspaceConfig!, state.skillsDir, runtimeConfig, phaseModelId,
