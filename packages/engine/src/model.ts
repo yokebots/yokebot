@@ -1333,37 +1333,11 @@ const gemma4Adapter: ToolFormatAdapter = {
     return modelId.toLowerCase().includes('gemma-4') || modelId.toLowerCase().includes('gemma4')
   },
 
-  formatToolPrompt(tools: ToolDef[]): string {
-    // Inject tool definitions into system prompt — same approach as yokebot adapter
-    const toolSchemas = tools.map((t) => ({
-      type: 'function',
-      function: {
-        name: t.function.name,
-        description: t.function.description,
-        parameters: t.function.parameters,
-      },
-    }))
-
-    return `You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query.
-
-<tools>
-${JSON.stringify(toolSchemas, null, 2)}
-</tools>
-
-For each function call, return a JSON object with the function name and arguments within <tool_call></tool_call> XML tags:
-<tool_call>
-{"name": "<function-name>", "arguments": <args-dict>}
-</tool_call>
-
-RULES:
-1. ALWAYS call at least one tool when you have a task to do. Never describe what you would do — ACT by calling tools.
-2. You MUST respond to the user by calling the "respond" tool with a "message" argument. Do NOT write a plain text response.
-3. You may call multiple tools by outputting multiple <tool_call> blocks.
-4. The "arguments" value must be a valid JSON object with the correct parameter names and types.
-5. ALWAYS use the "think" tool first to plan your approach before taking action.
-6. Do NOT claim you cannot use a tool. You have full access to ALL listed tools.
-7. For multi-step tasks, keep calling tools until the task is FULLY complete.
-8. Do NOT output raw code in your response. ALL code must be written via sandbox_setup or sandbox_write_file tools.`
+  formatToolPrompt(_tools: ToolDef[]): string {
+    // Let OpenRouter pass tools natively to Gemma 4 — the model uses its own native
+    // tool calling format. This adapter only PARSES responses, doesn't inject format.
+    // Return empty = use native OpenAI tools in the API body.
+    return ''
   },
 
   formatToolCall(name: string, args: Record<string, unknown>): string {
