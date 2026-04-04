@@ -781,7 +781,7 @@ export async function chatCompletion(
 
       // Safety net: strip any leaked XML tool markup from content before returning
       // This prevents raw tags like <function=think> from appearing in chat
-      if (content && (content.includes('<function=') || content.includes('<tool_call>') || content.includes('<parameter='))) {
+      if (content && (content.includes('<function=') || content.includes('<tool_call>') || content.includes('<parameter=') || content.includes('tool▁call') || content.includes('tool_call_end') || content.includes('```json\n{'))) {
         if (toolCalls.length === 0) {
           console.log(`[model] WARNING: Content has tool markup but no tool calls parsed. Raw content (first 500 chars): ${content.slice(0, 500)}`)
         }
@@ -1382,7 +1382,13 @@ const gemma4Adapter: ToolFormatAdapter = {
       .replace(/<\|think\|>[\s\S]*?<\|\/think\|>/g, '')
       .replace(/```tool_code\s*\n[\s\S]*?```/g, '')
       .replace(/```tool_result\s*\n[\s\S]*?```/g, '')
+      .replace(/```json\s*\n[\s\S]*?```/g, '')
+      .replace(/```\s*\n[\s\S]*?```/g, '')
       .replace(/\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
+      .replace(/\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"description"\s*:[\s\S]*?\}/g, '')
+      .replace(/<[｜|]tool[▁_]call[▁_]begin[｜|]>[\s\S]*?<[｜|]tool[▁_]call[▁_]end[｜|]>/g, '')
+      .replace(/<[｜|]tool[▁_]call[▁_]begin[｜|]>[\s\S]*$/g, '')
+      .replace(/<[｜|]tool[▁_]calls[▁_]end[｜|]>/g, '')
       .trim()
   },
 }
