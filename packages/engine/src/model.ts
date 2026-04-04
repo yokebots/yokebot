@@ -720,6 +720,11 @@ export async function chatCompletion(
     headers['X-Title'] = 'YokeBot'
     // Skip overloaded providers and sort by throughput for best availability
     body.provider = { ignore: ['AkashML'], sort: 'throughput', allow_fallbacks: true }
+    // Enable reasoning/thinking mode for models that support it
+    if (config.model.includes('gemma-4') || config.model.includes('qwen3.6')) {
+      body.reasoning = { enabled: true }
+      body.include_reasoning = true
+    }
     // Model-level fallback: if primary model is rate-limited, OpenRouter auto-tries the next
     if (config.model.includes('gemma-4')) {
       body.models = [config.model, 'deepseek/deepseek-chat-v3-0324']
