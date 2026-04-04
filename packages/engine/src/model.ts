@@ -1318,8 +1318,77 @@ ${toolDefs}
   },
 }
 
+// ---- Gemma 4 adapter ----
+// Gemma 4 supports OpenAI tools natively but sometimes outputs thinking blocks
+// and may dump tool calls as JSON in text. This adapter cleans up the output.
+const gemma4Adapter: ToolFormatAdapter = {
+  id: 'gemma4',
+
+  matches(modelId: string): boolean {
+    return modelId.toLowerCase().includes('gemma-4') || modelId.toLowerCase().includes('gemma4')
+  },
+
+  formatToolPrompt(_tools: ToolDef[]): string {
+    // Gemma 4 supports OpenAI tools natively — no system prompt injection needed
+    return ''
+  },
+
+  formatToolCall(name: string, args: Record<string, unknown>): string {
+    return JSON.stringify({ name, arguments: args })
+  },
+
+  parseToolCalls(text: string): ToolCall[] {
+    const calls: ToolCall[] = []
+
+    // Parse JSON tool calls embedded in text (Gemma sometimes outputs these)
+    // Format: {"name": "tool_name", "arguments": {...}}
+    const jsonCallRegex = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g
+    let match
+    while ((match = jsonCallRegex.exec(text)) !== null) {
+      try {
+        const args = JSON.parse(match[2])
+        calls.push({
+          id: `gemma4-recovery-${Date.now()}-${calls.length}`,
+          type: 'function',
+          function: { name: match[1], arguments: JSON.stringify(args) },
+        })
+      } catch { /* skip malformed JSON */ }
+    }
+
+    // Parse ```tool_code blocks (Gemma's native format)
+    const toolCodeRegex = /```tool_code\s*\n([\s\S]*?)```/g
+    while ((match = toolCodeRegex.exec(text)) !== null) {
+      try {
+        const parsed = JSON.parse(match[1].trim())
+        if (parsed.name || parsed.function_name) {
+          calls.push({
+            id: `gemma4-toolcode-${Date.now()}-${calls.length}`,
+            type: 'function',
+            function: {
+              name: parsed.name || parsed.function_name,
+              arguments: JSON.stringify(parsed.arguments || parsed.args || {}),
+            },
+          })
+        }
+      } catch { /* skip */ }
+    }
+
+    return calls
+  },
+
+  stripMarkup(text: string): string {
+    return text
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .replace(/<\|think\|>[\s\S]*?<\|\/think\|>/g, '')
+      .replace(/```tool_code\s*\n[\s\S]*?```/g, '')
+      .replace(/```tool_result\s*\n[\s\S]*?```/g, '')
+      .replace(/\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
+      .trim()
+  },
+}
+
 // Registry of all adapters — checked in order (most specific first)
-const TOOL_ADAPTERS: ToolFormatAdapter[] = [step3p5Adapter, mimoAdapter, nemotronAdapter, yokebotAdapter, dsmlAdapter]
+const TOOL_ADAPTERS: ToolFormatAdapter[] = [gemma4Adapter, step3p5Adapter, mimoAdapter, nemotronAdapter, yokebotAdapter, dsmlAdapter]
 
 /** Find the native tool format adapter for a given model ID, if any */
 function getToolAdapter(providerModelId: string): ToolFormatAdapter | null {
