@@ -305,66 +305,31 @@ CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is stil
     ],
   },
 
-  // ===== BuilderBot edit phases (research → build → review) =====
-  // When editing/fixing an existing project, skip plan + design and use targeted prompts.
-  // The research phase MUST browse the preview + read existing code to diagnose the issue.
-  // Defined inline above via editPhases on the builder-bot profile.
+  // ===== Category-specific agent profiles =====
+  // Each profile factory creates a RoutingProfile tailored to the agent's domain.
+  // All profiles use gemma-4-31b primary / deepseek-v3.2 fallback for every phase.
 
-  // ===== Universal agent profile (research → execute → deliver) =====
-  // Used by non-builder agents: ContentBot, ProspectorBot, AdvisorBot, ReputationBot, etc.
-  // 3 phases: research the topic, do the work, deliver a polished result.
-  ...[
-    'content-bot', 'prospector-bot', 'advisor-bot', 'reputation-bot',
-    'social-bot', 'ad-bot', 'seo-bot', 'email-bot', 'closer-bot',
-    'onboarder-bot', 'creative-bot', 'support-bot', 'analytics-bot',
-    'finance-bot', 'bookkeeper-bot', 'recruiter-bot', 'legal-bot',
-    'dev-bot', 'commerce-bot', 'scheduler-bot', 'project-bot',
-  ].map(templateId => ({
-    templateId,
-    orchestratorModelId: '',
-    orchestratorPrompt: '',
-    phases: [
-      {
-        name: 'research',
-        modelId: 'gemma-4-31b',
-        fallbackModelId: 'deepseek-v3.2',
-        maxIterations: 10,
-        toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
-        skillFilter: undefined as string[] | undefined,
-        systemInstruction: `Research the task. Browse the web for relevant information, check workspace files for existing context, and gather what you need to produce a high-quality deliverable. Write your research findings to Reports/ or Documents/ in the workspace using write_workspace_file. Do NOT do the actual work yet — just research.
+  // ---- Shared building blocks ----
 
-If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SEARCH+TERMS and browse results. Do NOT ask the human for URLs.`,
-        required: false,
-      },
-      {
-        name: 'execute',
-        modelId: 'gemma-4-31b',
-        maxIterations: 20,
-        toolCategories: ['core', 'workspace', 'tasks', 'chat', 'data', 'browser', 'skills'] as ToolCategory[],
-        skillFilter: undefined as string[] | undefined,
-        systemInstruction: `Do the work. Using your research findings, produce the deliverable the task requires. Write files to the workspace, create data tables, send messages, or use any tools needed. Be thorough and complete — do NOT cut corners or produce partial work.`,
-        required: true,
-      },
-      {
-        name: 'deliver',
-        modelId: 'gemma-4-31b',
-        fallbackModelId: 'deepseek-v3.2',
-        maxIterations: 3,
-        toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
-        skillFilter: [] as string[],
-        systemInstruction: `Review what was produced in the execute phase. Write the full deliverable to the workspace (Reports/ or Documents/) using write_workspace_file if not already saved. Post a concise summary to the team chat using the respond tool — include what was created, where to find it, and any key highlights. Then call update_task with status "done".`,
-        required: true,
-      },
-    ],
-    editPhases: [
-      {
-        name: 'research',
-        modelId: 'gemma-4-31b',
-        fallbackModelId: 'deepseek-v3.2',
-        maxIterations: 6,
-        toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
-        skillFilter: undefined as string[] | undefined,
-        systemInstruction: `You are editing/fixing EXISTING work, not starting fresh. Research what currently exists and what needs to change.
+  // Standard research phase prompt — reused across all profiles
+  // READ-ONLY, thorough, specific output principles
+  ...(() => {
+    const RESEARCH_PROMPT = `You are in research mode. Your ONLY job is to gather information — do NOT produce deliverables yet.
+
+Search the web for relevant information by navigating to https://www.bing.com/search?q=YOUR+SEARCH+TERMS and browsing 2-3 results. Check workspace files for existing context, brand guidelines, and previous work. Read the knowledge base for company context.
+
+Your research output MUST include:
+- Specific URLs and sources you found
+- Key data points, facts, and figures
+- Relevant context from workspace files and knowledge base
+- Clear summary of findings organized by topic
+
+Write your research findings to the workspace using write_workspace_file. Do NOT produce the actual deliverable yet — research only.
+Be thorough — use multiple search queries, follow links, read multiple sources. Do NOT ask the human for URLs — find references yourself.`
+
+    const DELIVER_PROMPT = `Post a concise summary to the team chat using the respond tool. Include what was created, where to find it in the workspace, and any key highlights. Then call update_task with status "done".`
+
+    const EDIT_RESEARCH_PROMPT = `You are editing/fixing EXISTING work, not starting fresh. Research what currently exists and what needs to change.
 
 Read the relevant workspace files, check existing data, and understand the current state before making changes. If the task references something visible (a page, report, etc.), browse it first.
 
@@ -373,36 +338,926 @@ Output a clear diagnosis:
 - **Requested change:** What the user wants different
 - **What to modify:** Specific files, data, or content that need to change
 
-Do NOT do the actual work yet — diagnose only.`,
-        required: true,
-      },
-      {
-        name: 'execute',
-        modelId: 'gemma-4-31b',
-        maxIterations: 12,
-        toolCategories: ['core', 'workspace', 'tasks', 'chat', 'data', 'browser', 'skills'] as ToolCategory[],
-        skillFilter: undefined as string[] | undefined,
-        systemInstruction: `Make TARGETED changes based on your research. Do NOT redo work that already exists.
+Do NOT do the actual work yet — diagnose only.`
+
+    const EDIT_EXECUTE_PROMPT = `Make TARGETED changes based on your research. Do NOT redo work that already exists.
 
 - Only modify what needs to change
 - Preserve everything that's working correctly
 - If updating a document, edit the specific sections — don't rewrite the entire thing
-- If fixing data, update the specific records — don't regenerate all data`,
-        required: true,
-      },
-      {
-        name: 'deliver',
-        modelId: 'gemma-4-31b',
-        fallbackModelId: 'deepseek-v3.2',
-        maxIterations: 3,
-        toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
-        skillFilter: [] as string[],
-        systemInstruction: `Summarize what was changed. Post to team chat using the respond tool — describe what was fixed/edited and verify the change looks correct. Then call update_task with status "done".`,
-        required: true,
-      },
-    ],
-  } as RoutingProfile)),
+- If fixing data, update the specific records — don't regenerate all data`
+
+    const EDIT_DELIVER_PROMPT = `Summarize what was changed. Post to team chat using the respond tool — describe what was fixed/edited and verify the change looks correct. Then call update_task with status "done".`
+
+    // Shared deliver phase config
+    const deliverPhase: PhaseConfig = {
+      name: 'deliver',
+      modelId: 'gemma-4-31b',
+      fallbackModelId: 'deepseek-v3.2',
+      maxIterations: 3,
+      toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
+      skillFilter: [] as string[],
+      systemInstruction: DELIVER_PROMPT,
+      required: true,
+    }
+
+    // Shared edit deliver phase
+    const editDeliverPhase: PhaseConfig = {
+      name: 'deliver',
+      modelId: 'gemma-4-31b',
+      fallbackModelId: 'deepseek-v3.2',
+      maxIterations: 3,
+      toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
+      skillFilter: [] as string[],
+      systemInstruction: EDIT_DELIVER_PROMPT,
+      required: true,
+    }
+
+    // ---- Profile factory: Content (research → draft → review → deliver) ----
+    function contentProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `You are in research mode. Your job is to gather everything needed to produce excellent content.
+
+Search the web for topic research, competitor content, and trending angles. Check workspace files for brand guidelines, previous content, and style guides. Read the knowledge base for company context.
+
+Your research output MUST include:
+- Specific URLs and sources you found
+- Key points and data to reference
+- Audience insights and tone guidance
+- Competitive analysis (what others have published on this topic)
+
+Write your research findings to the workspace. Do NOT write the actual content yet — just research.
+Be thorough — use multiple search queries, follow links, read multiple sources.`,
+            required: false,
+          },
+          {
+            name: 'draft',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 15,
+            toolCategories: ['core', 'workspace', 'media', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Write the content deliverable based on your research findings. This could be a blog post, social media posts, ad copy, email sequence, press release, or other content.
+
+Follow any brand guidelines found in research. Match the tone and style appropriate for the audience.
+Write the full deliverable to the workspace (Documents/ or Reports/).
+
+Be thorough and complete — do NOT produce partial work or placeholder content.`,
+            required: true,
+          },
+          {
+            name: 'review',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 8,
+            toolCategories: ['core', 'workspace', 'browser'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Self-review your draft for quality:
+- Tone and voice: Does it match brand guidelines?
+- Accuracy: Are facts and claims correct?
+- Grammar and clarity: Is it well-written?
+- Completeness: Does it cover everything requested?
+- SEO: Are keywords naturally included (if applicable)?
+
+If you find issues, revise the content in the workspace. Do NOT mark done yet.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'media', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Profile factory: Sales (research → strategy → execute → deliver) ----
+    function salesProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'strategy',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 5,
+            toolCategories: ['core', 'workspace', 'tasks'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Based on your research, develop a clear sales strategy. Outline:
+- Target prospect profile and key decision makers
+- Value proposition and messaging angles
+- Objection handling and competitive positioning
+- Recommended outreach sequence and timeline
+
+Write the strategy to the workspace. Do NOT execute yet — plan only.`,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 15,
+            toolCategories: ['core', 'workspace', 'data', 'skills', 'chat', 'tasks'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Execute the sales strategy. Produce the deliverables — prospect lists, outreach templates, qualification summaries, onboarding materials, or whatever the task requires.
+
+Use data tools for CRM/spreadsheet work, skills for specialized tasks, and workspace to save all outputs.
+Be thorough and complete — do NOT cut corners or produce partial work.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data', 'skills', 'chat', 'tasks'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Profile factory: Analysis (research → analyze → report → deliver) ----
+    function analysisProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'workspace', 'data', 'browser'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'analyze',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 15,
+            toolCategories: ['core', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Analyze the data and research you gathered. Crunch numbers, identify trends, find anomalies, and draw conclusions.
+
+Use data tools to query, aggregate, and compute metrics. Write intermediate analysis to the workspace.
+Be rigorous — show your work, cite data sources, and flag any assumptions or data quality issues.`,
+            required: true,
+          },
+          {
+            name: 'report',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'workspace'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Write a polished report based on your analysis. Structure it with:
+- Executive summary (key findings in 2-3 sentences)
+- Detailed findings with supporting data
+- Recommendations and next steps
+- Appendix with raw data references if applicable
+
+Write the full report to the workspace (Reports/). Make it clear, professional, and actionable.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Profile factory: Strategy (research → analyze → report → deliver) ----
+    function strategyProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 15,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'analyze',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Synthesize your research into strategic analysis. Identify patterns, opportunities, risks, and competitive dynamics.
+
+Compare multiple perspectives and data sources. Build frameworks or matrices to organize your thinking.
+Write your analysis to the workspace. Be thorough — strategic recommendations are only as good as the analysis behind them.`,
+            required: true,
+          },
+          {
+            name: 'report',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'workspace'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Write a polished strategic report based on your analysis. Structure it with:
+- Executive summary (key findings and recommendations in 2-3 sentences)
+- Situation analysis with supporting data
+- Strategic options with pros/cons
+- Recommended course of action with implementation steps
+- Risk factors and mitigation strategies
+
+Write the full report to the workspace (Reports/). Make it clear, professional, and actionable.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Profile factory: Ops (research → execute → deliver) ----
+    function opsProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'workspace', 'data', 'browser'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 15,
+            toolCategories: ['core', 'workspace', 'tasks', 'data', 'workflows', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Execute the operational task. Create schedules, manage projects, process procurement requests, or handle administrative work as needed.
+
+Use task tools to create/update sub-tasks, workflow tools for process automation, and data tools for tracking.
+Write all outputs to the workspace. Be thorough and organized — operational work must be precise and complete.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'tasks', 'data', 'workflows', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Profile factory: People (research → draft → review → deliver) ----
+    function peopleProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'draft',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Draft the people-focused deliverable based on your research. This could be job descriptions, candidate outreach, support responses, training materials, or HR documents.
+
+Follow company guidelines and tone. Be empathetic, clear, and professional.
+Write the full draft to the workspace (Documents/ or Reports/).
+
+Be thorough and complete — do NOT produce partial work or placeholder content.`,
+            required: true,
+          },
+          {
+            name: 'review',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 5,
+            toolCategories: ['core', 'workspace'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Self-review your draft for quality:
+- Tone: Is it appropriate for the audience (candidates, customers, employees)?
+- Accuracy: Are details correct and up-to-date?
+- Completeness: Does it address everything requested?
+- Sensitivity: Is the language inclusive and professional?
+
+If you find issues, revise the content in the workspace. Do NOT mark done yet.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Profile factory: Growth (research → strategy → execute → deliver) ----
+    function growthProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'strategy',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 8,
+            toolCategories: ['core', 'workspace', 'tasks'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Based on your research, develop a growth/retention/partnership strategy. Outline:
+- Key metrics and targets
+- Channel or tactic prioritization
+- Experiment design and success criteria
+- Timeline and resource requirements
+
+Write the strategy to the workspace. Do NOT execute yet — plan only.`,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data', 'browser', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Execute the growth strategy. Produce the deliverables — campaign plans, partner outreach, retention playbooks, experiment specs, or whatever the task requires.
+
+Use browser for competitive research if needed, data tools for metrics, and workspace to save all outputs.
+Be thorough and complete — do NOT cut corners or produce partial work.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data', 'browser', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Profile factory: Community (research → execute → deliver) ----
+    function communityProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data', 'skills', 'chat'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Execute the community/event task. Create engagement plans, event schedules, community content, moderation guidelines, or outreach materials.
+
+Use chat tools for community interaction, data tools for tracking engagement, and workspace to save all outputs.
+Be thorough and complete — community work needs to be authentic and well-organized.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data', 'skills', 'chat'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Standalone: Legal (research → analyze → draft → deliver) ----
+    function legalProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'analyze',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Analyze the legal landscape based on your research. Review relevant regulations, precedents, contract terms, or compliance requirements.
+
+Identify risks, obligations, and key legal considerations. Compare against industry standards and best practices.
+Write your analysis to the workspace. Be precise — legal work demands accuracy and attention to detail.`,
+            required: true,
+          },
+          {
+            name: 'draft',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Draft the legal deliverable based on your analysis. This could be a contract, policy, compliance report, legal memo, or terms of service.
+
+Use precise legal language. Include all necessary clauses, definitions, and provisions.
+Write the full draft to the workspace (Documents/ or Reports/).
+
+Be thorough — incomplete legal documents create risk.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Standalone: Design (research → design → review → deliver) ----
+    function designProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'design',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'media', 'workspace'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Create the design deliverable based on your research. Use generate_image for visual mockups and design assets.
+
+Develop color palettes, typography, layout specifications, and visual designs as needed for the task.
+Write design specs and save assets to the workspace.
+
+Be creative but practical — designs must be implementable and aligned with brand guidelines.`,
+            required: true,
+          },
+          {
+            name: 'review',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 5,
+            toolCategories: ['core', 'workspace'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Self-review your design work:
+- Consistency: Do colors, fonts, and spacing follow a coherent system?
+- Brand alignment: Does it match existing brand guidelines?
+- Accessibility: Are contrast ratios sufficient? Is text readable?
+- Completeness: Are all requested assets and specs included?
+
+If you find issues, revise the design in the workspace. Do NOT mark done yet.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'media', 'workspace'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Standalone: IT/Security (research → execute → deliver) ----
+    function itSecurityProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Execute the IT/security task. Produce security audits, infrastructure plans, compliance checklists, incident reports, or technical documentation as needed.
+
+Be precise and thorough — security and IT work must be accurate and comprehensive. Document all findings and recommendations.
+Write all outputs to the workspace.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'data', 'skills'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Standalone: Team Lead (research → plan → coordinate → deliver) ----
+    function teamLeadProfile(templateId: string): RoutingProfile {
+      return {
+        templateId,
+        orchestratorModelId: '',
+        orchestratorPrompt: '',
+        phases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 10,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: RESEARCH_PROMPT,
+            required: false,
+          },
+          {
+            name: 'plan',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 8,
+            toolCategories: ['core', 'workspace', 'tasks'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Create a project plan based on your research. Break work into tasks, assign priorities, estimate effort, and identify dependencies.
+
+Define clear milestones and success criteria. Write the plan to the workspace.
+Do NOT start coordinating yet — plan only.`,
+            required: true,
+          },
+          {
+            name: 'coordinate',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'tasks', 'chat', 'data', 'team'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: `Coordinate the team. Create and assign tasks, send messages to team members, track progress, and ensure alignment.
+
+Use task tools to create sub-tasks with clear descriptions and assignments. Use chat to communicate plans and updates.
+Be proactive — anticipate blockers and address them before they slow the team down.`,
+            required: true,
+          },
+          deliverPhase,
+        ],
+        editPhases: [
+          {
+            name: 'research',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 6,
+            toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_RESEARCH_PROMPT,
+            required: true,
+          },
+          {
+            name: 'execute',
+            modelId: 'gemma-4-31b',
+            fallbackModelId: 'deepseek-v3.2',
+            maxIterations: 12,
+            toolCategories: ['core', 'workspace', 'tasks', 'chat', 'data', 'team'] as ToolCategory[],
+            skillFilter: undefined as string[] | undefined,
+            systemInstruction: EDIT_EXECUTE_PROMPT,
+            required: true,
+          },
+          editDeliverPhase,
+        ],
+      }
+    }
+
+    // ---- Assemble all profiles ----
+    return [
+      // Content Profile (9 agents)
+      ...['content-bot', 'social-bot', 'ad-bot', 'email-bot', 'creative-bot', 'pr-bot', 'media-bot', 'reputation-bot', 'localize-bot'].map(contentProfile),
+      // Sales Profile (4 agents)
+      ...['prospector-bot', 'closer-bot', 'onboarder-bot', 'phone-bot'].map(salesProfile),
+      // Analysis Profile (5 agents)
+      ...['finance-bot', 'analytics-bot', 'bookkeeper-bot', 'commerce-bot', 'seo-bot'].map(analysisProfile),
+      // Strategy Profile (4 agents)
+      ...['advisor-bot', 'intel-bot', 'research-bot', 'survey-bot'].map(strategyProfile),
+      // Ops Profile (4 agents)
+      ...['scheduler-bot', 'project-bot', 'procurement-bot', 'admin-bot'].map(opsProfile),
+      // People Profile (3 agents)
+      ...['recruiter-bot', 'support-bot', 'trainer-bot'].map(peopleProfile),
+      // Growth Profile (3 agents)
+      ...['growth-bot', 'retention-bot', 'partner-bot'].map(growthProfile),
+      // Community Profile (2 agents)
+      ...['community-bot', 'event-bot'].map(communityProfile),
+      // Standalone profiles
+      legalProfile('legal-bot'),
+      designProfile('design-bot'),
+      ...['it-bot', 'security-bot'].map(itSecurityProfile),
+      teamLeadProfile('team-lead'),
+    ]
+  })(),
 ]
+
+// dev-bot uses the exact same 6-phase profile as builder-bot
+const builderProfile = ROUTING_PROFILES.find(p => p.templateId === 'builder-bot')!
+ROUTING_PROFILES.push({ ...builderProfile, templateId: 'dev-bot' })
 
 // ---- Public API ----
 
