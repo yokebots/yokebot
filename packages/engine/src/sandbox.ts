@@ -100,11 +100,23 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
   // Store db reference for idle timer DB updates
   _db = db
 
-  // Check in-memory cache first
+  // Check in-memory cache first — but verify sandbox is still alive
   const existing = sessions.get(teamId)
   if (existing) {
-    resetIdleTimer(existing)
-    return existing
+    try {
+      const state = existing.sandbox.state ?? (await getDaytona().get(existing.sandbox.id)).state
+      if (state === 'started' || state === 'running') {
+        resetIdleTimer(existing)
+        return existing
+      }
+      // Sandbox stopped/archived — evict cache and fall through to resume/create
+      console.log(`[sandbox] Cached sandbox for team ${teamId} is ${state} — evicting cache`)
+      sessions.delete(teamId)
+    } catch {
+      // Sandbox no longer exists in Daytona — evict cache
+      console.log(`[sandbox] Cached sandbox for team ${teamId} not found in Daytona — evicting cache`)
+      sessions.delete(teamId)
+    }
   }
 
   const daytona = getDaytona()
