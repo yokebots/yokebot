@@ -80,7 +80,7 @@ Rules:
       {
         name: 'research',
         modelId: 'step-3.5-flash',
-        fallbackModelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 8,
         toolCategories: ['core', 'browser'],
         skillFilter: [],
@@ -96,7 +96,7 @@ Output a structured report with your findings. Write your research findings to t
       {
         name: 'plan',
         modelId: 'mimo-v2-flash',
-        fallbackModelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 3,
         toolCategories: ['core', 'tasks'],
         skillFilter: [],
@@ -120,7 +120,7 @@ DO NOT skip steps or cut corners. Common excuses to reject:
       {
         name: 'design',
         modelId: 'mimo-v2-flash',
-        fallbackModelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 5,
         toolCategories: ['core', 'media'],
         skillFilter: [],
@@ -144,8 +144,8 @@ Write your design spec to the workspace using write_workspace_file. DO NOT skip 
       },
       {
         name: 'build',
-        modelId: 'deepseek-v3.2',
-        fallbackModelId: 'gemma-4-31b',
+        modelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 30,
         toolCategories: ['core', 'sandbox', 'tasks'],
         skillFilter: [],
@@ -172,7 +172,7 @@ DO NOT skip steps or cut corners. Common excuses to reject:
       },
       {
         name: 'test',
-        modelId: 'deepseek-v3.2',
+        modelId: 'gemma-4-31b',
         maxIterations: 10,
         toolCategories: ['core', 'sandbox'],
         skillFilter: [],
@@ -191,8 +191,8 @@ Do NOT browse. Do NOT mark the task done. Just fix code errors and move on. If e
       },
       {
         name: 'review',
-        modelId: 'deepseek-v3.2',
-        fallbackModelId: 'gemma-4-31b',
+        modelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 8,
         toolCategories: ['core', 'browser', 'sandbox', 'tasks'],
         skillFilter: [],
@@ -229,7 +229,7 @@ Rules:
     editPhases: [
       {
         name: 'research',
-        modelId: 'deepseek-v3.2',
+        modelId: 'gemma-4-31b',
         fallbackModelId: 'step-3.5-flash',
         maxIterations: 8,
         toolCategories: ['core', 'browser', 'sandbox'],
@@ -251,8 +251,8 @@ Do NOT write code yet. Do NOT create new projects. Do NOT use sandbox_setup. Dia
       },
       {
         name: 'build',
-        modelId: 'deepseek-v3.2',
-        fallbackModelId: 'gemma-4-31b',
+        modelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 15,
         toolCategories: ['core', 'sandbox', 'tasks'],
         skillFilter: [],
@@ -271,7 +271,7 @@ Rules:
       },
       {
         name: 'test',
-        modelId: 'deepseek-v3.2',
+        modelId: 'gemma-4-31b',
         maxIterations: 6,
         toolCategories: ['core', 'sandbox'],
         skillFilter: [],
@@ -285,8 +285,8 @@ Do NOT browse. Do NOT mark done. Just verify the code compiles and move on.`,
       },
       {
         name: 'review',
-        modelId: 'deepseek-v3.2',
-        fallbackModelId: 'gemma-4-31b',
+        modelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 8,
         toolCategories: ['core', 'browser', 'sandbox', 'tasks'],
         skillFilter: [],
@@ -327,7 +327,7 @@ CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is stil
       {
         name: 'research',
         modelId: 'step-3.5-flash',
-        fallbackModelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 10,
         toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
         skillFilter: undefined as string[] | undefined,
@@ -338,7 +338,7 @@ If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SE
       },
       {
         name: 'execute',
-        modelId: 'deepseek-v3.2',
+        modelId: 'gemma-4-31b',
         maxIterations: 20,
         toolCategories: ['core', 'workspace', 'tasks', 'chat', 'data', 'browser', 'skills'] as ToolCategory[],
         skillFilter: undefined as string[] | undefined,
@@ -348,7 +348,7 @@ If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SE
       {
         name: 'deliver',
         modelId: 'mimo-v2-flash',
-        fallbackModelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 3,
         toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
         skillFilter: [] as string[],
@@ -360,7 +360,7 @@ If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SE
       {
         name: 'research',
         modelId: 'step-3.5-flash',
-        fallbackModelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 6,
         toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
         skillFilter: undefined as string[] | undefined,
@@ -378,7 +378,7 @@ Do NOT do the actual work yet — diagnose only.`,
       },
       {
         name: 'execute',
-        modelId: 'deepseek-v3.2',
+        modelId: 'gemma-4-31b',
         maxIterations: 12,
         toolCategories: ['core', 'workspace', 'tasks', 'chat', 'data', 'browser', 'skills'] as ToolCategory[],
         skillFilter: undefined as string[] | undefined,
@@ -393,7 +393,7 @@ Do NOT do the actual work yet — diagnose only.`,
       {
         name: 'deliver',
         modelId: 'mimo-v2-flash',
-        fallbackModelId: 'gemma-4-31b',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 3,
         toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
         skillFilter: [] as string[],
