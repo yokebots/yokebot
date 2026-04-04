@@ -439,12 +439,18 @@ export async function respondToMention(
     {
       role: 'system',
       content: [
-        `You are ${agent.name}. ${agent.systemPrompt}`,
+        `You are ${agent.name}, an expert AI team member. ${agent.systemPrompt}`,
         `Today is ${today}.`,
-        `You were @mentioned. Reply immediately — be concise (under 500 characters).`,
-        `If the request needs real work (browsing websites, creating files, generating images, searching the web, etc.), acknowledge it and say you're on it. You'll follow up when done.`,
-        `If it's just a question or conversation, answer it directly.`,
-        `IMPORTANT: You DO have tools available including a web browser, file editor, search, and more. NEVER say you don't have access to tools or can't do something — just acknowledge and start working.`,
+        `You were @mentioned by a team member. Respond thoughtfully and professionally.`,
+        ``,
+        `Guidelines for your response:`,
+        `- Be conversational and collaborative — like a smart colleague, not a chatbot`,
+        `- If the task is complex or ambiguous, ask 1-2 clarifying questions before starting`,
+        `- If the task is clear, confirm what you'll do in plain language (no code, no commands)`,
+        `- Keep it concise (under 400 characters) but show you understand the request`,
+        `- NEVER output code blocks, bash commands, or technical syntax in your reply`,
+        `- NEVER say you can't do something — you have full access to tools, browser, files, and more`,
+        `- Show personality and expertise appropriate to your role`,
       ].join('\n'),
     },
     {
@@ -477,12 +483,12 @@ export async function respondToMention(
   // Broadcast typing immediately so user sees the indicator
   broadcastAgentStatus(teamId, channelId, agent.id, agent.name, 'typing')
 
-  // Use a fast cheap model for ack (Qwen 3.5 9B), fall back to agent's model
+  // Use Gemma 4 31B for ack — smart, conversational, asks good questions
   let ackModelConfig = modelConfig
   try {
-    ackModelConfig = await resolveModelConfig(db, 'qwen-3.5-9b')
+    ackModelConfig = await resolveModelConfig(db, 'gemma-4-31b')
   } catch {
-    // Qwen 3.5 9B not available (e.g. self-hosted without API key) — use agent's model
+    // Gemma 4 not available — fall back to agent's model
   }
 
   try {
@@ -493,8 +499,12 @@ export async function respondToMention(
       .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
       .replace(/<function=[^>]*>[\s\S]*?<\/function>/g, '')
       .replace(/<｜tool[▁_]call[▁_]begin｜>[\s\S]*?<｜tool[▁_]call[▁_]end｜>/g, '')
-      .replace(/```(?:typescript|javascript|json)?\n[\s\S]*?```/g, '')
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .replace(/<\|think\|>[\s\S]*?<\|\/think\|>/g, '')
+      .replace(/```[\s\S]*?```/g, '')  // strip ALL code blocks
       .replace(/sandbox_\w+\([^)]*\)/g, '')
+      .replace(/npm\s+\w+[\s\S]*?\n/g, '')  // strip npm commands
+      .replace(/cd\s+\/[\s\S]*?\n/g, '')  // strip cd commands
       .trim()
     if (reply && reply.length > 0) {
       // Stop typing, post the ack message (in the same thread if the trigger was a thread reply)
