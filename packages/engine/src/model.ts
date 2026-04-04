@@ -1321,6 +1321,11 @@ ${toolDefs}
 // ---- Gemma 4 adapter ----
 // Gemma 4 supports OpenAI tools natively but sometimes outputs thinking blocks
 // and may dump tool calls as JSON in text. This adapter cleans up the output.
+// ---- Gemma 4 Adapter ----
+// Gemma 4 through OpenRouter does NOT reliably use the native OpenAI tool calling format.
+// It frequently outputs tool calls as text (JSON, code blocks, Qwen-style tags).
+// This adapter uses the SAME approach as the yokebot adapter: inject tool definitions
+// into the system prompt and parse tool calls from the text output.
 const gemma4Adapter: ToolFormatAdapter = {
   id: 'gemma4',
 
@@ -1328,46 +1333,106 @@ const gemma4Adapter: ToolFormatAdapter = {
     return modelId.toLowerCase().includes('gemma-4') || modelId.toLowerCase().includes('gemma4')
   },
 
-  formatToolPrompt(_tools: ToolDef[]): string {
-    // Gemma 4 supports OpenAI tools natively — no system prompt injection needed
-    return ''
+  formatToolPrompt(tools: ToolDef[]): string {
+    // Inject tool definitions into system prompt — same approach as yokebot adapter
+    const toolSchemas = tools.map((t) => ({
+      type: 'function',
+      function: {
+        name: t.function.name,
+        description: t.function.description,
+        parameters: t.function.parameters,
+      },
+    }))
+
+    return `You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query.
+
+<tools>
+${JSON.stringify(toolSchemas, null, 2)}
+</tools>
+
+For each function call, return a JSON object with the function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": "<function-name>", "arguments": <args-dict>}
+</tool_call>
+
+RULES:
+1. ALWAYS call at least one tool when you have a task to do. Never describe what you would do — ACT by calling tools.
+2. You MUST respond to the user by calling the "respond" tool with a "message" argument. Do NOT write a plain text response.
+3. You may call multiple tools by outputting multiple <tool_call> blocks.
+4. The "arguments" value must be a valid JSON object with the correct parameter names and types.
+5. ALWAYS use the "think" tool first to plan your approach before taking action.
+6. Do NOT claim you cannot use a tool. You have full access to ALL listed tools.
+7. For multi-step tasks, keep calling tools until the task is FULLY complete.
+8. Do NOT output raw code in your response. ALL code must be written via sandbox_setup or sandbox_write_file tools.`
   },
 
   formatToolCall(name: string, args: Record<string, unknown>): string {
-    return JSON.stringify({ name, arguments: args })
+    return `<tool_call>\n${JSON.stringify({ name, arguments: args })}\n</tool_call>`
   },
 
   parseToolCalls(text: string): ToolCall[] {
     const calls: ToolCall[] = []
-
-    // Parse JSON tool calls embedded in text (Gemma sometimes outputs these)
-    // Format: {"name": "tool_name", "arguments": {...}}
-    const jsonCallRegex = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g
     let match
+
+    // Parse <tool_call>{"name": "...", "arguments": {...}}</tool_call> blocks
+    const toolCallRegex = /<tool_call>\s*\n?\s*(\{[\s\S]*?\})\s*\n?\s*<\/tool_call>/g
+    while ((match = toolCallRegex.exec(text)) !== null) {
+      try {
+        const parsed = JSON.parse(match[1])
+        if (parsed.name) {
+          calls.push({
+            id: `gemma4-tc-${Date.now()}-${calls.length}`,
+            type: 'function',
+            function: { name: parsed.name, arguments: JSON.stringify(parsed.arguments || {}) },
+          })
+        }
+      } catch { /* skip malformed */ }
+    }
+    if (calls.length > 0) return calls
+
+    // Fallback: parse bare JSON tool calls (no XML wrapper)
+    const jsonCallRegex = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/g
     while ((match = jsonCallRegex.exec(text)) !== null) {
       try {
         const args = JSON.parse(match[2])
         calls.push({
-          id: `gemma4-recovery-${Date.now()}-${calls.length}`,
+          id: `gemma4-json-${Date.now()}-${calls.length}`,
           type: 'function',
           function: { name: match[1], arguments: JSON.stringify(args) },
         })
-      } catch { /* skip malformed JSON */ }
+      } catch { /* skip */ }
     }
+    if (calls.length > 0) return calls
 
-    // Parse ```tool_code blocks (Gemma's native format)
+    // Fallback: parse ```tool_code blocks
     const toolCodeRegex = /```tool_code\s*\n([\s\S]*?)```/g
     while ((match = toolCodeRegex.exec(text)) !== null) {
       try {
         const parsed = JSON.parse(match[1].trim())
         if (parsed.name || parsed.function_name) {
           calls.push({
-            id: `gemma4-toolcode-${Date.now()}-${calls.length}`,
+            id: `gemma4-code-${Date.now()}-${calls.length}`,
             type: 'function',
             function: {
               name: parsed.name || parsed.function_name,
               arguments: JSON.stringify(parsed.arguments || parsed.args || {}),
             },
+          })
+        }
+      } catch { /* skip */ }
+    }
+    if (calls.length > 0) return calls
+
+    // Fallback: parse Qwen-style tags
+    const qwenRegex = /<[｜|]tool[▁_]call[▁_]begin[｜|]>\s*\n?\s*(\{[\s\S]*?\})\s*\n?\s*<[｜|]tool[▁_]call[▁_]end[｜|]>/g
+    while ((match = qwenRegex.exec(text)) !== null) {
+      try {
+        const parsed = JSON.parse(match[1])
+        if (parsed.name) {
+          calls.push({
+            id: `gemma4-qwen-${Date.now()}-${calls.length}`,
+            type: 'function',
+            function: { name: parsed.name, arguments: JSON.stringify(parsed.arguments || {}) },
           })
         }
       } catch { /* skip */ }
@@ -1380,6 +1445,8 @@ const gemma4Adapter: ToolFormatAdapter = {
     return text
       .replace(/<think>[\s\S]*?<\/think>/g, '')
       .replace(/<\|think\|>[\s\S]*?<\|\/think\|>/g, '')
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+      .replace(/<tool_call>[\s\S]*$/g, '')
       .replace(/```tool_code\s*\n[\s\S]*?```/g, '')
       .replace(/```tool_result\s*\n[\s\S]*?```/g, '')
       .replace(/```json\s*\n[\s\S]*?```/g, '')
