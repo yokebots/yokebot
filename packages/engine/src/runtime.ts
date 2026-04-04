@@ -454,6 +454,11 @@ function getBuiltinTools(): ToolDef[] {
       message: { type: 'string', description: 'The message to send' },
     }, ['message']),
 
+    toolDef('ask_user', 'Ask the user a structured question with selectable options. Use this when you need to clarify requirements, get a decision, or offer choices before proceeding. The sprint will pause until the user responds.', {
+      question: { type: 'string', description: 'The question to ask. Be specific and end with a question mark.' },
+      options: { type: 'array', items: { type: 'string' }, description: 'Array of 2-4 selectable options. The user can also type a custom response.' },
+    }, ['question', 'options']),
+
     // Workspace / knowledge base
     toolDef('read_workspace_file', 'Read a file from the shared knowledge base / workspace.', {
       path: { type: 'string', description: 'File path relative to workspace root, e.g. "global/company-context.md"' },
@@ -852,6 +857,19 @@ async function executeToolCall(toolCall: ToolCall, ctx: ToolContext): Promise<st
 
     case 'respond':
       return `Response: ${args.message as string}`
+
+    case 'ask_user': {
+      const question = args.question as string
+      const options = args.options as string[]
+      // Format as a structured question message that the dashboard can render
+      const optionsText = options.map((opt, i) => `${i + 1}. ${opt}`).join('\n')
+      // Send as a specially-formatted message — dashboard detects the [ASK_USER] prefix
+      const { sendMessage } = await import('./chat.ts')
+      const askContent = `[ASK_USER]\n**${question}**\n\n${optionsText}\n\n_Reply with your choice or type a custom response._`
+      await sendMessage(ctx.db, ctx.channelId || '', 'agent', ctx.agentId, askContent, ctx.currentTaskId, ctx.teamId)
+      // Signal the runtime to pause — the agent should stop and wait for the user's reply
+      return `PAUSE: Question sent to user. Waiting for their response. Do NOT continue until the user replies. Call the respond tool with "waiting for user input" and stop.`
+    }
 
     // ---- Workspace ----
     case 'read_workspace_file': {
