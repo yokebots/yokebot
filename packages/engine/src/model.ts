@@ -719,7 +719,7 @@ export async function chatCompletion(
   if (config.endpoint.includes('openrouter.ai')) {
     headers['HTTP-Referer'] = 'https://yokebot.com'
     headers['X-Title'] = 'YokeBot'
-    body.provider = { order: ['Novita', 'DeepInfra', 'Together'], allow_fallbacks: true }
+    // Provider routing available if needed: body.provider = { order: ['Novita'], allow_fallbacks: true }
   }
 
   let lastErr: Error | null = null
