@@ -715,9 +715,11 @@ export async function chatCompletion(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
   // OpenRouter requires HTTP-Referer and X-Title for rate limit attribution
+  // Also set provider preferences to avoid overloaded providers
   if (config.endpoint.includes('openrouter.ai')) {
     headers['HTTP-Referer'] = 'https://yokebot.com'
     headers['X-Title'] = 'YokeBot'
+    body.provider = { order: ['Novita', 'DeepInfra', 'Together'], allow_fallbacks: true }
   }
 
   let lastErr: Error | null = null
