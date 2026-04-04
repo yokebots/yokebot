@@ -721,9 +721,10 @@ export async function chatCompletion(
     // Skip overloaded providers and sort by throughput for best availability
     body.provider = { ignore: ['AkashML'], sort: 'throughput', allow_fallbacks: true }
     // Enable reasoning/thinking mode for models that support it
+    // include_reasoning=false keeps thinking tokens out of the content field
     if (config.model.includes('gemma-4') || config.model.includes('qwen3.6')) {
       body.reasoning = { enabled: true }
-      body.include_reasoning = true
+      body.include_reasoning = false
     }
     // Model-level fallback: if primary model is rate-limited, OpenRouter auto-tries the next
     if (config.model.includes('gemma-4')) {
@@ -768,6 +769,14 @@ export async function chatCompletion(
           content = adapter.stripMarkup(content) || null
           console.log(`[model] ${adapter.id} adapter recovered ${parsed.length} tool call(s) from text content`)
         }
+      }
+
+      // Strip thinking/reasoning blocks from content (Gemma 4, Qwen 3.6, etc.)
+      if (content && (content.includes('<think>') || content.includes('<|think|>'))) {
+        content = content
+          .replace(/<think>[\s\S]*?<\/think>/g, '')
+          .replace(/<\|think\|>[\s\S]*?<\|\/think\|>/g, '')
+          .trim() || null
       }
 
       // Safety net: strip any leaked XML tool markup from content before returning
