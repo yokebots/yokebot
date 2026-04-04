@@ -191,7 +191,7 @@ export const MODEL_CATALOG: LogicalModel[] = [
     category: 'frontier',
     contextWindow: 1000000,
     backends: [
-      { providerId: 'openrouter', providerModelId: 'qwen/qwen3.6-plus', priority: 1 },
+      { providerId: 'openrouter', providerModelId: 'qwen/qwen3.6-plus:free', priority: 1 },
     ],
   },
   {
