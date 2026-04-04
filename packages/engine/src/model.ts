@@ -184,6 +184,17 @@ export const MODEL_CATALOG: LogicalModel[] = [
     ],
   },
   {
+    id: 'qwen-3.6-plus',
+    name: 'Qwen 3.6 Plus',
+    description: 'Alibaba flagship — hybrid linear attention + sparse MoE, 78.8% SWE-bench, 1M context, optimized for agentic coding',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 1000000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'qwen/qwen3.6-plus', priority: 1 },
+    ],
+  },
+  {
     id: 'mercury-2',
     name: 'Mercury 2',
     description: 'Speed king — 1000 tokens/sec, diffusion-based architecture, great for real-time interactions',

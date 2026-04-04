@@ -142,7 +142,7 @@ Write your design spec to the workspace using write_workspace_file. DO NOT skip 
       },
       {
         name: 'build',
-        modelId: 'mimo-v2-pro',
+        modelId: 'qwen-3.6-plus',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 30,
         toolCategories: ['core', 'sandbox', 'tasks'],
@@ -227,7 +227,8 @@ Do NOT write code yet. Do NOT create new projects. Do NOT use sandbox_setup. Dia
       },
       {
         name: 'build',
-        modelId: 'deepseek-v3.2',
+        modelId: 'qwen-3.6-plus',
+        fallbackModelId: 'deepseek-v3.2',
         maxIterations: 15,
         toolCategories: ['core', 'sandbox', 'tasks'],
         skillFilter: [],
