@@ -83,6 +83,19 @@ export interface LogicalModel {
  * Users see this list. Providers are invisible.
  */
 export const MODEL_CATALOG: LogicalModel[] = [
+  // ---- Text/Chat — Frontier tier ----
+  {
+    id: 'gemma-4-31b',
+    name: 'Gemma 4 31B',
+    description: 'Google DeepMind flagship — 85% MMLU, 80% LiveCode, 256K context, native function calling, vision, thinking mode, 140 languages. Cheaper than DeepSeek V3.2.',
+    type: 'chat',
+    category: 'frontier',
+    contextWindow: 256000,
+    backends: [
+      { providerId: 'openrouter', providerModelId: 'google/gemma-4-31b-it', priority: 1 },
+    ],
+  },
+
   // ---- Text/Chat — Mid tier ----
   {
     id: 'llama-4-maverick',
