@@ -714,6 +714,11 @@ export async function chatCompletion(
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
+  // OpenRouter requires HTTP-Referer and X-Title for rate limit attribution
+  if (config.endpoint.includes('openrouter.ai')) {
+    headers['HTTP-Referer'] = 'https://yokebot.com'
+    headers['X-Title'] = 'YokeBot'
+  }
 
   let lastErr: Error | null = null
   for (let attempt = 0; attempt <= LLM_MAX_RETRIES; attempt++) {
