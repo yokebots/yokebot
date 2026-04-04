@@ -105,7 +105,7 @@ export async function getOrCreateSandbox(db: Db, teamId: string): Promise<Sandbo
   if (existing) {
     try {
       const state = existing.sandbox.state ?? (await getDaytona().get(existing.sandbox.id)).state
-      if (state === 'started' || state === 'running') {
+      if (state === 'started') {
         resetIdleTimer(existing)
         return existing
       }
