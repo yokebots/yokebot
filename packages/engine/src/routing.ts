@@ -79,7 +79,7 @@ Rules:
     phases: [
       {
         name: 'research',
-        modelId: 'step-3.5-flash',
+        modelId: 'gemma-4-31b',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 8,
         toolCategories: ['core', 'browser'],
@@ -95,7 +95,7 @@ Output a structured report with your findings. Write your research findings to t
       },
       {
         name: 'plan',
-        modelId: 'mimo-v2-flash',
+        modelId: 'gemma-4-31b',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 3,
         toolCategories: ['core', 'tasks'],
@@ -119,7 +119,7 @@ DO NOT skip steps or cut corners. Common excuses to reject:
       },
       {
         name: 'design',
-        modelId: 'mimo-v2-flash',
+        modelId: 'gemma-4-31b',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 5,
         toolCategories: ['core', 'media'],
@@ -326,7 +326,7 @@ CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is stil
     phases: [
       {
         name: 'research',
-        modelId: 'step-3.5-flash',
+        modelId: 'gemma-4-31b',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 10,
         toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
@@ -347,7 +347,7 @@ If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SE
       },
       {
         name: 'deliver',
-        modelId: 'mimo-v2-flash',
+        modelId: 'gemma-4-31b',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 3,
         toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
@@ -359,7 +359,7 @@ If you need to search the web, navigate to https://www.bing.com/search?q=YOUR+SE
     editPhases: [
       {
         name: 'research',
-        modelId: 'step-3.5-flash',
+        modelId: 'gemma-4-31b',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 6,
         toolCategories: ['core', 'browser', 'workspace', 'data'] as ToolCategory[],
@@ -392,7 +392,7 @@ Do NOT do the actual work yet — diagnose only.`,
       },
       {
         name: 'deliver',
-        modelId: 'mimo-v2-flash',
+        modelId: 'gemma-4-31b',
         fallbackModelId: 'deepseek-v3.2',
         maxIterations: 3,
         toolCategories: ['core', 'tasks', 'chat'] as ToolCategory[],
