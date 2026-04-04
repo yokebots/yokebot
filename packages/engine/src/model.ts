@@ -714,12 +714,16 @@ export async function chatCompletion(
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
-  // OpenRouter requires HTTP-Referer and X-Title for rate limit attribution
-  // Also set provider preferences to avoid overloaded providers
+  // OpenRouter: required headers for rate limit attribution + provider/model fallback config
   if (config.endpoint.includes('openrouter.ai')) {
     headers['HTTP-Referer'] = 'https://yokebot.com'
     headers['X-Title'] = 'YokeBot'
-    // Provider routing available if needed: body.provider = { order: ['Novita'], allow_fallbacks: true }
+    // Skip overloaded providers and sort by throughput for best availability
+    body.provider = { ignore: ['AkashML'], sort: 'throughput', allow_fallbacks: true }
+    // Model-level fallback: if primary model is rate-limited, fall back to DeepSeek V3.2
+    if (config.model.includes('gemma-4')) {
+      body.models = [config.model, 'deepseek/deepseek-chat-v3-0324']
+    }
   }
 
   let lastErr: Error | null = null
