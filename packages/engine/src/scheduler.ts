@@ -15,7 +15,7 @@ import { listAgents, type Agent } from './agent.ts'
 import { runReactLoop, buildAgentSystemPrompt, getFilteredBuiltinTools, type ToolCategory } from './runtime.ts'
 import { resolveModelConfig } from './model.ts'
 import { getRoutingProfile, runOrchestrator, buildPhasePrompt, getMaxPhaseCreditCost, calculateActualCost, type RoutingProfile, type PhaseResult } from './routing.ts'
-import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage, broadcastAgentStatus, broadcastFileWritten } from './chat.ts'
+import { getDmChannel, sendMessage, listChannels, createChannel, getTeamChannel, findLatestTaskMessage, broadcastAgentStatus, broadcastAgentProgress, broadcastFileWritten } from './chat.ts'
 import type { WorkspaceConfig } from './workspace.ts'
 import { logActivity } from './activity.ts'
 import { getSubscription, isTeamActive, getCreditBalance, getModelCreditCost, getSprintBudget, deductCredits, reserveCredits, releaseCredits } from './billing.ts'
@@ -641,146 +641,33 @@ export async function respondToMention(
       try {
         const { listSandboxProjects, createSandboxProject, getSandboxProject } = await import('./sandbox.ts')
         const { getTask } = await import('./tasks.ts')
-
-        // Check if user is asking to switch projects
-        const switchMatch = triggerMessage.content.toLowerCase().match(/switch\s+(?:to\s+)?(?:project\s+)?(\d+|.{3,30})/i)
-        if (switchMatch) {
-          const existing = await listSandboxProjects(db, teamId)
-          const input = switchMatch[1].trim()
-          const num = parseInt(input, 10)
-          let target = num > 0 && num <= existing.length ? existing[num - 1] : null
-          if (!target) {
-            // Match by name
-            const inputLower = input.toLowerCase()
-            target = existing.find(p => p.name.toLowerCase().includes(inputLower)) ?? null
-          }
-          if (target) {
-            await db.run('UPDATE agents SET active_project_id = $1 WHERE id = $2', [target.id, agent.id])
-            agent.activeProjectId = target.id
-            ackMessages[0].content += `\n\nThe user wants to switch projects. Confirm: "Switched to project: ${target.name}. All future work will be in this project until you tell me to switch again."`
-            console.log(`[scheduler] Agent "${agent.name}" switched to project "${target.name}"`)
-          } else {
-            const projectList = existing.map((p, i) => `${i + 1}. ${p.name}`).join('\n')
-            ackMessages[0].content += `\n\nThe user wants to switch projects but the project wasn't found. List the available projects and ask them to pick:\n${projectList}`
-          }
-        }
-
         const mentionTask = await getTask(db, mentionTaskId)
+        const existing = await listSandboxProjects(db, teamId)
 
         // Priority 1: Task already linked to a project
         if (mentionTask?.sandboxProjectId) {
           const project = await getSandboxProject(db, mentionTask.sandboxProjectId)
           if (project) { mentionSandboxDir = project.directory; mentionSandboxId = project.id }
 
-        // Priority 2: Agent has a locked active project
-        } else if (agent.activeProjectId) {
-          const project = await getSandboxProject(db, agent.activeProjectId)
-          if (project) {
-            mentionSandboxDir = project.directory
-            mentionSandboxId = project.id
-            mentionIsEdit = true
-            await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [project.id, mentionTaskId])
-            ackMessages[0].content += `\n\nYou are currently assigned to project: "${project.name}". You will work in this project.`
-            console.log(`[scheduler] Using agent's locked project "${project.name}" for mention`)
-          }
+        // Priority 2: Existing projects — let the ack model decide what to do
+        } else if (existing.length > 0) {
+          const projectList = existing.map((p, i) => `${i + 1}. "${p.name}"`).join('\n')
+          ackMessages[0].content += `\n\n## Existing Sandbox Projects\n${projectList}\n\nIMPORTANT: Decide based on the user's request:\n- If they want to modify/fix/improve an existing project, confirm WHICH project and say you'll work on it. Do NOT start until they confirm.\n- If they want something completely new, tell them you'll create a new project and briefly confirm what you'll build.\n- If you're not sure, ASK — list the projects and ask if they want to edit one or start fresh.\nNEVER assume. ALWAYS confirm before proceeding.`
+          console.log(`[scheduler] ${existing.length} existing projects — letting ack model decide intent`)
+          // Don't auto-assign a project — wait for ack confirmation
+          // The sprint will create a new project if needed based on the ack response
 
-        // Priority 3: Detect edit intent and match/confirm project
+        // No existing projects — sprint will auto-create one when it runs sandbox_setup
         } else {
-          // Check if user is asking to fix/edit an existing project
-          const msg = triggerMessage.content.toLowerCase()
-          const isEditRequest = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise|broken|issue|error|bug|wrong|not working|not loading|doesn't work|figure.?it.?out/i.test(msg)
-          const existing = await listSandboxProjects(db, teamId)
-
-          if (isEditRequest && existing.length > 0) {
-            mentionIsEdit = true
-            // Match user's message against project names — pick the best match
-            const msgLower = msg.toLowerCase()
-            let bestMatch = existing[0]
-            let bestScore = 0
-            for (const proj of existing) {
-              const words = proj.name.toLowerCase().split(/\s+/)
-              const score = words.filter(w => w.length > 2 && msgLower.includes(w)).length
-              if (score > bestScore) {
-                bestScore = score
-                bestMatch = proj
-              }
-            }
-
-            // If multiple projects and no strong match, inject project list into ack prompt
-            // so the agent asks the user to confirm which project
-            if (existing.length > 1 && bestScore < 2) {
-              const projectList = existing.map((p, i) => `${i + 1}. ${p.name}`).join('\n')
-              ackMessages[0].content += `\n\nIMPORTANT: There are ${existing.length} sandbox projects. The user wants to edit one but didn't clearly specify which. Ask them to confirm by replying with the number:\n${projectList}\n\nDo NOT start working until the user confirms which project.`
-              console.log(`[scheduler] Ambiguous project match (score: ${bestScore}) — asking user to confirm`)
-              // Don't assign a project yet — wait for confirmation
-            } else {
-              mentionSandboxDir = bestMatch.directory
-              mentionSandboxId = bestMatch.id
-              await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [bestMatch.id, mentionTaskId])
-              // Inject project name into ack so user knows which project
-              ackMessages[0].content += `\n\nYou will be working on the project: "${bestMatch.name}". Mention this project name in your response so the user can confirm.`
-              console.log(`[scheduler] Matched project "${bestMatch.name}" (score: ${bestScore}) for edit request`)
-            }
-          } else if (existing.length > 0) {
-            // Non-edit request but projects exist — reuse the most recent one
-            // (user is likely continuing a conversation about the same project)
-            const latest = existing[0]
-            mentionSandboxDir = latest.directory
-            mentionSandboxId = latest.id
-            await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [latest.id, mentionTaskId])
-            // Lock the agent to this project
-            await db.run('UPDATE agents SET active_project_id = $1 WHERE id = $2', [latest.id, agent.id])
-            ackMessages[0].content += `\n\nYou will be working in the existing project: "${latest.name}".`
-            console.log(`[scheduler] Reusing existing project "${latest.name}" for new work (not creating duplicate)`)
-          } else {
-            // No projects at all — create the first one
-            // Re-check agent lock (may have been set by a concurrent mention)
-            const freshAgent = await getAgent(db, agentId)
-            if (freshAgent?.activeProjectId) {
-              const proj = await getSandboxProject(db, freshAgent.activeProjectId)
-              if (proj) {
-                mentionSandboxDir = proj.directory
-                mentionSandboxId = proj.id
-                await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [proj.id, mentionTaskId])
-                console.log(`[scheduler] Concurrent mention already created project "${proj.name}" — reusing`)
-              }
-            }
-            if (!mentionSandboxId) {
-            // Generate a clean project name from the user's message
-            const rawTitle = triggerMessage.content.replace(/@\[[^\]]+\]\([^)]+\)\s*/g, '').trim()
-            // Strip common verbs, pronouns, filler words to extract the app concept
-            const cleanName = rawTitle
-              .replace(/\b(scaffold|build|create|set up|implement|make|develop|please|can you|could you|i want|i need|i'd like|let's|lets|let me|give me|me|a|an|the|for me|for us|that|which|with|and|see|have|add|check|them|off|daily|weekly|clean|modern|simple|super|really|very|just|also|some|like|want|it|app|—|–|-)\b/gi, '')
-              .replace(/[.!?,;:—–"']+/g, '')
-              .replace(/\s+/g, ' ')
-              .trim()
-            // Capitalize first letter of each word
-            const projectName = (cleanName || 'New App')
-              .slice(0, 40)
-              .trim()
-              .split(' ')
-              .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-              .join(' ')
-            const project = await createSandboxProject(db, teamId, projectName)
-            mentionSandboxDir = project.directory
-            mentionSandboxId = project.id
-            await db.run('UPDATE tasks SET sandbox_project_id = $1 WHERE id = $2', [project.id, mentionTaskId])
-            // Lock agent to this new project
-            await db.run('UPDATE agents SET active_project_id = $1 WHERE id = $2', [project.id, agent.id])
-            console.log(`[scheduler] Created first project "${projectName}" and locked agent to it`)
-          }
-          }
+          console.log(`[scheduler] No existing projects — sprint will create one if needed`)
         }
       } catch (err) {
         console.error(`[scheduler] Failed to resolve sandbox project for mention:`, err)
       }
     }
 
-    // Detect edit intent for non-sandbox agents too (universal agents editing workspace files, etc.)
-    if (!mentionIsEdit) {
-      const editPattern = /fix|edit|update|change|modify|improve|redesign|refactor|debug|repair|correct|tweak|adjust|revise|broken|issue|error|bug|wrong|not working|not loading|doesn't work|figure.?it.?out/i
-      mentionIsEdit = editPattern.test(triggerMessage.content)
-    }
+    // Edit mode is now determined by the ack model's response, not keyword matching
+    // The ack model sees the project list and decides whether this is an edit or new build
 
     const mentionPromise = mentionRoutingProfile
       ? runRoutedSprint(
