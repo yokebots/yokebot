@@ -1423,6 +1423,35 @@ RULES:
     }
     if (calls.length > 0) return calls
 
+    // Fallback: parse Gemma 4 native format
+    // <|tool_call>call:FUNCTION_NAME{param1:<|"|>value1<|"|>,param2:value2}<tool_call|>
+    const nativeRegex = /<\|tool_call>call:(\w+)\{([\s\S]*?)\}<tool_call\|>/g
+    while ((match = nativeRegex.exec(text)) !== null) {
+      const funcName = match[1]
+      const rawParams = match[2]
+      const params: Record<string, unknown> = {}
+      // Parse key:value pairs, handling <|"|> escaped strings
+      const paramParts = rawParams.split(',')
+      for (const part of paramParts) {
+        const colonIdx = part.indexOf(':')
+        if (colonIdx > 0) {
+          const key = part.slice(0, colonIdx).trim()
+          let value: string | number | boolean = part.slice(colonIdx + 1).trim()
+            .replace(/<\|"\|>/g, '') // unescape Gemma 4 string delimiters
+          if (value === 'true') params[key] = true
+          else if (value === 'false') params[key] = false
+          else if (/^-?\d+(\.\d+)?$/.test(value)) params[key] = Number(value)
+          else params[key] = value
+        }
+      }
+      calls.push({
+        id: `gemma4-native-${Date.now()}-${calls.length}`,
+        type: 'function',
+        function: { name: funcName, arguments: JSON.stringify(params) },
+      })
+    }
+    if (calls.length > 0) return calls
+
     // Fallback: parse Qwen-style tags
     const qwenRegex = /<[｜|]tool[▁_]call[▁_]begin[｜|]>\s*\n?\s*(\{[\s\S]*?\})\s*\n?\s*<[｜|]tool[▁_]call[▁_]end[｜|]>/g
     while ((match = qwenRegex.exec(text)) !== null) {
@@ -1456,6 +1485,8 @@ RULES:
       .replace(/<[｜|]tool[▁_]call[▁_]begin[｜|]>[\s\S]*?<[｜|]tool[▁_]call[▁_]end[｜|]>/g, '')
       .replace(/<[｜|]tool[▁_]call[▁_]begin[｜|]>[\s\S]*$/g, '')
       .replace(/<[｜|]tool[▁_]calls[▁_]end[｜|]>/g, '')
+      .replace(/<\|tool_call>[\s\S]*?<tool_call\|>/g, '')
+      .replace(/<\|tool_call>[\s\S]*$/g, '')
       .trim()
   },
 }
