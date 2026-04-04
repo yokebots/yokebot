@@ -63,15 +63,17 @@ Available phases:
 - "plan": Break the task into implementation steps, component list, file structure, and tech decisions. Recommended for complex tasks with multiple features.
 - "design": Create a detailed design specification (color palette, typography, spacing, component breakdown) and generate a visual mockup image. Recommended when the task involves UI work.
 - "build": Write code to build the web application. ALWAYS needed.
+- "test": Run TypeScript and Vite build checks, fix any compilation errors. ALWAYS needed after build.
 - "review": Visit the preview URL, compare to requirements, fix issues. ALWAYS needed unless the task is trivial.
 
-Respond with JSON only: {"phases": ["research", "plan", "design", "build", "review"], "reasoning": "one sentence"}
+Respond with JSON only: {"phases": ["research", "plan", "design", "build", "test", "review"], "reasoning": "one sentence"}
 
 Rules:
 - If no URL/website is mentioned, skip "research"
 - "plan" is recommended for complex tasks (3+ features or pages), skip for simple single-component tasks
 - "design" is recommended for any task with UI work, skip for backend-only or config tasks
 - "build" is always required
+- "test" is always required after build
 - "review" should almost always be included
 - Do NOT add phases not in the list above`,
     phases: [
@@ -169,6 +171,25 @@ DO NOT skip steps or cut corners. Common excuses to reject:
         required: true,
       },
       {
+        name: 'test',
+        modelId: 'deepseek-v3.2',
+        maxIterations: 10,
+        toolCategories: ['core', 'sandbox'],
+        skillFilter: [],
+        systemInstruction: `You are a QA engineer. Run automated checks on the app that was just built and fix any errors.
+
+Step 1: Run TypeScript check — call sandbox_exec with "cd {projectDir} && npx tsc --noEmit 2>&1 | head -30". If there are type errors, fix them with sandbox_write_files.
+
+Step 2: Run Vite build check — call sandbox_exec with "cd {projectDir} && npx vite build 2>&1 | tail -20". If the build fails, fix the errors.
+
+Step 3: Check that all imported files exist — call sandbox_exec with "cd {projectDir} && find src -name '*.tsx' -o -name '*.ts' | head -20" and verify the file structure matches the imports.
+
+Step 4: If you fixed any errors, re-run the TypeScript check to confirm they're resolved.
+
+Do NOT browse. Do NOT mark the task done. Just fix code errors and move on. If everything passes on the first check, exit immediately — don't waste iterations.`,
+        required: true,
+      },
+      {
         name: 'review',
         modelId: 'deepseek-v3.2',
         maxIterations: 8,
@@ -192,13 +213,15 @@ CIRCUIT BREAKER: If you have attempted 3 fixes for the same issue and it is stil
 Available phases:
 - "research": Browse the preview URL and read existing code to understand what's broken or needs changing. ALWAYS needed for edits.
 - "build": Make targeted code changes to fix/edit the app. ALWAYS needed.
+- "test": Run TypeScript and build checks to verify the fix compiles. ALWAYS needed after build.
 - "review": Browse the preview URL after changes to verify the fix works. ALWAYS needed.
 
-Respond with JSON only: {"phases": ["research", "build", "review"], "reasoning": "one sentence"}
+Respond with JSON only: {"phases": ["research", "build", "test", "review"], "reasoning": "one sentence"}
 
 Rules:
 - "research" is always required for edits — you MUST look at the current state before changing anything
 - "build" is always required
+- "test" is always required after build
 - "review" is always required — verify your fix works
 - Do NOT include "plan" or "design" — those are for new builds only
 - Do NOT add phases not in the list above`,
@@ -243,6 +266,20 @@ Rules:
 - Do NOT change the project structure, framework, or dependencies unless the fix requires it
 - If the research phase identified specific files and changes, follow that plan exactly
 - If an auto-detected error was provided, fix that specific error first`,
+        required: true,
+      },
+      {
+        name: 'test',
+        modelId: 'deepseek-v3.2',
+        maxIterations: 6,
+        toolCategories: ['core', 'sandbox'],
+        skillFilter: [],
+        systemInstruction: `Run automated checks to verify your edits compile correctly.
+
+Step 1: Run TypeScript check — call sandbox_exec with "cd {projectDir} && npx tsc --noEmit 2>&1 | head -30". If there are errors, fix them.
+Step 2: If you fixed anything, re-run the check to confirm.
+
+Do NOT browse. Do NOT mark done. Just verify the code compiles and move on.`,
         required: true,
       },
       {
