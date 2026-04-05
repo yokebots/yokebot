@@ -673,7 +673,7 @@ export async function getAvailableModels(db: Db): Promise<LogicalModel[]> {
 
 // ---- Chat completion ----
 
-const LLM_TIMEOUT_MS = 120_000  // 120s — large context + many tools can take a while
+const LLM_TIMEOUT_MS = 180_000  // 180s — Gemma 4 with reasoning + large tool prompts needs more time
 const LLM_MAX_RETRIES = 3     // 3 retries with exponential backoff
 const LLM_BASE_DELAY_MS = 2_000  // 2s → 4s → 8s
 
@@ -723,8 +723,10 @@ export async function chatCompletion(
     // Enable reasoning/thinking mode for models that support it
     // include_reasoning=false keeps thinking tokens out of the content field
     if (config.model.includes('gemma-4') || config.model.includes('qwen3.6')) {
-      body.reasoning = { enabled: true }
-      body.include_reasoning = false
+      // Reasoning mode disabled — adds significant latency (30-60s per call) without
+      // clear quality gain for tool calling. The model's base reasoning is sufficient.
+      // body.reasoning = { enabled: true }
+      // body.include_reasoning = false
     }
     // Model-level fallback: if primary model is rate-limited, OpenRouter auto-tries the next
     if (config.model.includes('gemma-4')) {

@@ -2473,10 +2473,27 @@ export async function runReactLoop(
       break
     }
 
-    // Filter out tool calls for tools not in the provided list (model hallucination / adapter recovery of stale tools)
+    // Filter out tool calls for tools not in the provided list
+    // First try to map common hallucinations to available equivalents
     const allowedToolNames = new Set(tools.map(t => t.function.name))
+    const toolAliases: Record<string, string> = {
+      'write_workspace_file': 'sandbox_write_file',
+      'read_workspace_file': 'sandbox_read_file',
+      'sandbox_write_file': 'write_workspace_file',
+      'sandbox_read_file': 'read_workspace_file',
+      'browser_navigate': 'sandbox_preview',
+      'web_search': 'browser_navigate',
+      'search': 'browser_navigate',
+    }
     const validToolCalls = completion.tool_calls.filter(tc => {
       if (allowedToolNames.has(tc.function.name)) return true
+      // Try mapping to an available alias
+      const alias = toolAliases[tc.function.name]
+      if (alias && allowedToolNames.has(alias)) {
+        console.log(`[runtime] Remapped tool call: ${tc.function.name} → ${alias}`)
+        tc.function.name = alias
+        return true
+      }
       console.log(`[runtime] Rejected hallucinated tool call: ${tc.function.name} (not in provided tools)`)
       return false
     })
